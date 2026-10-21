@@ -841,7 +841,10 @@ fn hankel(n: u32, x: f64) -> Option<(f64, f64)> {
     if j.is_finite() && y.is_finite() { Some((j, y)) } else { None }
 }
 
-const EULER: f64 = std::f64::consts::EULER_GAMMA;
+/// The Euler–Mascheroni constant γ. Written out because
+/// `std::f64::consts::EULER_GAMMA` is newer than the minimum supported Rust
+/// (1.90); this literal rounds to the same f64 (bits 0x3fe2788cfc6fb619).
+const EULER: f64 = 0.577_215_664_901_532_860_606_512_090_082_402_431_f64;
 
 /// J_0..J_m(x) for 0 < x ≤ ~100 by Miller's backward recurrence, normalised with
 /// J_0 + 2ΣJ_{2k} = 1.
@@ -1125,8 +1128,14 @@ pub(crate) fn specs() -> Vec<FnSpec> {
 mod tests {
     use gridcraft_core::{CellError, Value};
 
-    use super::parse_complex;
+    use super::{EULER, parse_complex};
     use crate::util::testutil::*;
+
+    #[test]
+    fn euler_matches_std_bits() {
+        // Same bits as std::f64::consts::EULER_GAMMA (checked on Rust 1.99).
+        assert_eq!(EULER.to_bits(), 0x3fe2_788c_fc6f_b619);
+    }
 
     #[track_caller]
     fn cx(v: Value, re: f64, im: f64) {
