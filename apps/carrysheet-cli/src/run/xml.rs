@@ -501,7 +501,10 @@ mod tests {
             }
             let took = started.elapsed();
             eprintln!("{what}: {took:?}");
-            assert!(took < Duration::from_millis(100), "{what}: {took:?}");
+            // Linear inputs take about 100 ms in a debug build on a shared CI
+            // runner; a quadratic one takes seconds. One second keeps the test
+            // about the shape of the cost, not the speed of the machine.
+            assert!(took < Duration::from_secs(1), "{what}: {took:?}");
         }
     }
 }
