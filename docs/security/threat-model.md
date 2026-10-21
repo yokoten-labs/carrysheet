@@ -7,10 +7,10 @@ report a problem, see [SECURITY.md](../../SECURITY.md).
 `crates/`: `.xls` (carrysheet-biff), CSV (carrysheet-csv), Apple Numbers
 (carrysheet-numbers), VBA projects (carrysheet-vba) and encrypted files
 (carrysheet-crypto). `carrysheet-cli` runs its MCP server over stdio, but the
+`macros` command opens a workbook and lists its VBA project. The other
 commands that open workbooks answer "not implemented yet" until the kernel
-lands ([issue 45][i45]). Several defences below are in review on their own
-branches and not yet merged; they are marked **planned**. This page must
-change when they land.
+lands ([issue 45][i45]). Some defences below are not built yet; they are
+marked **planned**. This page must change when they land.
 
 ## What we protect
 
@@ -82,18 +82,23 @@ characters; XML with a DOCTYPE and entities.
 - Encrypted files: carrysheet-crypto caps the key-stretching spin count
   (default 10,000,000), reads the `EncryptionInfo` XML with a size and event
   budget, and refuses a DOCTYPE.
-- Every reader crate has hostile and mutation tests under `tests/`.
-- Compound files are read with the `cfb` crate behind `catch_unwind`.
-  Record 0003 counts a caught panic as a failure, not a pass.
+- Hostile-input tests under `tests/`: carrysheet-biff, carrysheet-cfb,
+  carrysheet-crypto, carrysheet-numbers, carrysheet-vba and carrysheet-zip.
+  Mutation tests: carrysheet-biff, carrysheet-csv and carrysheet-numbers.
+  carrysheet-csv has no hostile-input test file yet.
+- Compound files are read with our own carrysheet-cfb. It returns an error on
+  a damaged file and never panics, so no `catch_unwind` is needed. Record 0003
+  counts a caught panic as a failure, not a pass. (The `cfb` crate is only a
+  dev-dependency of carrysheet-vba, used in tests.)
+- Zip archives: carrysheet-zip is a hardened opener (one end-record scan,
+  size and entry limits checked against bytes really read, only Stored and
+  Deflate, `..` clamped at the root). The CLI uses it for `macros`.
 
 **Open:**
-- One hardened zip opener for every reader: end-record scan, size and entry
-  limits checked against bytes really read, only Stored and Deflate, `..`
-  clamped at the root ([issue 40][i40], planned).
-- Our own CFB reader that returns errors instead of panicking, so no
-  `catch_unwind` is needed ([issue 42][i42], planned). On wasm32 a panic
-  aborts, so today one damaged `.xls` stops the browser converter
-  (`docs/web-build.md`).
+- Use carrysheet-zip for every reader ([issue 40][i40], partly done).
+  carrysheet-numbers still uses the `zip` crate.
+- On wasm32 a panic aborts (`docs/web-build.md`). The readers return errors
+  instead of panicking, but a Web Worker should still run the parsing.
 - One shared work budget with a deadline ([issue 56][i56]); the VBA case
   that takes 13 s on a 479 KB file ([issue 53][i53]).
 - Continuous fuzzing of every reader ([issue 8][i8]; fuzzlite work in
@@ -236,8 +241,8 @@ carries a bug; a release binary leaks the build machine's paths.
   license (record 0003, [issue 45][i45]). We review and carry it ourselves.
 - Reproducible builds and audits such as `cargo vet` ([issue 10][i10]).
 - Signed release builds ([issue 11][i11], [issue 52][i52]).
-- CI that runs fmt, clippy, tests, `cargo deny` and fuzzing once the
-  repository is public ([issue 52][i52]).
+- Fuzzing in CI. CI already runs `scripts/check.mjs`, clippy, tests and
+  `cargo deny` (`.github/workflows/ci.yml`; [issue 52][i52]).
 
 **Not defended:** a compromise of crates.io, of the Rust toolchain, or of
 the machine that builds a release.
@@ -253,9 +258,10 @@ them byte for byte. It flags auto-run entry points, `Shell`,
 only compiled code. Its messages tell the user not to enable the macros of
 an untrusted file.
 
-**Planned:** the `macros` command and MCP tool ([issue 22][i22]). Running
-macros is undecided and lowest priority ([issue 21][i21]); so is refreshing
-external data ([issue 27][i27]).
+The `macros` command and MCP tool list the VBA project of a workbook
+without running it ([issue 22][i22]). Running macros is undecided and lowest
+priority ([issue 21][i21]); so is refreshing external data
+([issue 27][i27]).
 
 **CSV formula injection:** carrysheet-csv's writer puts an apostrophe before
 fields that start with `=`, `+`, `-` or `@` (OWASP advice), on by default, so
@@ -324,7 +330,6 @@ Please do not open a public issue. Follow [SECURITY.md](../../SECURITY.md).
 [i26]: https://github.com/yokoten-labs/carrysheet/issues/26
 [i27]: https://github.com/yokoten-labs/carrysheet/issues/27
 [i40]: https://github.com/yokoten-labs/carrysheet/issues/40
-[i42]: https://github.com/yokoten-labs/carrysheet/issues/42
 [i43]: https://github.com/yokoten-labs/carrysheet/issues/43
 [i45]: https://github.com/yokoten-labs/carrysheet/issues/45
 [i49]: https://github.com/yokoten-labs/carrysheet/issues/49

@@ -49,7 +49,7 @@ versions to patch.
 ## Scope
 
 In scope: the code in this repository, which is the `carrysheet-cli`
-program, its MCP server, and the libraries in `crates/` and `apps/`. The
+program, its MCP server, and the libraries in `crates/` and the programs in `apps/`. The
 [threat model](docs/security/threat-model.md) says what we defend against,
 for example hostile files, hostile text aimed at agents, and MCP clients, and
 what we do not.
