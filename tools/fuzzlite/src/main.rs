@@ -48,7 +48,8 @@ Limits (run and repro):
   --memory-mib N        memory limit per case, Linux only (default: half the
                         machine's memory split over the jobs, at most 1024)
   --amp-ms N            a case this slow is an amplification (default 2000)
-  --amp-mib N           ...or one using this much memory (default 256)
+  --amp-mib N           ...or one using this much memory, Linux only
+                        (default 256)
 
 Findings print as one JSON line each on stdout; progress goes to stderr.
 Exit code: 0 nothing found, 1 findings or failure, 2 usage.
@@ -302,6 +303,7 @@ fn run(f: &Flags) -> Result<ExitCode, Usage> {
         opts.seeds.len(),
         display_path(&out)
     );
+    memory_note();
     let summary = match campaign::campaign(&opts) {
         Ok(s) => s,
         Err(e) => return fail(e),
@@ -322,10 +324,12 @@ fn run(f: &Flags) -> Result<ExitCode, Usage> {
         summary.caught_cfb
     );
     if let Some((ms, len, family)) = &summary.slowest {
-        say!(
-            "fuzzlite: slowest passing case {ms} ms ({len} bytes, {family}); most memory {} MiB",
-            summary.max_peak_kib.div_ceil(1024)
-        );
+        let memory = if child::MEMORY_MEASURED {
+            format!("most memory {} MiB", summary.max_peak_kib.div_ceil(1024))
+        } else {
+            "memory not measured".to_string()
+        };
+        say!("fuzzlite: slowest passing case {ms} ms ({len} bytes, {family}); {memory}");
     }
     Ok(if summary.findings.is_empty() {
         ExitCode::SUCCESS
@@ -334,12 +338,23 @@ fn run(f: &Flags) -> Result<ExitCode, Usage> {
     })
 }
 
+/// Says, where it is so, that memory is neither limited nor measured, so
+/// a quiet run is not read as "no memory blow-ups".
+fn memory_note() {
+    if !child::MEMORY_MEASURED {
+        say!(
+            "fuzzlite: memory is not limited or measured on this system (Linux only), so --memory-mib and --amp-mib do nothing and only time blow-ups are found"
+        );
+    }
+}
+
 fn repro(f: &Flags) -> Result<ExitCode, Usage> {
     let target = f.target()?;
     let limits = f.limits(1)?;
     if f.files.is_empty() {
         return Err(Usage("repro needs at least one input file".into()));
     }
+    memory_note();
     let exe = match exe() {
         Ok(e) => e,
         Err(e) => return fail(e),

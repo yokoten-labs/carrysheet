@@ -196,6 +196,9 @@ fn usage_errors_exit_2() {
     }
 }
 
+// Peak memory is read from /proc, so only Linux measures it; elsewhere
+// fuzzlite says at the start that memory is not measured (MEMORY_MEASURED).
+#[cfg(target_os = "linux")]
 #[test]
 fn a_memory_hungry_finish_is_an_amplification() {
     let out = out_dir("big");
