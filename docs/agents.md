@@ -1,8 +1,8 @@
 # Working with AI agents
 
-**Status: draft for the owner's review.** Design rules for `carrysheet-cli` and its MCP server, so they work well with many agents: Claude Code, Claude Desktop, Codex, Cursor, VS Code Copilot, Gemini CLI, Windsurf, Cline, Zed, JetBrains, Goose, and local models through LM Studio or Ollama hosts.
+**Status: accepted.** Design rules for `carrysheet-cli` and its MCP server, so they work well with many agents: Claude Code, Claude Desktop, Codex, Cursor, VS Code Copilot, Gemini CLI, Windsurf, Cline, Zed, JetBrains, Goose, and local models through LM Studio or Ollama hosts.
 
-Evidence: [research/mcp-client-compat.md](../research/mcp-client-compat.md), [research/agent-spreadsheet-landscape.md](../research/agent-spreadsheet-landscape.md), the decision records ([0005](records/0005-every-agent-equal.md), [0006](records/0006-follow-habits.md), and records 0007 and 0008 named below), and lessons from earlier agent tools.
+Evidence: [research/mcp-client-compat.md](../research/mcp-client-compat.md), the decision records ([0005](records/0005-every-agent-equal.md), [0006](records/0006-follow-habits.md), and records 0007 and 0008 named below), and lessons from earlier agent tools.
 
 ## Principles
 
@@ -32,14 +32,14 @@ Carrysheet aims to be **AI-friendly, human-friendly and MCP-friendly**. The rule
 
 - rmcp, serving both spec versions: 2025-11-25 (with `initialize`) and 2026-07-28 (stateless, `server/discover`).
 - No session state. A workbook is named by its path in every call. Never call an argument `session_id` (one client bridge strips it).
-- `carrysheet-cli mcp serve` starts the server. stdio by default. `--http 127.0.0.1:PORT` (or `[::1]:PORT`) serves streamable HTTP at `/mcp`, for conformance tests and tunnels, stateless like stdio. Any other address, `0.0.0.0` included, is a usage error (exit 2). See HTTP mode under Safety.
+- `carrysheet-cli mcp serve` starts the server. stdio by default. `--http 127.0.0.1:PORT` (or `[::1]:PORT`) is planned (PR 91; the argument exists, but answers "not built yet"). It will serve streamable HTTP at `/mcp`, for conformance tests and tunnels, stateless like stdio. Any other address, `0.0.0.0` included, is a usage error (exit 2). See HTTP mode under Safety.
 - stdout carries only JSON-RPC: UTF-8, LF, one message per line. Logs go to stderr or `--log-file`, with control characters escaped; a full log queue drops lines and counts them rather than blocking. Every crate denies `println!`.
 - Calls run off the protocol thread, so `ping` and cancellation keep working during a slow call. Answers can come back out of order; clients match them by id.
 - Starts in well under 1 s (Codex gives up after 10 s; Windows process start is slow).
 
 ### Tools
 
-Few, workflow-level tools. Names of built tools match the command table in `crates/carrysheet-commands/src/table.rs`; `macros` is on branch 22-macros-command until it is merged.
+Few, workflow-level tools. Names of built tools match the command table in `crates/carrysheet-commands/src/table.rs`. `macros` is built.
 
 | Tool | Does | Changes files | Toolset |
 |---|---|---|---|
@@ -64,10 +64,10 @@ Rules:
 
 ### Toolsets
 
-Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, on branch 62-mcp-tools until it is merged).
+Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, in PR 88 until it is merged).
 
 - **The default list stays at 10,000 characters or less**, counted as compact JSON (name, description, input schema, annotations). The default list is what a client gets with no flags. The number is ours, not a client limit: it keeps the tools usable for a local model with a 4k–8k context and for clients that load every tool into every request. A new record can change it.
-- `carrysheet-cli mcp serve --toolsets default,macros --tools diff`. `default` is used when no toolset is given; `all` turns on everything. An unknown name stops the server at start with a three-part error. Clients can only hide tools on their side, never add one, so the server's default list is the small one.
+- Planned: `carrysheet-cli mcp serve --toolsets default,macros --tools diff`. The arguments of `mcp serve` today are `root`, `read_only`, `log_file` and `http`; `--toolsets` and `--tools` are not built yet. `default` is used when no toolset is given; `all` turns on everything. An unknown name stops the server at start with a three-part error. Clients can only hide tools on their side, never add one, so the server's default list is the small one.
 - `--read-only` wins over both: a write tool stays hidden whatever `--toolsets` or `--tools` say.
 - **Fold first.** A new feature becomes an argument or an `edit` op of an existing tool when it is the same verb on the same file. A new tool needs a verb no tool has, and goes in a toolset that is off by default unless it belongs in `default`.
 - Toolsets off by default are named in one line of the server instructions. When a call meets something an off tool handles, its `hint` names the CLI command and the toolset. Safety facts are never behind a toolset: `check` reports macro risk on its own, with `macros` off.
@@ -113,7 +113,7 @@ Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, on branch 62-mcp-t
 - **Folder confinement.** `--root` (default: the current folder). Paths are checked as text first, before any file is touched: network paths (`\\host\share`, WebDAV), device paths (`\\.\`, `\\?\GLOBALROOT`), other drives, reserved names (`NUL`, `COM1`) and `..` above the root are refused at once, so a path can never make Windows send credentials to another machine. Then links and junctions are followed one by one, each checked again. A refusal is `outside_root`.
 - Without `--root`, a drive root, `/` or the home folder is too wide: the server refuses to start and asks for `--root`. An explicit `--root /` starts with a warning in the log.
 - **Read-only mode.** `--read-only` hides every tool that changes files or is not marked read-only, and refuses them by name, whatever `--toolsets` and `--tools` say. It is set in the server's own arguments, not an env variable, because several clients strip env.
-- **HTTP mode on this computer only.** Details and measurements: `docs/mcp-http.md` (on branch 9-mcp-http until it is merged).
+- **HTTP mode on this computer only (planned, PR 91).** Details and measurements will be in `docs/mcp-http.md`.
   - Loopback only (127.0.0.1 or [::1]). `Host` and `Origin` must name it, against DNS rebinding (403). Read-only unless `--allow-writes`.
   - Every request needs `Authorization: Bearer <token>` (401 without it). The token is 256 random bits made at start, shown once on stderr or written to `--token-file`, never logged.
   - Limits: a body of at most 1 MiB within 10 s, 2 MiB of bodies at once, 8 calls at once, 120 s per call, 256 connections, each checked within 3 s. Refusals are short three-part errors that never repeat the request.
@@ -131,7 +131,7 @@ Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, on branch 62-mcp-t
   - SQL is shown whole only when it is a plain read (one `SELECT` or `WITH`, nothing that writes, runs or connects); otherwise it is hidden whole, with the reason.
   - Raw texts (connection strings, full URLs, M code) come only with `include_raw: true` (`--raw`), masked as well as patterns can, and the answer warns that this masking is best effort. A text over its limit stays hidden even then, because a cut could end inside a secret.
 - **Cell text is data, not instructions.** Results mark workbook content clearly, so a sheet saying "ignore your instructions" stays text. Answers that contain macro names or source carry a `notice` field, placed before any of that text. Control, bidi and invisible characters from the file are escaped, and names are cut at 64 characters.
-- **Provenance** (proposed in record 0007, `docs/records/0007-traceability.md`; not yet accepted). A trail of changes, off by default because it holds people's names and files are shared.
+- **Provenance** (proposed in record 0007; not yet accepted). A trail of changes, off by default because it holds people's names and files are shared.
   - On for one call with `--trace`, for a file (saved in the file, so it stays on), or for every file in the user's settings.
   - Each entry: who (the person's name if set; the client and model, labelled as self-reported), UTC time, sheet and cell, value and formula before and after, the note why, the command and its arguments, and the source the value came from.
   - Stored inside the workbook as a custom XML part. csv, and .xls for now, say that the trail can't be saved there.
@@ -179,12 +179,12 @@ The CLI and MCP server ship for three tiers of platforms from the first release.
 
 ## Testing
 
-There is no CI while the repository is private. The gate is local: `node scripts/check.mjs` (fmt, clippy, tests, cargo-deny, wasm, Windows builds, release privacy check), with `CARRYSHEET_HEAVY` set on the shared machine; see `AGENTS.md`.
+CI runs `node scripts/check.mjs` on every pull request (fmt, clippy, tests, cargo-deny, wasm, Windows builds, release privacy check). You can run the same command locally; see `AGENTS.md`.
 
 - The schema lint and the tool-list size tests above run as part of it.
 - Tests use a temporary home folder and `TZ=UTC`, and never read the developer's real client configs.
 
-Once the repository is public (issue 52), CI adds:
+Planned for CI (issue 52):
 
 - Official MCP conformance suite against both spec versions (through `--http`).
 - MCP Inspector CLI smoke test over stdio on Windows x64 and x86 runners.
