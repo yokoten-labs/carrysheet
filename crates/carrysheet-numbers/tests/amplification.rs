@@ -240,8 +240,9 @@ fn a_formula_with_too_many_parts_is_not_decoded() {
 
 // --- H3: zip directories ---------------------------------------------------
 
-/// A file whose zip64 end record says `entries` entries, consistent enough
-/// for the zip crate to accept it and set aside memory for them.
+/// A file whose zip64 end record, found through its locator, says
+/// `entries` entries: a reader that trusted the count would set aside
+/// memory for them.
 fn zip64_claiming(entries: u64) -> Vec<u8> {
     let at = entries * 46;
     let mut data = vec![0u8; at as usize];
@@ -266,16 +267,17 @@ fn zip64_claiming(entries: u64) -> Vec<u8> {
 }
 
 #[test]
-fn zip64_entry_counts_are_checked_before_the_zip_crate() {
+fn zip64_entry_counts_are_checked_before_anything_is_allocated() {
     let bytes = zip64_claiming(40_000);
     too_large(bounded(10, || read(&bytes)), "entries in the zip file");
-    // Within the limit, the zip crate gets it and finds it damaged.
+    // Within the limit, the directory is checked and found damaged.
     let e = read(&zip64_claiming(100)).unwrap_err();
     assert!(matches!(e, NumbersError::Damaged { .. }), "{e}");
 }
 
 /// `zeros` bytes of padding, then `records` end records that each say one
-/// entry at offset 0, where there is none: the zip crate tries every one.
+/// entry at offset 0, where there is none. A reader that tried each in
+/// turn would search the file again for every one.
 fn failing_end_records(zeros: usize, records: usize) -> Vec<u8> {
     let mut data = b"PK".to_vec();
     data.resize(zeros.max(2), 0);
@@ -289,9 +291,9 @@ fn failing_end_records(zeros: usize, records: usize) -> Vec<u8> {
 
 #[test]
 fn many_end_records_are_quick_then_refused() {
-    // The zip crate tries each of 4,000 end records. Searching the 16 MiB
-    // before each one again would be 64 GB of reading; with the archive
-    // offset known it checks each in place.
+    // 4,000 end records after 16 MiB: a reader that searched the 16 MiB
+    // again for each would read 64 GB. The reader looks for the end
+    // record once, in the last 65,557 bytes, and uses only the last one.
     let bytes = failing_end_records(16 << 20, 4_000);
     let start = Instant::now();
     let e = read(&bytes).unwrap_err();
@@ -314,8 +316,8 @@ fn many_end_records_are_quick_then_refused() {
 
 #[test]
 fn zip64_records_over_the_limit_are_refused_even_if_inconsistent() {
-    // A zip64 record claiming 2^40 entries 100 bytes into the file, which
-    // the zip crate's own check (46 bytes per entry) would reject today.
+    // A zip64 record claiming 2^40 entries 100 bytes into the file, with
+    // no locator or end record pointing at it.
     let mut data = b"PK".to_vec();
     data.resize(100, 0);
     data.extend_from_slice(b"PK\x06\x06");
@@ -331,7 +333,71 @@ fn zip64_records_over_the_limit_are_refused_even_if_inconsistent() {
     let e = bounded(10, || read(&data)).unwrap_err();
     assert!(matches!(e, NumbersError::Damaged { .. }), "{e}");
     // Where a locator points at it, its count is refused before anything
-    // is allocated: zip64_entry_counts_are_checked_before_the_zip_crate.
+    // is allocated: zip64_entry_counts_are_checked_before_anything_is_allocated.
+}
+
+/// A deflate stream that passes every byte guard of the zip reader and is
+/// still slow: `rounds` times, 62 matches of 258 bytes, then 12,285 bytes
+/// of empty fixed blocks (under the 16 KiB cap on a run without output;
+/// the matches give enough output to stay within the quarter more input
+/// than output that the reader allows). Every piece ends on a byte, so each round is built
+/// once and repeated. Returns the stream and what it inflates to.
+fn slow_stream(rounds: usize) -> (Vec<u8>, u64) {
+    use zip_builder::Bits;
+    const MATCHES: usize = 62;
+    // Four empty fixed blocks are 40 bits: five whole bytes.
+    let mut filler = Bits::new();
+    for _ in 0..4 {
+        filler.empty_fixed_block();
+    }
+    let filler = filler.finish().repeat(12_285 / 5);
+    // A fixed block of matches at distance 1: 3 + 13 * 62 + 7 bits.
+    let mut matches = Bits::new();
+    matches.put(0, 1);
+    matches.put(1, 2);
+    for _ in 0..MATCHES {
+        matches.fixed(285);
+        matches.code(0, 5);
+    }
+    matches.fixed(256);
+    let matches = matches.finish();
+    assert_eq!(matches.len() * 8, 3 + 13 * MATCHES + 7, "ends on a byte");
+    // A stored block with one byte to copy from, then the rounds, then a
+    // final empty stored block.
+    let mut stream = vec![0, 1, 0, 0xFE, 0xFF, b'a'];
+    // Output first, so the filler after it is within the room it earned.
+    let round = [matches, filler].concat();
+    stream.extend(round.repeat(rounds));
+    stream.extend_from_slice(&[1, 0, 0, 0xFF, 0xFF]);
+    (stream, 1 + (rounds * MATCHES * 258) as u64)
+}
+
+#[test]
+fn slow_deflate_is_stopped_by_the_unpack_time_limit() {
+    // About 32 MiB of such rounds, within every byte limit: without the
+    // time limit, 64 s of inflating with miniz in a test build (measured
+    // 2026-10-22), and minutes at the 256 MiB input limit.
+    let (stream, size) = slow_stream(2_700);
+    assert!(stream.len() as u64 * 4 <= size * 5);
+    let mut raw = zip_builder::Raw::new("Index/Document.iwa", b"", zip_builder::Method::Deflated);
+    raw.data = stream;
+    raw.compressed_size = raw.data.len() as u32;
+    raw.local_compressed_size = raw.compressed_size;
+    raw.size = size as u32;
+    raw.local_size = raw.size;
+    let mut b = zip_builder::Builder::new();
+    b.raw(raw);
+    let bytes = b.finish();
+
+    let mut limits = Limits::default();
+    assert_eq!(limits.max_unpack_time, Some(Duration::from_secs(30)));
+    limits.max_unpack_time = Some(Duration::from_millis(100));
+    let start = Instant::now();
+    let e = read_with(&bytes, &limits).unwrap_err();
+    let took = start.elapsed();
+    assert!(matches!(e, NumbersError::TooSlow { seconds: 1 }), "{e}");
+    assert!(e.fix().contains("max_unpack_time"), "{}", e.fix());
+    assert!(took < Duration::from_secs(1), "took {took:?}");
 }
 
 #[test]

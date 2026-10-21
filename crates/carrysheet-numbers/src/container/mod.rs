@@ -82,6 +82,14 @@ pub struct Limits {
     /// document, counted for every cell. Default 50,000,000 (20,000,000 on
     /// 32-bit targets).
     pub max_document_formula_nodes: u64,
+    /// The most time unpacking the zip file may take, nested `Index.zip`
+    /// included. Real documents unpack in well under a second; deflate
+    /// data built to waste time (such as many runs of empty blocks, each
+    /// followed by a little output) passes every byte limit and can take
+    /// minutes. Default 30 seconds. `None` turns the limit off. Not kept
+    /// on `wasm32-unknown-unknown`, which has no clock: there, lower
+    /// [`Limits::max_input_bytes`] for untrusted input instead.
+    pub max_unpack_time: Option<std::time::Duration>,
 }
 
 /// Defaults that differ with the address space: (input, decompressed,
@@ -125,6 +133,7 @@ impl Default for Limits {
             max_document_merges: 1_000_000,
             max_formula_nodes: 10_000,
             max_document_formula_nodes: nodes,
+            max_unpack_time: Some(std::time::Duration::from_secs(30)),
         }
     }
 }

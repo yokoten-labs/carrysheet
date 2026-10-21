@@ -4,9 +4,11 @@
 //! shares (issue 40): it looks for the end record once, near the end of
 //! the file, checks the entry count and directory size before it takes
 //! memory, refuses overlapping entries and duplicate names, and checks
-//! each entry's size and CRC-32 while it inflates.
+//! each entry's size and CRC-32 while it inflates. Its byte limits do not
+//! bound time, so inflating stops at [`Limits::max_unpack_time`].
 
 use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::time::Instant;
 
 use carrysheet_zip::{Archive, DuplicateNames, Error as ZipError, Limits as ZipLimits};
 
@@ -15,12 +17,49 @@ use crate::error::{NumbersError, damaged};
 
 /// Reads the parts the reader uses from a zip file.
 pub(super) fn read<R: Read + Seek>(
+    reader: R,
+    label: &str,
+    limits: &Limits,
+    budget: &mut Budget,
+    parts: &mut Parts,
+    allow_nested: bool,
+) -> Result<(), NumbersError> {
+    read_by(
+        reader,
+        label,
+        limits,
+        budget,
+        parts,
+        allow_nested,
+        deadline(limits),
+    )
+}
+
+/// When unpacking must stop: one deadline for the file and a nested
+/// `Index.zip` together. None without a limit, or without a clock.
+fn deadline(limits: &Limits) -> Option<Instant> {
+    if cfg!(target_family = "wasm") {
+        return None;
+    }
+    let limit = limits.max_unpack_time?;
+    Some(Instant::now().checked_add(limit).unwrap_or_else(far_future))
+}
+
+/// A deadline that never comes, for a limit too large to add.
+fn far_future() -> Instant {
+    let now = Instant::now();
+    let year = std::time::Duration::from_secs(365 * 24 * 3600);
+    now.checked_add(year).unwrap_or(now)
+}
+
+fn read_by<R: Read + Seek>(
     mut reader: R,
     label: &str,
     limits: &Limits,
     budget: &mut Budget,
     parts: &mut Parts,
     allow_nested: bool,
+    deadline: Option<Instant>,
 ) -> Result<(), NumbersError> {
     let starts_with_pk = {
         let mut magic = [0u8; 2];
@@ -33,6 +72,9 @@ pub(super) fn read<R: Read + Seek>(
         },
         e => zip_error(label, limits, e),
     })?;
+    if let Some(at) = deadline {
+        archive.set_interrupt(Box::new(move || Instant::now() >= at));
+    }
     for i in 0..archive.entries().len() {
         let entry = &archive.entries()[i];
         let name = entry.name.clone();
@@ -103,7 +145,15 @@ pub(super) fn read<R: Read + Seek>(
         budget.take(data.len() as u64)?;
         match usage {
             Use::Archive => parts.archives.push(Part { name, data }),
-            Use::NestedIndex => read(Cursor::new(&data[..]), &name, limits, budget, parts, false)?,
+            Use::NestedIndex => read_by(
+                Cursor::new(&data[..]),
+                &name,
+                limits,
+                budget,
+                parts,
+                false,
+                deadline,
+            )?,
             Use::Properties | Use::BuildHistory | Use::Password | Use::Skip => {}
         }
     }
@@ -144,12 +194,11 @@ fn zip_error(part: &str, limits: &Limits, e: ZipError) -> NumbersError {
         ZipError::Unsupported(_) => NumbersError::Unsupported {
             feature: "zip features Numbers does not write (a compression method other than Deflate, encryption, or several disks)",
         },
-        e if e.is_slow_to_unpack() => damaged(
-            part,
-            format!(
-                "{e}; Numbers does not write such data, so the file was made to slow readers down"
-            ),
-        ),
+        ZipError::Interrupted => NumbersError::TooSlow {
+            seconds: limits
+                .max_unpack_time
+                .map_or(0, |d| d.as_secs() + u64::from(d.subsec_nanos() > 0)),
+        },
         e => damaged(part, e.to_string()),
     }
 }

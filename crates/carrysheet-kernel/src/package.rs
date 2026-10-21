@@ -12,8 +12,9 @@ use gridcraft_engine::core::limits as gc;
 
 /// Most entries listed from one package (as GridCraft reads).
 const MAX_ENTRIES: usize = 200_000;
-/// Largest central directory read: room for [`MAX_ENTRIES`] entries with
-/// names of a few hundred bytes.
+/// Largest central directory read: 64 MiB, room for [`MAX_ENTRIES`]
+/// entries with names of up to about 290 bytes (each entry is a 46-byte
+/// header and its name). Excel's part names are far shorter.
 const MAX_DIRECTORY: u64 = 64 << 20;
 /// Largest part searched for features inside sheets and the workbook.
 const MAX_SCANNED_PART: u64 = 64 << 20;
@@ -110,10 +111,10 @@ fn zip_limits() -> ZipLimits {
 }
 
 impl<'a> Package<'a> {
-    /// Lists a package's parts without unpacking them; `None` if the bytes
-    /// are not a zip the hardened reader opens.
-    pub(crate) fn open(bytes: &'a [u8]) -> Option<Package<'a>> {
-        let mut zip = Archive::open(Cursor::new(bytes), zip_limits()).ok()?;
+    /// Lists a package's parts without unpacking them; when the bytes are
+    /// not a zip the hardened reader opens, says why in plain words.
+    pub(crate) fn open(bytes: &'a [u8]) -> Result<Package<'a>, String> {
+        let mut zip = Archive::open(Cursor::new(bytes), zip_limits()).map_err(unlisted)?;
         // Unpacking counts against the command's time limit (round 2, N6).
         zip.set_interrupt(Box::new(|| !gc::check_time()));
         let mut parts = BTreeMap::new();
@@ -130,7 +131,7 @@ impl<'a> Package<'a> {
                 .entry(normalize(&f.name))
                 .or_insert((f.name.clone(), entry));
         }
-        Some(Package {
+        Ok(Package {
             zip,
             parts,
             refused: BTreeMap::new(),
@@ -728,18 +729,41 @@ fn features(p: &mut Package<'_>) -> (BTreeMap<&'static str, u64>, Vec<&'static s
 }
 
 /// Feature counts of a package, for reports when the output is not one.
-/// `None` when its parts cannot be listed.
-pub(crate) fn source_features(bytes: &[u8]) -> Option<BTreeMap<&'static str, u64>> {
+/// When its parts cannot be listed, why.
+pub(crate) fn source_features(bytes: &[u8]) -> Result<BTreeMap<&'static str, u64>, String> {
     Package::open(bytes).map(|mut p| features(&mut p).0)
 }
 
+/// Why the zip reader would not list a package's parts, in plain words
+/// (its texts hold nothing from the file).
+fn unlisted(e: carrysheet_zip::Error) -> String {
+    match e {
+        carrysheet_zip::Error::LimitExceeded {
+            what: "zip entries",
+            ..
+        } => format!("it has more than {MAX_ENTRIES} parts"),
+        carrysheet_zip::Error::LimitExceeded {
+            what: "bytes of the central directory",
+            ..
+        } => format!(
+            "its list of parts is larger than {} MiB",
+            MAX_DIRECTORY >> 20
+        ),
+        carrysheet_zip::Error::Unsupported(_) => {
+            format!("it uses zip features Excel does not write ({e})")
+        }
+        e => format!("its zip structure cannot be read ({e})"),
+    }
+}
+
 /// The loss reported when a package cannot be compared: the save must not
-/// pass as losing nothing (record 0003).
-pub(crate) fn unchecked_loss() -> Loss {
+/// pass as losing nothing (record 0003). It says what was not checked,
+/// why, and what to do.
+pub(crate) fn unchecked_loss(why: &str) -> Loss {
     Loss {
-        feature:
-            "anything the file holds besides cell values (its parts could not be listed to check)"
-                .into(),
+        feature: format!(
+            "anything the file holds besides cell values (not checked: its parts could not be listed because {why}; open and save the file in Excel to repair it, or pass confirm_loss to save without the check)"
+        ),
         before: 1,
         after: 0,
     }
@@ -778,9 +802,18 @@ pub(crate) fn compare(source: &[u8], output: &[u8], report: &mut SaveReport) {
 }
 
 fn compare_within(source: &[u8], output: &[u8], report: &mut SaveReport, caps: Caps) {
-    let (Some(mut before), Some(mut after)) = (Package::open(source), Package::open(output)) else {
-        report.lost.push(unchecked_loss());
-        return;
+    let (mut before, mut after) = match (Package::open(source), Package::open(output)) {
+        (Ok(b), Ok(a)) => (b, a),
+        (Err(why), _) => {
+            report.lost.push(unchecked_loss(&why));
+            return;
+        }
+        (_, Err(why)) => {
+            report
+                .lost
+                .push(unchecked_loss(&format!("in the file to be written, {why}")));
+            return;
+        }
     };
     before.caps = caps;
     after.caps = caps;
@@ -1082,6 +1115,30 @@ mod tests {
         let mut r = SaveReport::new(carrysheet_commands::engine::FileFormat::Xlsx);
         compare(&plain, &plain, &mut r);
         assert!(r.lost.is_empty(), "{:?}", r.lost);
+    }
+
+    #[test]
+    fn a_package_that_cannot_be_listed_says_why_and_what_to_do() {
+        let good = package(&[("xl/workbook.xml", "<workbook/>")]);
+        let mut r = SaveReport::new(carrysheet_commands::engine::FileFormat::Xlsx);
+        compare(b"not a zip at all, but long enough", &good, &mut r);
+        let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
+        assert_eq!(lost.len(), 1, "{lost:?}");
+        assert!(
+            lost[0].contains(
+                "could not be listed because its zip structure cannot be read (the zip is damaged: "
+            ),
+            "{}",
+            lost[0]
+        );
+        assert!(lost[0].contains("confirm_loss"), "{}", lost[0]);
+        let mut r = SaveReport::new(carrysheet_commands::engine::FileFormat::Xlsx);
+        compare(&good, b"PK", &mut r);
+        assert!(
+            r.lost[0].feature.contains("in the file to be written"),
+            "{:?}",
+            r.lost
+        );
     }
 
     #[test]
