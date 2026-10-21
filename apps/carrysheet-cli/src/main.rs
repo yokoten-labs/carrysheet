@@ -76,8 +76,19 @@ fn real_main(args: Vec<OsString>) -> u8 {
     }
 }
 
+/// The hidden first argument that runs this program as a query worker
+/// (`carrysheet_query::QueryEngine::start`), with the `query` feature. It is
+/// read before clap, so it is not in the help.
+#[cfg(feature = "query")]
+pub(crate) const QUERY_WORKER_ARG: &str = "__query-worker";
+
 fn main() -> std::process::ExitCode {
-    std::process::ExitCode::from(real_main(std::env::args_os().collect()))
+    let args: Vec<OsString> = std::env::args_os().collect();
+    #[cfg(feature = "query")]
+    if args.get(1).is_some_and(|a| a == QUERY_WORKER_ARG) {
+        return carrysheet_query::serve_worker();
+    }
+    std::process::ExitCode::from(real_main(args))
 }
 
 #[cfg(test)]

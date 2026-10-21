@@ -1,0 +1,210 @@
+{
+  "schema": 1,
+  "title": "Statistical functions and their edge cases",
+  "formats": ["xlsx"],
+  "inputs": { "A1": 1, "A2": 2, "A3": 3, "A4": 4, "A5": 5 },
+  "cases": [
+    {
+      "id": "st.stdev-single-value",
+      "note": "The sample standard deviation of one value divides by zero; the population one is 0.",
+      "formulas": { "C1": "=STDEV(1)", "C2": "=STDEV.P(1)" },
+      "expect": { "C1": "#DIV/0!", "C2": 0 }
+    },
+    {
+      "id": "st.stdev-basic",
+      "note": "Sample and population standard deviation of 1..4.",
+      "formulas": { "C1": "=STDEV(1,2,3,4)", "C2": "=STDEV.P(1,2,3,4)" },
+      "expect": { "C1": 1.2909944487358056, "C2": 1.118033988749895 }
+    },
+    {
+      "id": "st.stdev-cancellation",
+      "note": "Large equal-spaced values: a one-pass sum-of-squares algorithm loses everything; the right answer is 1.",
+      "inputs": { "C1": 1000000001, "C2": 1000000002, "C3": 1000000003, "D1": 1000000000000001, "D2": 1000000000000002, "D3": 1000000000000003 },
+      "formulas": { "E1": "=STDEV(C1:C3)", "E2": "=STDEV(D1:D3)", "E3": "=VAR.S(D1:D3)" },
+      "expect": { "E1": 1 }
+    },
+    {
+      "id": "st.stdev-text-cell",
+      "note": "STDEV skips a text cell; STDEVA counts it as 0.",
+      "inputs": { "C1": 1, "C2": "2", "C3": 3 },
+      "formulas": { "E1": "=STDEV(C1:C3)", "E2": "=STDEVA(C1:C3)" },
+      "expect": { "E1": 1.4142135623730951 }
+    },
+    {
+      "id": "st.stdev-text-argument",
+      "note": "Numeric text typed directly as an argument is counted.",
+      "formulas": { "C1": "=STDEV(\"1\",2,3)" },
+      "expect": { "C1": 1 }
+    },
+    {
+      "id": "st.variance",
+      "note": "Sample and population variance of 1..4.",
+      "formulas": { "C1": "=VAR(1,2,3,4)", "C2": "=VAR.P(1,2,3,4)" },
+      "expect": { "C1": 1.6666666666666667, "C2": 1.25 }
+    },
+    {
+      "id": "st.percentile-ends",
+      "note": "PERCENTILE interpolates between ranks: 0 is the minimum, 1 the maximum, 0.1 of 1..5 is 1.4.",
+      "formulas": {
+        "C1": "=PERCENTILE(A1:A5,0)",
+        "C2": "=PERCENTILE(A1:A5,1)",
+        "C3": "=PERCENTILE(A1:A5,0.5)",
+        "C4": "=PERCENTILE(A1:A5,0.1)"
+      },
+      "expect": { "C1": 1, "C2": 5, "C3": 3, "C4": 1.4 }
+    },
+    {
+      "id": "st.percentile-out-of-range",
+      "note": "k outside 0..1 is #NUM!.",
+      "formulas": { "C1": "=PERCENTILE(A1:A5,1.1)", "C2": "=PERCENTILE(A1:A5,-0.1)" },
+      "expect": { "C1": "#NUM!", "C2": "#NUM!" }
+    },
+    {
+      "id": "st.percentile-exc-edges",
+      "note": "PERCENTILE.EXC rejects k=0 and k too close to the ends for the data size.",
+      "formulas": {
+        "C1": "=PERCENTILE.EXC(A1:A5,0)",
+        "C2": "=PERCENTILE.EXC(A1:A5,0.1)",
+        "C3": "=PERCENTILE.EXC(A1:A5,0.5)",
+        "C4": "=PERCENTILE.EXC(A1:A5,0.2)"
+      },
+      "expect": { "C1": "#NUM!", "C2": "#NUM!", "C3": 3, "C4": 1.2 }
+    },
+    {
+      "id": "st.percentile-inc-vs-exc",
+      "note": "The same k gives different answers in the inclusive and exclusive methods.",
+      "formulas": { "C1": "=PERCENTILE.INC(A1:A5,0.25)", "C2": "=PERCENTILE.EXC(A1:A5,0.25)" },
+      "expect": { "C1": 2, "C2": 1.5 }
+    },
+    {
+      "id": "st.quartile",
+      "note": "QUARTILE truncates a fractional quart; 5 is #NUM!.",
+      "formulas": {
+        "C1": "=QUARTILE(A1:A5,4)",
+        "C2": "=QUARTILE(A1:A5,5)",
+        "C3": "=QUARTILE.EXC(A1:A5,1)",
+        "C4": "=QUARTILE(A1:A5,1.9)"
+      },
+      "expect": { "C1": 5, "C2": "#NUM!", "C3": 1.5, "C4": 2 }
+    },
+    {
+      "id": "st.median-even-count",
+      "note": "The median of an even count is the mean of the middle two.",
+      "formulas": { "C1": "=MEDIAN(A1:A4)" },
+      "expect": { "C1": 2.5 }
+    },
+    {
+      "id": "st.median-skips-blank-and-text",
+      "note": "MEDIAN skips blank and text cells in a range.",
+      "inputs": { "C1": 1, "C2": null, "C3": "x", "C4": 3 },
+      "formulas": { "E1": "=MEDIAN(C1:C4)" },
+      "expect": { "E1": 2 }
+    },
+    {
+      "id": "st.mode-no-repeats",
+      "note": "MODE with no repeated value is #N/A.",
+      "formulas": { "C1": "=MODE(1,2,3)" },
+      "expect": { "C1": "#N/A" }
+    },
+    {
+      "id": "st.mode-first-wins",
+      "note": "With two modes, MODE returns the one that appears first.",
+      "formulas": { "C1": "=MODE(3,3,2,2,1)", "C2": "=MODE(2,2,3,3,1)" },
+      "expect": { "C1": 3, "C2": 2 }
+    },
+    {
+      "id": "st.mode-mult",
+      "note": "MODE.MULT spills every mode.",
+      "requires": ["dynamic-arrays"],
+      "formulas": { "C1": "=MODE.MULT(1,2,2,3,3)" }
+    },
+    {
+      "id": "st.rank-ties",
+      "note": "RANK gives ties the same (best) rank; RANK.AVG gives the average.",
+      "inputs": { "C1": 10, "C2": 20, "C3": 20, "C4": 30 },
+      "formulas": { "E1": "=RANK(20,C1:C4)", "E2": "=RANK.AVG(20,C1:C4)", "E3": "=RANK.EQ(20,C1:C4,1)" },
+      "expect": { "E1": 2, "E2": 2.5, "E3": 2 }
+    },
+    {
+      "id": "st.rank-missing",
+      "note": "RANK of a value not in the list is #N/A.",
+      "formulas": { "C1": "=RANK(2.5,A1:A5)" },
+      "expect": { "C1": "#N/A" }
+    },
+    {
+      "id": "st.large-small-k",
+      "note": "k=0 and k past the count are #NUM!; a fractional k is rounded up or truncated?",
+      "formulas": { "C1": "=LARGE(A1:A5,0)", "C2": "=SMALL(A1:A5,6)", "C3": "=LARGE(A1:A5,1.5)" },
+      "expect": { "C1": "#NUM!", "C2": "#NUM!" }
+    },
+    {
+      "id": "st.average-empty",
+      "note": "AVERAGE of an empty range is #DIV/0!.",
+      "formulas": { "C1": "=AVERAGE(G1:G3)" },
+      "expect": { "C1": "#DIV/0!" }
+    },
+    {
+      "id": "st.averageif-no-match",
+      "note": "AVERAGEIF with no matching cell is #DIV/0!.",
+      "formulas": { "C1": "=AVERAGEIF(A1:A5,\">10\")" },
+      "expect": { "C1": "#DIV/0!" }
+    },
+    {
+      "id": "st.correl-constant",
+      "note": "Correlation with a constant series divides by a zero standard deviation.",
+      "inputs": { "C1": 1, "C2": 1, "C3": 1 },
+      "formulas": { "E1": "=CORREL(C1:C3,A1:A3)" },
+      "expect": { "E1": "#DIV/0!" }
+    },
+    {
+      "id": "st.geomean-harmean",
+      "note": "GEOMEAN with a zero is #NUM!; HARMEAN of 1,2,4 is 12/7.",
+      "formulas": { "C1": "=GEOMEAN(0,1)", "C2": "=HARMEAN(1,2,4)", "C3": "=GEOMEAN(A1:A5)" },
+      "expect": { "C1": "#NUM!", "C2": 1.7142857142857142 }
+    },
+    {
+      "id": "st.trimmean",
+      "note": "TRIMMEAN trims a rounded-down even number of points; percent 1 is #NUM!.",
+      "formulas": { "C1": "=TRIMMEAN(A1:A5,0.4)", "C2": "=TRIMMEAN(A1:A5,1)", "C3": "=TRIMMEAN(A1:A5,0.3)" },
+      "expect": { "C1": 3, "C2": "#NUM!" }
+    },
+    {
+      "id": "st.kurt-skew-small",
+      "note": "KURT needs 4 points and SKEW 3.",
+      "formulas": { "C1": "=KURT(1,2,3)", "C2": "=SKEW(1,2)", "C3": "=SKEW(1,2,4)" },
+      "expect": { "C1": "#DIV/0!", "C2": "#DIV/0!" }
+    },
+    {
+      "id": "st.normal-distribution",
+      "note": "NORM.S.INV(0.5) is 0; at 0 it is #NUM!; NORM.S.DIST(1.96) is about 0.975.",
+      "formulas": { "C1": "=NORM.S.INV(0.5)", "C2": "=NORM.S.INV(0)", "C3": "=NORM.S.DIST(1.96,TRUE)", "C4": "=NORM.INV(0.975,0,1)" },
+      "expect": { "C1": 0, "C2": "#NUM!" }
+    },
+    {
+      "id": "st.booleans",
+      "note": "STDEV skips TRUE/FALSE in cells (one number left, so #DIV/0!); STDEVA counts them; typed as arguments they count.",
+      "inputs": { "C1": true, "C2": false, "C3": 1 },
+      "formulas": { "E1": "=STDEV(C1:C3)", "E2": "=STDEVA(C1:C3)", "E3": "=STDEV(TRUE,FALSE,1)" },
+      "expect": { "E1": "#DIV/0!" }
+    },
+    {
+      "id": "st.count-family",
+      "note": "COUNT, COUNTA and COUNTBLANK each count different kinds of cells.",
+      "inputs": { "C1": 1, "C2": "a", "C3": true, "C4": null, "C5": { "typed": "#N/A" } },
+      "formulas": { "E1": "=COUNT(C1:C5)", "E2": "=COUNTA(C1:C5)", "E3": "=COUNTBLANK(C1:C5)" },
+      "expect": { "E1": 1, "E2": 4, "E3": 1 }
+    },
+    {
+      "id": "st.countif-number-and-text",
+      "note": "COUNTIF with criteria 1 also counts the text \"1\".",
+      "inputs": { "C1": 1, "C2": "1", "C3": 2 },
+      "formulas": { "E1": "=COUNTIF(C1:C3,1)", "E2": "=COUNTIF(C1:C3,\"1\")", "E3": "=COUNTIF(C1:C3,\">0\")" }
+    },
+    {
+      "id": "st.percentrank-truncates",
+      "note": "PERCENTRANK truncates (not rounds) to 3 significant digits by default.",
+      "formulas": { "C1": "=PERCENTRANK(A1:A5,2.5)", "C2": "=PERCENTRANK.INC(A1:A5,2.5,5)", "C3": "=PERCENTRANK.EXC(A1:A5,2.5)" },
+      "expect": { "C1": 0.375 }
+    }
+  ]
+}

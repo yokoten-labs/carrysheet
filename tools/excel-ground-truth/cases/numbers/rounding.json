@@ -1,0 +1,188 @@
+{
+  "schema": 1,
+  "title": "Rounding functions and half cases",
+  "formats": ["xlsx", "xls"],
+  "cases": [
+    {
+      "id": "round.half-away-from-zero",
+      "note": "ROUND rounds halves away from zero (not to even): 2.5 to 3, -2.5 to -3, 0.5 to 1.",
+      "formulas": { "A1": "=ROUND(2.5,0)", "A2": "=ROUND(-2.5,0)", "A3": "=ROUND(0.5,0)", "A4": "=ROUND(-0.5,0)" },
+      "expect": { "A1": 3, "A2": -3, "A3": 1, "A4": -1 }
+    },
+    {
+      "id": "round.binary-1-005",
+      "note": "1.005 is 1.00499999... as a double; Excel's ROUND still gives 1.01.",
+      "formulas": { "A1": "=ROUND(1.005,2)" },
+      "expect": { "A1": 1.01 }
+    },
+    {
+      "id": "round.binary-2-675",
+      "note": "2.675 is 2.67499999... as a double; Python gives 2.67, Excel is expected to give 2.68.",
+      "formulas": { "A1": "=ROUND(2.675,2)" },
+      "expect": { "A1": 2.68 }
+    },
+    {
+      "id": "round.binary-0-285",
+      "note": "0.285 is 0.28499999... as a double.",
+      "formulas": { "A1": "=ROUND(0.285,2)" },
+      "expect": { "A1": 0.29 }
+    },
+    {
+      "id": "round.negative-digits",
+      "note": "Negative digits round to tens, hundreds; 1250 to -2 digits is 1300.",
+      "formulas": { "A1": "=ROUND(1234.5678,-2)", "A2": "=ROUND(1250,-2)", "A3": "=ROUND(-1250,-2)", "A4": "=ROUND(5.5,-1)" },
+      "expect": { "A1": 1200, "A2": 1300, "A3": -1300, "A4": 10 }
+    },
+    {
+      "id": "round.huge-digits",
+      "note": "ROUND with 400 digits or -400 digits: no error, or #NUM!?",
+      "formulas": { "A1": "=ROUND(1/3,400)", "A2": "=ROUND(123,-400)" }
+    },
+    {
+      "id": "round.just-below-half",
+      "note": "0.49999999999999994 is the largest double below 0.5; ROUND to 0 digits.",
+      "formulas": { "A1": "=ROUND(0.49999999999999994,0)" }
+    },
+    {
+      "id": "round.roundup-rounddown-negative",
+      "note": "ROUNDUP and ROUNDDOWN go away from and toward zero, also for negatives.",
+      "formulas": { "A1": "=ROUNDUP(-2.1,0)", "A2": "=ROUNDDOWN(-2.9,0)", "A3": "=ROUNDUP(2.1,0)" },
+      "expect": { "A1": -3, "A2": -2, "A3": 3 }
+    },
+    {
+      "id": "round.roundup-binary-noise",
+      "note": "0.1*3 is 0.30000000000000004; ROUNDUP to 1 digit gives 0.4 in plain doubles but probably 0.3 in Excel.",
+      "formulas": { "A1": "=ROUNDUP(0.1*3,1)", "A2": "=ROUNDDOWN(0.7*3,1)" }
+    },
+    {
+      "id": "round.mround-basic",
+      "note": "MROUND to the nearest multiple.",
+      "formulas": { "A1": "=MROUND(10,3)", "A2": "=MROUND(11,3)" },
+      "expect": { "A1": 9, "A2": 12 }
+    },
+    {
+      "id": "round.mround-half",
+      "note": "MROUND halves go away from zero.",
+      "formulas": { "A1": "=MROUND(7.5,5)", "A2": "=MROUND(2.5,1)", "A3": "=MROUND(-2.5,-1)" },
+      "expect": { "A1": 10, "A2": 3, "A3": -3 }
+    },
+    {
+      "id": "round.mround-sign-mismatch",
+      "note": "MROUND with number and multiple of different signs is #NUM!.",
+      "formulas": { "A1": "=MROUND(-10,3)", "A2": "=MROUND(-10,-3)" },
+      "expect": { "A1": "#NUM!", "A2": -9 }
+    },
+    {
+      "id": "round.mround-binary",
+      "note": "MROUND with a decimal multiple meets binary noise: 6.05 to 0.1, 0.15 to 0.1, 1.3 to 0.2.",
+      "formulas": { "A1": "=MROUND(6.05,0.1)", "A2": "=MROUND(0.15,0.1)", "A3": "=MROUND(1.3,0.2)" }
+    },
+    {
+      "id": "round.mround-zero",
+      "note": "MROUND to a multiple of 0 is 0, not an error.",
+      "formulas": { "A1": "=MROUND(5,0)" },
+      "expect": { "A1": 0 }
+    },
+    {
+      "id": "round.ceiling-basic",
+      "note": "CEILING rounds away from zero when both signs match.",
+      "formulas": { "A1": "=CEILING(2.5,1)", "A2": "=CEILING(-2.5,-1)" },
+      "expect": { "A1": 3, "A2": -3 }
+    },
+    {
+      "id": "round.ceiling-mixed-sign",
+      "note": "CEILING(-2.5,1) is -2 (toward zero) since Excel 2010; CEILING(2.5,-1) is #NUM!.",
+      "formulas": { "A1": "=CEILING(-2.5,1)", "A2": "=CEILING(2.5,-1)" },
+      "expect": { "A1": -2, "A2": "#NUM!" }
+    },
+    {
+      "id": "round.ceiling-zero",
+      "note": "CEILING to 0 is 0; FLOOR to 0 is #DIV/0!. The two functions disagree.",
+      "formulas": { "A1": "=CEILING(5,0)", "A2": "=FLOOR(5,0)" },
+      "expect": { "A1": 0, "A2": "#DIV/0!" }
+    },
+    {
+      "id": "round.floor-basic",
+      "note": "FLOOR with negative numbers.",
+      "formulas": { "A1": "=FLOOR(2.5,1)", "A2": "=FLOOR(-2.5,1)", "A3": "=FLOOR(-2.5,-1)" },
+      "expect": { "A1": 2, "A2": -3, "A3": -2 }
+    },
+    {
+      "id": "round.floor-mixed-sign",
+      "note": "FLOOR of a positive number with a negative significance is #NUM!.",
+      "formulas": { "A1": "=FLOOR(2.5,-1)" },
+      "expect": { "A1": "#NUM!" }
+    },
+    {
+      "id": "round.ceiling-math",
+      "note": "CEILING.MATH ignores the sign of significance; mode 1 rounds negatives away from zero.",
+      "formulas": { "A1": "=CEILING.MATH(-2.5)", "A2": "=CEILING.MATH(-2.5,1,1)", "A3": "=CEILING.MATH(2.5,-1)" },
+      "expect": { "A1": -2, "A2": -3, "A3": 3 }
+    },
+    {
+      "id": "round.floor-math",
+      "note": "FLOOR.MATH mode 1 rounds negatives toward zero.",
+      "formulas": { "A1": "=FLOOR.MATH(-2.5)", "A2": "=FLOOR.MATH(-2.5,1,1)" },
+      "expect": { "A1": -3, "A2": -2 }
+    },
+    {
+      "id": "round.ceiling-precise-iso",
+      "note": "CEILING.PRECISE and ISO.CEILING always round up and ignore the sign of significance.",
+      "formulas": { "A1": "=CEILING.PRECISE(-4.5,2)", "A2": "=CEILING.PRECISE(4.5,-2)", "A3": "=ISO.CEILING(-4.5,2)" },
+      "expect": { "A1": -4, "A2": 6, "A3": -4 }
+    },
+    {
+      "id": "round.ceiling-floor-binary",
+      "note": "CEILING(0.3,0.1) may give 0.4 in plain doubles (0.3/0.1 is 2.9999999999999996).",
+      "formulas": { "A1": "=CEILING(0.3,0.1)", "A2": "=FLOOR(0.3,0.1)", "A3": "=CEILING(0.7,0.1)" }
+    },
+    {
+      "id": "round.even-odd",
+      "note": "EVEN and ODD round away from zero; ODD(0) is 1, EVEN(0) is 0.",
+      "formulas": { "A1": "=EVEN(-1.5)", "A2": "=ODD(2)", "A3": "=EVEN(0)", "A4": "=ODD(0)", "A5": "=ODD(-2)" },
+      "expect": { "A1": -2, "A2": 3, "A3": 0, "A4": 1, "A5": -3 }
+    },
+    {
+      "id": "round.int-vs-trunc",
+      "note": "INT rounds down (toward minus infinity); TRUNC cuts toward zero.",
+      "formulas": { "A1": "=INT(-2.5)", "A2": "=TRUNC(-2.5)", "A3": "=TRUNC(1234.567,-2)", "A4": "=TRUNC(1234.567,1)" },
+      "expect": { "A1": -3, "A2": -2, "A3": 1200, "A4": 1234.5 }
+    },
+    {
+      "id": "round.int-binary-noise",
+      "note": "4.35*100 is 434.99999999999994 in doubles; INT and TRUNC may give 434.",
+      "formulas": { "A1": "=INT(4.35*100)", "A2": "=TRUNC(4.35*100)", "A3": "=TRUNC(8.2*100)" }
+    },
+    {
+      "id": "round.fixed-text",
+      "note": "FIXED returns text and should round like ROUND.",
+      "formulas": { "A1": "=FIXED(1.005,2)", "A2": "=FIXED(-0.5,0)" }
+    },
+    {
+      "id": "round.text-function-half",
+      "note": "TEXT rounds halves for display.",
+      "formulas": { "A1": "=TEXT(0.5,\"0\")", "A2": "=TEXT(-0.5,\"0\")", "A3": "=TEXT(1.005,\"0.00\")", "A4": "=TEXT(2.675,\"0.00\")" }
+    },
+    {
+      "id": "round.big-half",
+      "note": "1E15+0.5 is exactly representable; ROUND to 0 digits.",
+      "formulas": { "A1": "=ROUND(1E+15+0.5,0)", "A2": "=ROUND(2^52+0.5,0)" }
+    },
+    {
+      "id": "round.near-zero-result",
+      "note": "ROUND of a near-zero difference to 15 digits; does it give exactly 0?",
+      "formulas": { "A1": "=ROUND(0.1+0.2-0.3,15)", "A2": "=ROUND(1*(0.5-0.4-0.1),16)" }
+    },
+    {
+      "id": "round.mround-large",
+      "note": "MROUND with a large number.",
+      "formulas": { "A1": "=MROUND(1E+15,7)", "A2": "=MROUND(123456789.5,1)" }
+    },
+    {
+      "id": "round.rounding-text-number",
+      "note": "ROUND accepts a number written as text.",
+      "formulas": { "A1": "=ROUND(\"2.5\",0)", "A2": "=ROUND(\"abc\",0)" },
+      "expect": { "A1": 3, "A2": "#VALUE!" }
+    }
+  ]
+}

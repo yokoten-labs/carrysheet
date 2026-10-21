@@ -1,0 +1,226 @@
+{
+  "schema": 1,
+  "title": "Date and time functions",
+  "formats": ["xlsx", "xls"],
+  "settings": { "date1904": false },
+  "cases": [
+    {
+      "id": "dt.date-month-overflow",
+      "note": "DATE rolls month 14 into the next year.",
+      "formulas": { "A1": "=TEXT(DATE(2024,14,1),\"yyyy-mm-dd\")" },
+      "expect": { "A1": "2025-02-01" }
+    },
+    {
+      "id": "dt.date-month-zero",
+      "note": "Month 0 means December of the year before.",
+      "formulas": { "A1": "=TEXT(DATE(2024,0,1),\"yyyy-mm-dd\")" },
+      "expect": { "A1": "2023-12-01" }
+    },
+    {
+      "id": "dt.date-month-negative",
+      "note": "Negative months count back from January.",
+      "formulas": { "A1": "=TEXT(DATE(2024,-1,15),\"yyyy-mm-dd\")" },
+      "expect": { "A1": "2023-11-15" }
+    },
+    {
+      "id": "dt.date-day-negative",
+      "note": "Day -1 is two days before the first of the month.",
+      "formulas": { "A1": "=TEXT(DATE(2024,1,-1),\"yyyy-mm-dd\")" },
+      "expect": { "A1": "2023-12-30" }
+    },
+    {
+      "id": "dt.date-fraction-args",
+      "note": "DATE truncates fractional year, month and day.",
+      "formulas": { "A1": "=DATE(2024.9,1.9,1.9)" },
+      "expect": { "A1": 45292 }
+    },
+    {
+      "id": "dt.edate-month-end",
+      "note": "EDATE clamps Jan 31 + 1 month to the last day of February (leap year).",
+      "formulas": { "A1": "=TEXT(EDATE(DATE(2024,1,31),1),\"yyyy-mm-dd\")" },
+      "expect": { "A1": "2024-02-29" }
+    },
+    {
+      "id": "dt.edate-negative",
+      "note": "EDATE backwards from Mar 31 also clamps.",
+      "formulas": { "A1": "=TEXT(EDATE(DATE(2024,3,31),-1),\"yyyy-mm-dd\")" },
+      "expect": { "A1": "2024-02-29" }
+    },
+    {
+      "id": "dt.eomonth-fraction",
+      "note": "EOMONTH truncates 1.9 months to 1.",
+      "formulas": { "A1": "=EOMONTH(DATE(2024,1,15),1.9)" },
+      "expect": { "A1": 45351 }
+    },
+    {
+      "id": "dt.datedif-md",
+      "note": "DATEDIF \"md\" is documented as unreliable; its result for Jan 31 to Mar 1 is a known oddity.",
+      "formulas": { "A1": "=DATEDIF(DATE(2024,1,31),DATE(2024,3,1),\"md\")" }
+    },
+    {
+      "id": "dt.datedif-ym-yd",
+      "note": "DATEDIF \"ym\" and \"yd\" around a leap day.",
+      "formulas": {
+        "A1": "=DATEDIF(DATE(2023,11,30),DATE(2024,2,29),\"ym\")",
+        "A2": "=DATEDIF(DATE(2023,3,1),DATE(2024,2,29),\"yd\")"
+      }
+    },
+    {
+      "id": "dt.datedif-reversed",
+      "note": "DATEDIF with the start after the end is #NUM!, not a negative number.",
+      "formulas": { "A1": "=DATEDIF(DATE(2024,2,1),DATE(2024,1,1),\"d\")" },
+      "expect": { "A1": "#NUM!" }
+    },
+    {
+      "id": "dt.yearfrac-bases",
+      "note": "YEARFRAC gives a different answer for each day-count basis 0-4.",
+      "formulas": {
+        "A1": "=YEARFRAC(DATE(2024,1,31),DATE(2024,3,1),0)",
+        "A2": "=YEARFRAC(DATE(2024,1,31),DATE(2024,3,1),1)",
+        "A3": "=YEARFRAC(DATE(2024,1,31),DATE(2024,3,1),2)",
+        "A4": "=YEARFRAC(DATE(2024,1,31),DATE(2024,3,1),3)",
+        "A5": "=YEARFRAC(DATE(2024,1,31),DATE(2024,3,1),4)"
+      }
+    },
+    {
+      "id": "dt.days360-methods",
+      "note": "DAYS360 US (NASD) and European methods treat month ends differently.",
+      "formulas": {
+        "A1": "=DAYS360(DATE(2024,1,31),DATE(2024,2,29))",
+        "A2": "=DAYS360(DATE(2024,1,31),DATE(2024,2,29),TRUE)",
+        "A3": "=DAYS360(DATE(2024,2,29),DATE(2024,3,31))"
+      }
+    },
+    {
+      "id": "dt.weekday-types",
+      "note": "WEEKDAY return types 1, 2, 3, 11 and 17 number the same Sunday differently.",
+      "formulas": {
+        "A1": "=WEEKDAY(DATE(2024,1,7),1)",
+        "A2": "=WEEKDAY(DATE(2024,1,7),2)",
+        "A3": "=WEEKDAY(DATE(2024,1,7),3)",
+        "A4": "=WEEKDAY(DATE(2024,1,7),11)",
+        "A5": "=WEEKDAY(DATE(2024,1,7),17)"
+      },
+      "expect": { "A1": 1, "A2": 7, "A3": 6, "A4": 7, "A5": 1 }
+    },
+    {
+      "id": "dt.weekday-bad-type",
+      "note": "Return type 4 does not exist.",
+      "formulas": { "A1": "=WEEKDAY(DATE(2024,1,7),4)" },
+      "expect": { "A1": "#NUM!" }
+    },
+    {
+      "id": "dt.weeknum-vs-iso",
+      "note": "2021-01-01 is week 1 by WEEKNUM but ISO week 53.",
+      "formulas": {
+        "A1": "=WEEKNUM(DATE(2021,1,1))",
+        "A2": "=ISOWEEKNUM(DATE(2021,1,1))",
+        "A3": "=WEEKNUM(DATE(2021,1,1),21)"
+      },
+      "expect": { "A1": 1, "A2": 53, "A3": 53 }
+    },
+    {
+      "id": "dt.time-wraps",
+      "note": "TIME(25,0,0) wraps to 1:00 (1/24), it does not return 1 day and 1 hour.",
+      "formulas": { "A1": "=TIME(25,0,0)" },
+      "expect": { "A1": 0.041666666666666664 }
+    },
+    {
+      "id": "dt.time-negative",
+      "note": "A negative total time is #NUM!.",
+      "formulas": { "A1": "=TIME(0,0,-1)" },
+      "expect": { "A1": "#NUM!" }
+    },
+    {
+      "id": "dt.time-minute-overflow",
+      "note": "90 minutes carries into the hour.",
+      "formulas": { "A1": "=TIME(0,90,0)" },
+      "expect": { "A1": 0.0625 }
+    },
+    {
+      "id": "dt.time-fractional-seconds",
+      "note": "TIME truncates fractional seconds.",
+      "formulas": { "A1": "=TEXT(TIME(0,0,59.9),\"hh:mm:ss\")" },
+      "expect": { "A1": "00:00:59" }
+    },
+    {
+      "id": "dt.hour-near-midnight",
+      "note": "HOUR of 0.99999999 (a fraction of a second before midnight): rounds to 0 or truncates to 23?",
+      "formulas": { "A1": "=HOUR(0.99999999)", "A2": "=SECOND(0.99999999)" }
+    },
+    {
+      "id": "dt.second-rounding",
+      "note": "SECOND of 59.5 seconds as a day fraction rounds; to 0 or 59 or 60?",
+      "formulas": { "A1": "=SECOND(59.5/86400)", "A2": "=SECOND(59.4/86400)" }
+    },
+    {
+      "id": "dt.text-rounds-to-next-day",
+      "note": "Formatting a time a moment before midnight with seconds rounds up into the next day.",
+      "formulas": { "A1": "=TEXT(45000.9999999,\"yyyy-mm-dd hh:mm:ss\")" }
+    },
+    {
+      "id": "dt.text-elapsed-hours",
+      "note": "[h] shows elapsed hours past 24.",
+      "formulas": { "A1": "=TEXT(1.5,\"[h]:mm\")" },
+      "expect": { "A1": "36:00" }
+    },
+    {
+      "id": "dt.timevalue-24",
+      "note": "TIMEVALUE of 24:00 and of 25:00.",
+      "formulas": { "A1": "=TIMEVALUE(\"24:00\")", "A2": "=TIMEVALUE(\"25:00\")" }
+    },
+    {
+      "id": "dt.datevalue-invalid-day",
+      "note": "February 30 is not a date; no rolling over.",
+      "formulas": { "A1": "=DATEVALUE(\"2024-02-30\")" },
+      "expect": { "A1": "#VALUE!" }
+    },
+    {
+      "id": "dt.datevalue-drops-time",
+      "note": "DATEVALUE ignores a time part.",
+      "formulas": { "A1": "=DATEVALUE(\"2024-01-02 18:00\")" },
+      "expect": { "A1": 45293 }
+    },
+    {
+      "id": "dt.datevalue-two-digit-year",
+      "note": "Two-digit years: 29 becomes 2029 and 30 becomes 1930 by default. The order of day and month follows the Windows locale.",
+      "formulas": { "A1": "=YEAR(DATEVALUE(\"1/1/29\"))", "A2": "=YEAR(DATEVALUE(\"1/1/30\"))" }
+    },
+    {
+      "id": "dt.networkdays",
+      "note": "January 2024 has 23 working days.",
+      "formulas": { "A1": "=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,31))" },
+      "expect": { "A1": 23 }
+    },
+    {
+      "id": "dt.networkdays-reversed",
+      "note": "Reversed dates give a negative count, not an error.",
+      "formulas": { "A1": "=NETWORKDAYS(DATE(2024,1,31),DATE(2024,1,1))" },
+      "expect": { "A1": -23 }
+    },
+    {
+      "id": "dt.workday-skips-weekend",
+      "note": "One working day after Friday 2024-01-05 is Monday the 8th.",
+      "formulas": { "A1": "=TEXT(WORKDAY(DATE(2024,1,5),1),\"yyyy-mm-dd\")" },
+      "expect": { "A1": "2024-01-08" }
+    },
+    {
+      "id": "dt.workday-intl-mask",
+      "note": "WORKDAY.INTL weekend mask 1111110 leaves only Sunday as a working day.",
+      "formulas": { "A1": "=TEXT(WORKDAY.INTL(DATE(2024,1,5),1,\"1111110\"),\"yyyy-mm-dd\")" },
+      "expect": { "A1": "2024-01-07" }
+    },
+    {
+      "id": "dt.date-plus-time",
+      "note": "Dates and times add as plain numbers.",
+      "formulas": { "A1": "=DATE(2024,1,1)+TIME(12,0,0)" },
+      "expect": { "A1": 45292.5 }
+    },
+    {
+      "id": "dt.date-concat",
+      "note": "Joining a date to text gives the serial, not the formatted date.",
+      "formulas": { "A1": "=DATE(2024,1,2)&\"\"" },
+      "expect": { "A1": "45293" }
+    }
+  ]
+}

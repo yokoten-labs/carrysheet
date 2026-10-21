@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "tools/*"]
-exclude = ["research/kernel-bench"]
+exclude = ["research/kernel-bench", "tools/excel-ground-truth"]
 
 [workspace.package]
 edition = "2024"
@@ -68,6 +68,12 @@ overflow-checks = false
 
 [profile.release.package.sha2]
 overflow-checks = false
+
+# SQLite (carrysheet-query) is C: unoptimized, LIKE on a large value is about
+# five times slower than in a release build, and the time-limit tests would
+# measure a speed nobody ships.
+[profile.dev.package.libsqlite3-sys]
+opt-level = 2
 
 # Fuzzing (tools/fuzzlite): release speed with integer overflow checks on,
 # so an overflow the reader would wrap silently becomes a panic finding.

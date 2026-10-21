@@ -424,8 +424,8 @@ function plan(step, opts, m, notes) {
   }
 }
 
-// Run a command; resolve to { code, signal, error, tail } with the last
-// output lines (bounded, scrubbed). `onLine` sees each kept line as it comes.
+// Run a command; resolve to { code, signal, error, tail, kept } with the last
+// output lines and the failed tests and panics (bounded, scrubbed). `onLine` sees each kept line as it comes.
 export function run([cmd, args], { cwd = root, env = process.env, onLine = null, ctx } = {}) {
   return new Promise((done) => {
     const tail = new LineTail({ onLine, ctx, drop: isFlockChatter });
@@ -435,7 +435,7 @@ export function run([cmd, args], { cwd = root, env = process.env, onLine = null,
       if (finished) return;
       finished = true;
       if (error) tail.add(`Could not start ${cmd}: ${error}`);
-      done({ code, signal: signal ?? null, error, tail: tail.lines });
+      done({ code, signal: signal ?? null, error, tail: tail.lines, kept: tail.kept });
     };
     let child;
     try {
@@ -459,9 +459,9 @@ export function run([cmd, args], { cwd = root, env = process.env, onLine = null,
 
 // A step's result from how its command ended.
 export function stepResult(name, ran, seconds, m = {}) {
-  const { code, signal, error, tail } = ran;
+  const { code, signal, error, tail, kept = [] } = ran;
   if (error) return { name, status: "failed", seconds, exitCode: null, note: `could not start the command (${error})`, tail };
-  if (signal) return { name, status: "failed", seconds, exitCode: null, signal, note: `killed by ${signal}`, tail };
+  if (signal) return { name, status: "failed", seconds, exitCode: null, signal, note: `killed by ${signal}`, tail, kept };
   if (code === 0) return { name, status: "ok", seconds };
   if (m.heavy && code === BUSY_EXIT && tail.some((l) => HEAVY_REFUSED.test(l))) {
     return { name, status: "busy", seconds, exitCode: code, note: "the machine was busy; the heavy-jobs wrapper ran nothing", fix: "retry later", tail };
@@ -469,7 +469,7 @@ export function stepResult(name, ran, seconds, m = {}) {
   if (lockTimedOut(code, tail)) {
     return { name, status: "busy", seconds, exitCode: code, note: "another build held the build lock until the wait ran out (CARRYSHEET_LOCK_WAIT)", fix: "retry later", tail };
   }
-  return { name, status: "failed", seconds, exitCode: code, tail };
+  return { name, status: "failed", seconds, exitCode: code, tail, kept };
 }
 
 export function formatTime(ms) {
@@ -508,6 +508,11 @@ export function summarize(results, opts, commit, tree, ms = 0) {
 
   const report = [];
   if (failed) {
+    // Failed tests and panics that scrolled out of the last lines.
+    const earlier = (failed.kept ?? []).filter((l) => !failed.tail?.includes(l));
+    if (earlier.length) {
+      report.push("", `Failed tests and panics in ${failed.name}, from before the last lines:`, ...earlier.map((l) => `  ${l}`));
+    }
     if (failed.tail?.length) {
       report.push("", `Last ${failed.tail.length} lines of ${failed.name}:`, ...failed.tail.map((l) => `  ${l}`));
     }

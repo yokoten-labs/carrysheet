@@ -13,6 +13,10 @@ const LINE_MAX = 500; // characters kept from one line
 const RAW_MAX = 4 * LINE_MAX; // characters held in memory for one line
 const LOCK_WAIT = 1800; // seconds to wait for the build lock
 const LINE_SLACK = 60; // a line up to LINE_MAX + LINE_SLACK passes whole
+const KEPT = 40; // failure lines kept even after they leave the tail
+const KEPT_AFTER = 3; // lines kept after a failure line, from the same stream
+// A failed test (libtest's or a harness = false test's) or a panic.
+const FAILURE_LINE = /^test .+ \.\.\. FAILED\b|\bpanicked at\b/;
 export const LOCK_TIMEOUT_EXIT = 73; // flock gave up waiting for the build lock
 
 // Running in CI (CI=1 or CI=true)? There cargo may use every core at normal
@@ -126,16 +130,24 @@ export function cleanLine(raw, cut = false, total = raw.length, ctx = scrubConte
 
 // The last lines of a command's output, bounded in lines, bytes and line
 // length. Reads raw chunks, so one huge line never sits in memory whole.
+// `kept` holds the first failed tests and panics with the few lines after
+// each, so they can be shown when they scrolled out of the tail.
 export class LineTail {
   // A line for which drop() is true is left out; onLine sees each other line as it comes.
   constructor({ lines = TAIL, bytes = TAIL_BYTES, onLine = null, drop = null, ctx = undefined } = {}) {
-    Object.assign(this, { max: lines, maxBytes: bytes, onLine, drop, ctx, lines: [], size: 0 });
+    Object.assign(this, { max: lines, maxBytes: bytes, onLine, drop, ctx, lines: [], size: 0, kept: [], after: 0 });
   }
 
-  add(line, cut = false, total = line.length) {
+  // `from` counts the lines still to keep after a failure line: one per stream.
+  add(line, cut = false, total = line.length, from = this) {
     const text = cleanLine(line, cut, total, this.ctx ?? scrubContext());
     if (this.drop?.(text)) return;
     this.onLine?.(text);
+    if (FAILURE_LINE.test(text)) from.after = KEPT_AFTER + 1;
+    if (from.after > 0) {
+      from.after -= 1;
+      if (this.kept.length < KEPT) this.kept.push(text);
+    }
     this.lines.push(text);
     this.size += Buffer.byteLength(text) + 1;
     while (this.lines.length > 1 && (this.lines.length > this.max || this.size > this.maxBytes)) {
@@ -146,6 +158,7 @@ export class LineTail {
   // A sink for one stream: write(chunk) and end().
   stream() {
     const decoder = new StringDecoder("utf8");
+    const from = { after: 0 };
     let held = "";
     let total = 0;
     let cut = false;
@@ -156,7 +169,7 @@ export class LineTail {
       if (room > 0) held += piece.slice(0, room);
     };
     const finish = () => {
-      this.add(held.endsWith("\r") ? held.slice(0, -1) : held, cut, total);
+      this.add(held.endsWith("\r") ? held.slice(0, -1) : held, cut, total, from);
       held = ""; total = 0; cut = false;
     };
     const feed = (text) => {

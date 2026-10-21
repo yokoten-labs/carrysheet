@@ -1,0 +1,226 @@
+{
+  "schema": 1,
+  "title": "Text, number and boolean coercion",
+  "formats": ["xlsx", "xls"],
+  "cases": [
+    {
+      "id": "coerce.text-plus-number",
+      "note": "Arithmetic turns the text \"1\" into the number 1.",
+      "formulas": { "A1": "=\"1\"+1" },
+      "expect": { "A1": 2 }
+    },
+    {
+      "id": "coerce.text-cell-plus-number",
+      "note": "A cell holding the text \"1\" is also converted by +.",
+      "inputs": { "A1": "1" },
+      "formulas": { "B1": "=A1+1" },
+      "expect": { "B1": 2 }
+    },
+    {
+      "id": "coerce.sum-skips-text-cell",
+      "note": "SUM ignores text in referenced cells, so a text \"1\" in A1 adds nothing.",
+      "inputs": { "A1": "1" },
+      "formulas": { "B1": "=SUM(A1,1)", "B2": "=SUM(A1:A1)" },
+      "expect": { "B1": 1, "B2": 0 }
+    },
+    {
+      "id": "coerce.sum-converts-text-argument",
+      "note": "But text typed directly as a SUM argument is converted.",
+      "formulas": { "A1": "=SUM(\"1\",1)", "A2": "=SUM(\"x\",1)" },
+      "expect": { "A1": 2, "A2": "#VALUE!" }
+    },
+    {
+      "id": "coerce.sum-boolean-argument",
+      "note": "TRUE typed as a SUM argument counts as 1.",
+      "formulas": { "A1": "=SUM(TRUE,1)" },
+      "expect": { "A1": 2 }
+    },
+    {
+      "id": "coerce.sum-boolean-cell",
+      "note": "TRUE in a referenced cell is ignored by SUM but used by +.",
+      "inputs": { "A1": true },
+      "formulas": { "B1": "=SUM(A1,1)", "B2": "=A1+1" },
+      "expect": { "B1": 1, "B2": 2 }
+    },
+    {
+      "id": "coerce.true-plus-one",
+      "note": "TRUE is 1 in arithmetic.",
+      "formulas": { "A1": "=TRUE+1", "A2": "=FALSE*5" },
+      "expect": { "A1": 2, "A2": 0 }
+    },
+    {
+      "id": "coerce.number-concat",
+      "note": "& turns numbers into text with up to 15 significant digits and no formatting.",
+      "inputs": { "A1": 1.5 },
+      "formulas": { "B1": "=A1&1" },
+      "expect": { "B1": "1.51" }
+    },
+    {
+      "id": "coerce.float-concat",
+      "note": "0.1+0.2 joins as \"0.3\" and 1/3 as fifteen 3s.",
+      "formulas": { "A1": "=0.1+0.2&\"\"", "A2": "=1/3&\"\"" },
+      "expect": { "A1": "0.3", "A2": "0.333333333333333" }
+    },
+    {
+      "id": "coerce.large-number-concat",
+      "note": "Large numbers join in scientific notation.",
+      "formulas": { "A1": "=1E+20&\"\"", "A2": "=123456789012345678&\"\"", "A3": "=1E-20&\"\"" }
+    },
+    {
+      "id": "coerce.boolean-concat",
+      "note": "TRUE joins as the text TRUE (in English Excel).",
+      "formulas": { "A1": "=TRUE&\"\"", "A2": "=CONCATENATE(TRUE,1)" }
+    },
+    {
+      "id": "coerce.text-true-is-not-true",
+      "note": "Comparison does not convert: \"TRUE\"=TRUE and \"1\"=1 are FALSE.",
+      "formulas": { "A1": "=\"TRUE\"=TRUE", "A2": "=\"1\"=1" },
+      "expect": { "A1": false, "A2": false }
+    },
+    {
+      "id": "coerce.text-compare-ignores-case",
+      "note": "Text comparison ignores case.",
+      "formulas": { "A1": "=\"a\"=\"A\"", "A2": "=\"a\"<\"B\"", "A3": "=EXACT(\"a\",\"A\")" },
+      "expect": { "A1": true, "A2": true, "A3": false }
+    },
+    {
+      "id": "coerce.type-ordering",
+      "note": "In comparisons every number is less than every text, and every text less than every logical.",
+      "formulas": { "A1": "=1<\"a\"", "A2": "=\"z\"<TRUE", "A3": "=99999<\"0\"", "A4": "=FALSE>100" },
+      "expect": { "A1": true, "A2": true, "A3": true, "A4": true }
+    },
+    {
+      "id": "coerce.blank-cell",
+      "note": "A blank cell is 0 for numbers, \"\" for text, and equal to both.",
+      "inputs": { "A1": null },
+      "formulas": { "B1": "=A1", "B2": "=A1=0", "B3": "=A1=\"\"", "B4": "=A1&\"\"", "B5": "=ISBLANK(A1)" },
+      "expect": { "B1": 0, "B2": true, "B3": true, "B4": "", "B5": true }
+    },
+    {
+      "id": "coerce.date-text",
+      "note": "Text that looks like a date converts to its serial in arithmetic.",
+      "formulas": { "A1": "=\"2024-01-02\"+0" },
+      "expect": { "A1": 45293 }
+    },
+    {
+      "id": "coerce.thousands-text",
+      "note": "\"1,000\"+0 is 1000 only where comma is the thousands separator.",
+      "formulas": { "A1": "=\"1,000\"+0" }
+    },
+    {
+      "id": "coerce.currency-text",
+      "note": "\"$5\"+0 depends on the currency symbol of the locale.",
+      "formulas": { "A1": "=\"$5\"+0" }
+    },
+    {
+      "id": "coerce.exponent-text",
+      "note": "Scientific notation in text converts.",
+      "formulas": { "A1": "=\"1e3\"+0" },
+      "expect": { "A1": 1000 }
+    },
+    {
+      "id": "coerce.spaces-text",
+      "note": "Leading and trailing spaces are allowed when converting.",
+      "formulas": { "A1": "=\" 1 \"+0" },
+      "expect": { "A1": 1 }
+    },
+    {
+      "id": "coerce.percent-text",
+      "note": "\"50%\" converts to 0.5.",
+      "formulas": { "A1": "=\"50%\"+0" },
+      "expect": { "A1": 0.5 }
+    },
+    {
+      "id": "coerce.parentheses-text",
+      "note": "Accounting-style \"(5)\" converts to -5.",
+      "formulas": { "A1": "=\"(5)\"+0" }
+    },
+    {
+      "id": "coerce.mixed-fraction-text",
+      "note": "\"1 1/2\" converts to 1.5 (a fraction, not a date).",
+      "formulas": { "A1": "=\"1 1/2\"+0" }
+    },
+    {
+      "id": "coerce.double-negation",
+      "note": "-- converts \"1\" and TRUE, but not the text \"TRUE\".",
+      "formulas": { "A1": "=--\"TRUE\"", "A2": "=--TRUE", "A3": "=--\"1\"" },
+      "expect": { "A1": "#VALUE!", "A2": 1, "A3": 1 }
+    },
+    {
+      "id": "coerce.n-function",
+      "note": "N turns text into 0 and TRUE into 1.",
+      "formulas": { "A1": "=N(\"5\")", "A2": "=N(TRUE)" },
+      "expect": { "A1": 0, "A2": 1 }
+    },
+    {
+      "id": "coerce.value-function",
+      "note": "VALUE converts numeric text but not \"TRUE\"; what does VALUE(\"\") give?",
+      "formulas": { "A1": "=VALUE(\"1.5\")", "A2": "=VALUE(\"TRUE\")", "A3": "=VALUE(\"\")" },
+      "expect": { "A1": 1.5, "A2": "#VALUE!" }
+    },
+    {
+      "id": "coerce.isnumber-text",
+      "note": "ISNUMBER does not convert: text \"1\" is not a number.",
+      "inputs": { "A1": "1" },
+      "formulas": { "B1": "=ISNUMBER(\"1\")", "B2": "=ISNUMBER(A1)", "B3": "=ISTEXT(A1)" },
+      "expect": { "B1": false, "B2": false, "B3": true }
+    },
+    {
+      "id": "coerce.if-text-condition",
+      "note": "IF with text \"TRUE\" as the condition, and with other text.",
+      "formulas": { "A1": "=IF(\"TRUE\",1,2)", "A2": "=IF(\"x\",1,2)" },
+      "expect": { "A2": "#VALUE!" }
+    },
+    {
+      "id": "coerce.count-text-arguments",
+      "note": "COUNT counts numeric text typed as an argument, but not other text.",
+      "formulas": { "A1": "=COUNT(\"1\",1)", "A2": "=COUNT(\"x\",1)" },
+      "expect": { "A1": 2, "A2": 1 }
+    },
+    {
+      "id": "coerce.average-text-cell",
+      "note": "AVERAGE skips a text cell; AVERAGEA counts it as 0.",
+      "inputs": { "A1": 1, "A2": "2", "A3": 3 },
+      "formulas": { "B1": "=AVERAGE(A1:A3)", "B2": "=AVERAGEA(A1:A3)" },
+      "expect": { "B1": 2, "B2": 1.3333333333333333 }
+    },
+    {
+      "id": "coerce.max-text",
+      "note": "MAX converts numeric text arguments but skips text cells.",
+      "inputs": { "A1": "5" },
+      "formulas": { "B1": "=MAX(\"5\",1)", "B2": "=MAX(A1,1)" },
+      "expect": { "B1": 5, "B2": 1 }
+    },
+    {
+      "id": "coerce.empty-string-formula",
+      "note": "A formula returning \"\" is not blank: +0 fails and ISBLANK is FALSE.",
+      "formulas": { "B1": "=\"\"", "C1": "=B1+0", "C2": "=ISBLANK(B1)", "C3": "=B1=0", "C4": "=COUNTA(B1)", "C5": "=B1=\"\"" },
+      "expect": { "B1": "", "C1": "#VALUE!", "C2": false, "C3": false, "C4": 1, "C5": true }
+    },
+    {
+      "id": "coerce.whitespace-text",
+      "note": "Text with only spaces does not convert to 0.",
+      "inputs": { "A1": "  " },
+      "formulas": { "B1": "=A1*1" },
+      "expect": { "B1": "#VALUE!" }
+    },
+    {
+      "id": "coerce.percent-operator",
+      "note": "% is a postfix operator: 50% is 0.5 and 50%% is 0.005.",
+      "formulas": { "A1": "=50%", "A2": "=50%%" },
+      "expect": { "A1": 0.5, "A2": 0.005 }
+    },
+    {
+      "id": "coerce.and-text-argument",
+      "note": "AND with the text \"TRUE\" as a direct argument.",
+      "formulas": { "A1": "=AND(\"TRUE\",TRUE)", "A2": "=AND(\"x\",TRUE)" }
+    },
+    {
+      "id": "coerce.number-as-text-in-comparison",
+      "note": "A number stored as text compares as text: \"10\" is less than \"9\".",
+      "inputs": { "A1": "10", "A2": "9" },
+      "formulas": { "B1": "=A1<A2", "B2": "=A1+0<A2+0" },
+      "expect": { "B1": true, "B2": false }
+    }
+  ]
+}

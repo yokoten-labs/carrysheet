@@ -1,0 +1,160 @@
+{
+  "schema": 1,
+  "title": "Dynamic array spills",
+  "formats": ["xlsx"],
+  "requires": ["dynamic-arrays"],
+  "cases": [
+    {
+      "id": "da.sequence-column",
+      "note": "SEQUENCE(3) spills into A1:A3; only A1 holds the formula.",
+      "formulas": { "A1": "=SEQUENCE(3)" }
+    },
+    {
+      "id": "da.sequence-grid",
+      "note": "SEQUENCE(2,3,10,5) fills row by row: 10,15,20 / 25,30,35.",
+      "formulas": { "A1": "=SEQUENCE(2,3,10,5)" }
+    },
+    {
+      "id": "da.range-arithmetic",
+      "note": "A range times a number spills instead of using implicit intersection.",
+      "inputs": { "A1": 1, "A2": 2, "A3": 3 },
+      "formulas": { "B1": "=A1:A3*2" }
+    },
+    {
+      "id": "da.spill-blocked",
+      "note": "A value in the spill area blocks the spill: the anchor shows #SPILL! and nothing spills.",
+      "inputs": { "A2": "x" },
+      "formulas": { "A1": "=SEQUENCE(3)" },
+      "expect": { "A1": "#SPILL!" }
+    },
+    {
+      "id": "da.spill-reference",
+      "note": "B1# refers to the whole spilled range and follows its size.",
+      "formulas": { "B1": "=SEQUENCE(4)", "C1": "=SUM(B1#)", "C2": "=ROWS(B1#)" },
+      "expect": { "C1": 10, "C2": 4 }
+    },
+    {
+      "id": "da.spill-reference-to-blocked",
+      "note": "A spill reference to a blocked anchor: which error comes through?",
+      "inputs": { "B2": "x" },
+      "formulas": { "B1": "=SEQUENCE(3)", "C1": "=SUM(B1#)" }
+    },
+    {
+      "id": "da.filter-no-match",
+      "note": "FILTER with no matching rows and no if_empty argument is #CALC!.",
+      "inputs": { "A1": 1, "A2": 2, "A3": 3 },
+      "formulas": { "B1": "=FILTER(A1:A3,A1:A3>5)" },
+      "expect": { "B1": "#CALC!" }
+    },
+    {
+      "id": "da.filter-if-empty",
+      "note": "FILTER with an if_empty value returns it as a single cell.",
+      "inputs": { "A1": 1, "A2": 2, "A3": 3 },
+      "formulas": { "B1": "=FILTER(A1:A3,A1:A3>5,\"none\")" },
+      "expect": { "B1": "none" }
+    },
+    {
+      "id": "da.unique-case",
+      "note": "UNIQUE ignores case, so b and B are one value; which spelling is kept?",
+      "inputs": { "A1": "b", "A2": "a", "A3": "B", "A4": "a", "A5": 1 },
+      "formulas": { "B1": "=UNIQUE(A1:A5)" }
+    },
+    {
+      "id": "da.sort-mixed-types",
+      "note": "SORT puts numbers before text before logical values; text sorts without case.",
+      "inputs": { "A1": 3, "A2": "a", "A3": true, "A4": 1, "A5": "B" },
+      "formulas": { "B1": "=SORT(A1:A5)" }
+    },
+    {
+      "id": "da.sequence-zero",
+      "note": "An empty array cannot exist in a cell: SEQUENCE(0) is an error.",
+      "formulas": { "A1": "=SEQUENCE(0)" }
+    },
+    {
+      "id": "da.array-constant",
+      "note": "An array constant spills: commas are columns and semicolons are rows.",
+      "formulas": { "A1": "={1,2;3,4}" }
+    },
+    {
+      "id": "da.sum-of-product",
+      "note": "SUM(A*B) over ranges works without Ctrl+Shift+Enter in dynamic-array Excel.",
+      "inputs": { "A1": 1, "A2": 2, "A3": 3, "B1": 4, "B2": 5, "B3": 6 },
+      "formulas": { "C1": "=SUM(A1:A3*B1:B3)" },
+      "expect": { "C1": 32 }
+    },
+    {
+      "id": "da.transpose",
+      "note": "TRANSPOSE spills a column into a row.",
+      "inputs": { "A1": 1, "A2": 2, "A3": 3 },
+      "formulas": { "B1": "=TRANSPOSE(A1:A3)" }
+    },
+    {
+      "id": "da.let",
+      "note": "LET names intermediate values.",
+      "formulas": { "A1": "=LET(x,2,y,x*3,x+y)" },
+      "expect": { "A1": 8 }
+    },
+    {
+      "id": "da.xlookup-returns-row",
+      "note": "XLOOKUP with a two-column return range spills two cells.",
+      "inputs": { "A1": 1, "A2": 2, "B1": "a", "B2": "b", "C1": "x", "C2": "y" },
+      "formulas": { "E1": "=XLOOKUP(2,A1:A2,B1:C2)" }
+    },
+    {
+      "id": "da.index-with-array",
+      "note": "INDEX with an array of row numbers returns several values.",
+      "formulas": { "A1": "=INDEX(SEQUENCE(5)*10,{1;3})" }
+    },
+    {
+      "id": "da.if-over-range",
+      "note": "IF over a range returns one result per row.",
+      "inputs": { "A1": 1, "A2": -2, "A3": 3 },
+      "formulas": { "B1": "=IF(A1:A3>0,A1:A3,0)" }
+    },
+    {
+      "id": "da.textjoin-array",
+      "note": "TEXTJOIN accepts an array and returns one cell.",
+      "formulas": { "A1": "=TEXTJOIN(\",\",TRUE,SEQUENCE(3))" },
+      "expect": { "A1": "1,2,3" }
+    },
+    {
+      "id": "da.vstack",
+      "note": "VSTACK (2022) stacks arrays; on older 365 builds this is #NAME?.",
+      "formulas": { "A1": "=VSTACK({1,2},{3,4})" }
+    },
+    {
+      "id": "da.textsplit-empty-parts",
+      "note": "TEXTSPLIT (2022) keeps empty parts by default: a,b,,c gives four cells, one empty text.",
+      "formulas": { "A1": "=TEXTSPLIT(\"a,b,,c\",\",\")" }
+    },
+    {
+      "id": "da.sequence-too-tall",
+      "note": "A spill taller than the sheet (1048577 rows).",
+      "formulas": { "A1": "=SEQUENCE(1048577)" }
+    },
+    {
+      "id": "da.spill-off-sheet",
+      "note": "A spill that would run past the last row is #SPILL!.",
+      "formulas": { "A1048575": "=SEQUENCE(3)" },
+      "expect": { "A1048575": "#SPILL!" }
+    },
+    {
+      "id": "da.byrow-lambda",
+      "note": "BYROW with LAMBDA sums each row.",
+      "formulas": { "A1": "=BYROW({1,2;3,4},LAMBDA(r,SUM(r)))" }
+    },
+    {
+      "id": "da.counta-of-array",
+      "note": "COUNTA of an array result counts its cells.",
+      "formulas": { "A1": "=COUNTA(SEQUENCE(2,2))" },
+      "expect": { "A1": 4 }
+    },
+    {
+      "id": "da.boolean-to-number",
+      "note": "Multiplying a boolean array by 1 turns TRUE/FALSE into 1/0.",
+      "inputs": { "A1": 1, "A2": 2, "A3": 3 },
+      "formulas": { "B1": "=SUMPRODUCT((A1:A3>1)*1)", "B2": "=SUM(--(A1:A3>1))" },
+      "expect": { "B1": 2, "B2": 2 }
+    }
+  ]
+}

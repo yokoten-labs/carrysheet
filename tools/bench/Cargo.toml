@@ -1,0 +1,28 @@
+[package]
+name = "carrysheet-bench"
+version = "0.1.0"
+description = "Times Carrysheet's readers and writers on fixed files and catches slowdowns and memory growth against a committed baseline."
+license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[[bin]]
+name = "bench"
+path = "src/main.rs"
+
+# Only std and our own crates: the bench must not pull anything new into the
+# workspace. The compound-file writer comes through carrysheet-vba's `cfb`
+# re-export, and the legacy encoder through carrysheet-csv's `encoding_rs`
+# re-export.
+[dependencies]
+carrysheet-biff = { path = "../../crates/carrysheet-biff", version = "0.1.0" }
+carrysheet-crypto = { path = "../../crates/carrysheet-crypto", version = "0.1.0" }
+carrysheet-csv = { path = "../../crates/carrysheet-csv", version = "0.1.0" }
+carrysheet-numbers = { path = "../../crates/carrysheet-numbers", version = "0.1.0" }
+carrysheet-vba = { path = "../../crates/carrysheet-vba", version = "0.1.0" }
+
+[lints]
+workspace = true

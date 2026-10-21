@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "note": "Written by `bench update`. Explain every change to this file in the commit message.",
+  "machine": "linux-x86_64, 8 CPUs, 13th Gen Intel(R) Core(TM) i9-13900HX, 4 GiB RAM",
+  "runs": 5,
+  "cases": [
+    {"name": "csv-samples/open", "file": "csv-samples", "operation": "open", "median_ns": 47292, "min_ns": 46966, "max_ns": 50387, "peak_kib": 3172, "check": 180, "input_bytes": 752, "input_hash": "9a5169a2e8084cf6"},
+    {"name": "csv-samples/save", "file": "csv-samples", "operation": "save", "median_ns": 10612, "min_ns": 9802, "max_ns": 11699, "peak_kib": 3164, "check": 1371, "input_bytes": 752, "input_hash": "9a5169a2e8084cf6"},
+    {"name": "csv-100mb/open", "file": "csv-100mb", "operation": "open", "median_ns": 424984317, "min_ns": 383484617, "max_ns": 623138859, "peak_kib": 654728, "check": 13670336, "input_bytes": 99999935, "input_hash": "4e190630faf686cb"},
+    {"name": "csv-100mb/save", "file": "csv-100mb", "operation": "save", "median_ns": 175552980, "min_ns": 169592354, "max_ns": 191207714, "peak_kib": 660540, "check": 199259010, "input_bytes": 99999935, "input_hash": "4e190630faf686cb"},
+    {"name": "csv-wide/open", "file": "csv-wide", "operation": "open", "median_ns": 272030842, "min_ns": 257707552, "max_ns": 294675945, "peak_kib": 280436, "check": 8388608, "input_bytes": 24700288, "input_hash": "767ff28a73d45c2f"},
+    {"name": "csv-wide/save", "file": "csv-wide", "operation": "save", "median_ns": 37975931, "min_ns": 37317067, "max_ns": 38917659, "peak_kib": 280500, "check": 49400576, "input_bytes": 24700288, "input_hash": "767ff28a73d45c2f"},
+    {"name": "csv-gbk-20mb/open", "file": "csv-gbk-20mb", "operation": "open", "median_ns": 333347921, "min_ns": 291109667, "max_ns": 349246258, "peak_kib": 212852, "check": 3816396, "input_bytes": 20000057, "input_hash": "38302cefd4476881"},
+    {"name": "csv-gbk-20mb/save", "file": "csv-gbk-20mb", "operation": "save", "median_ns": 792749614, "min_ns": 718849501, "max_ns": 822018248, "peak_kib": 212732, "check": 40000114, "input_bytes": 20000057, "input_hash": "38302cefd4476881"},
+    {"name": "csv-hostile-quotes/open", "file": "csv-hostile-quotes", "operation": "open", "median_ns": 138253773, "min_ns": 130993545, "max_ns": 178503441, "peak_kib": 115180, "check": 1600000, "input_bytes": 24599892, "input_hash": "49c37b879771a113"},
+    {"name": "csv-hostile-empty-cells/open", "file": "csv-hostile-empty-cells", "operation": "open", "median_ns": 228129971, "min_ns": 215001231, "max_ns": 239260734, "peak_kib": 436368, "check": 18000000, "input_bytes": 10000000, "input_hash": "f9042163b29ad3bb"},
+    {"name": "xls-samples/open", "file": "xls-samples", "operation": "open", "median_ns": 4124557, "min_ns": 3449787, "max_ns": 4235348, "peak_kib": 7412, "check": 47267, "input_bytes": 1665765, "input_hash": "5375163b40d47fbb"},
+    {"name": "xls-1m-cells/open", "file": "xls-1m-cells", "operation": "open", "median_ns": 171074199, "min_ns": 166671557, "max_ns": 203881711, "peak_kib": 226368, "check": 2097152, "input_bytes": 21843968, "input_hash": "c330eb0d1fb744c7"},
+    {"name": "xls-1m-cells/read-range", "file": "xls-1m-cells", "operation": "read-range", "median_ns": 1275716, "min_ns": 1219521, "max_ns": 1309811, "peak_kib": 226020, "check": 16934273331226396664, "input_bytes": 21843968, "input_hash": "c330eb0d1fb744c7"},
+    {"name": "xls-hostile-many-records/open", "file": "xls-hostile-many-records", "operation": "open", "median_ns": 107831642, "min_ns": 103968708, "max_ns": 109403831, "peak_kib": 153940, "check": 0, "input_bytes": 12021760, "input_hash": "671d98b192e23afe"},
+    {"name": "numbers-samples/open", "file": "numbers-samples", "operation": "open", "median_ns": 4570494, "min_ns": 4040974, "max_ns": 4777439, "peak_kib": 4504, "check": 36, "input_bytes": 274057, "input_hash": "44411177d6ae7370"},
+    {"name": "vba-samples/open", "file": "vba-samples", "operation": "open", "median_ns": 2594565, "min_ns": 2567168, "max_ns": 3061612, "peak_kib": 3616, "check": 98, "input_bytes": 273408, "input_hash": "482d112953fec586"},
+    {"name": "vba-bomb-16mib/decompress", "file": "vba-bomb-16mib", "operation": "decompress", "median_ns": 473400, "min_ns": 376916, "max_ns": 507797, "peak_kib": 19088, "check": 16773120, "input_bytes": 0, "input_hash": "cbf29ce484222325"},
+    {"name": "vba-hostile-bomb-module/open", "file": "vba-hostile-bomb-module", "operation": "open", "median_ns": 18769581, "min_ns": 18174965, "max_ns": 21127581, "peak_kib": 35948, "check": 2, "input_bytes": 49152, "input_hash": "1c8b2563e40a7815"},
+    {"name": "crypto-samples/detect", "file": "crypto-samples", "operation": "detect", "median_ns": 68032, "min_ns": 67353, "max_ns": 68520, "peak_kib": 3380, "check": 14, "input_bytes": 100008, "input_hash": "943a20afe37f29f8"},
+    {"name": "xlsx-agile/decrypt", "file": "xlsx-agile", "operation": "decrypt", "median_ns": 19276948, "min_ns": 17275636, "max_ns": 19986730, "peak_kib": 3268, "check": 9394, "input_bytes": 53416, "input_hash": "d8c302ce595bae48"},
+    {"name": "xls-1m-cells-rc4/decrypt", "file": "xls-1m-cells-rc4", "operation": "decrypt", "median_ns": 59148128, "min_ns": 56643937, "max_ns": 63429691, "peak_kib": 45436, "check": 21808102, "input_bytes": 21808306, "input_hash": null}
+  ]
+}
