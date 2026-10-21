@@ -23,6 +23,13 @@ fn damaged<T: std::fmt::Debug>(r: Result<T, Error>, says: &str) {
     }
 }
 
+fn slow<T: std::fmt::Debug>(r: Result<T, Error>, says: &str) {
+    match r {
+        Err(Error::Slow(what)) => assert!(what.contains(says), "{what}"),
+        other => panic!("expected slow ({says}), got {other:?}"),
+    }
+}
+
 fn over_limit<T: std::fmt::Debug>(r: Result<T, Error>, says: &str) {
     match r {
         Err(Error::LimitExceeded { what, .. }) => assert!(what.contains(says), "{what}"),
@@ -125,12 +132,12 @@ fn empty_deflate_blocks_cost_their_input_and_no_more() {
     let mut a = open(b.finish()).unwrap();
     // Refused for its shape before a byte is inflated.
     let r = timed("whole read of 4 MB of empty blocks", || a.read(0, 1 << 20));
-    damaged(r, "far larger than its output");
+    slow(r, "far larger than its output");
     assert_eq!(a.bytes_read(), 0);
     // The first bytes: input is charged, and the stream stops once its
     // input runs ahead of its output.
     let r = timed("prefix of 4 MB of empty blocks", || a.read_prefix(0, 8));
-    damaged(r, "without producing output");
+    slow(r, "without producing output");
     assert!(a.bytes_read() <= 4 << 10, "{}", a.bytes_read());
 
     // Claiming 4 MB of output makes the shape plausible; inflating then
@@ -147,7 +154,7 @@ fn empty_deflate_blocks_cost_their_input_and_no_more() {
     b.raw(raw);
     let mut a = open(b.finish()).unwrap();
     let r = timed("whole read claiming 4 MB", || a.read(0, 8 << 20));
-    damaged(r, "without producing output");
+    slow(r, "without producing output");
     assert_eq!(a.bytes_read(), stream.len() as u64);
 }
 
@@ -416,12 +423,12 @@ fn empty_fixed_blocks_are_stopped_while_inflating() {
     let r = timed("whole read: 4 MiB of empty fixed blocks first", || {
         a.read(0, 64 << 20)
     });
-    damaged(r, "without producing output");
+    slow(r, "without producing output");
     // The first bytes: refused after about 1 KiB of input.
     let r = timed("prefix: 4 MiB of empty fixed blocks first", || {
         a.read_prefix(0, 8)
     });
-    damaged(r, "without producing output");
+    slow(r, "without producing output");
 
     // Entries of 63 KiB filler each (the reviewer's prefix probe): each
     // is refused after about 1 KiB of input, not 63 KiB.
@@ -487,7 +494,7 @@ fn a_long_run_without_output_between_outputs_is_refused() {
     let r = timed("256 KiB run of empty blocks after output", || {
         a.read(0, 64 << 20)
     });
-    damaged(r, "long run of input without output");
+    slow(r, "long run of input without output");
     let e = open(entry(256 << 10))
         .unwrap()
         .read(0, 64 << 20)

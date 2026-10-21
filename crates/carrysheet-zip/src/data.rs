@@ -67,7 +67,7 @@ pub(crate) fn read<R: Read + Seek>(
         Method::Deflated
             if entry.compressed_size > entry.size.saturating_add(entry.size / 4 + 1024) =>
         {
-            return Err(damaged(format!(
+            return Err(Error::Slow(format!(
                 "entry {index}'s {SLOW_SHAPE}, which is how padding made to waste time looks; a valid but unusual writer (such as one that flushes after every few bytes) can also cause it"
             )));
         }
@@ -405,11 +405,11 @@ fn inflate<R: Read>(
         pos += used;
         let (total_in, total_out) = (dec.total_in(), dec.total_out());
         if total_in > total_out + total_out / PROGRESS_SHARE + PROGRESS_SLACK {
-            return Err(damaged(SLOW_NO_OUTPUT));
+            return Err(Error::Slow(SLOW_NO_OUTPUT.into()));
         }
         idle = if made > 0 { 0 } else { idle + used as u64 };
         if idle > idle_max {
-            return Err(damaged(SLOW_IDLE_RUN));
+            return Err(Error::Slow(SLOW_IDLE_RUN.into()));
         }
         if let Some(stop) = interrupt.as_mut()
             && stop()

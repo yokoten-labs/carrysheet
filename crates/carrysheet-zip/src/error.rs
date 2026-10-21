@@ -11,6 +11,10 @@ pub enum Error {
     /// The archive breaks the format, or was built to mislead: what is
     /// wrong, without any text from the file.
     Damaged(String),
+    /// An entry's deflate data is shaped to cost time rather than to hold
+    /// data, such as runs of empty blocks: what was seen, without any text
+    /// from the file. A valid but unusual writer can cause some of these.
+    Slow(String),
     /// A [`Limits`](crate::Limits) value would be passed.
     LimitExceeded {
         /// What was counted, such as "zip entries".
@@ -28,24 +32,17 @@ pub enum Error {
     Interrupted,
 }
 
-/// Texts of the [`Error::Damaged`] refusals for deflate data shaped to
-/// cost time (see [`Error::is_slow_to_unpack`]).
+/// Texts of the [`Error::Slow`] refusals.
 pub(crate) const SLOW_SHAPE: &str = "compressed data is far larger than its output";
 pub(crate) const SLOW_NO_OUTPUT: &str = "an entry's deflate data consumes input without producing output (such as runs of empty blocks)";
 pub(crate) const SLOW_IDLE_RUN: &str = "an entry's deflate data has a long run of input without output between pieces of output (such as empty blocks)";
 
 impl Error {
     /// True when an entry was refused because its deflate data is shaped
-    /// to cost time rather than to hold data (such as runs of empty
-    /// blocks): the file unpacks far more slowly than real files do.
-    /// Callers can say so instead of calling the file damaged.
+    /// to cost time rather than to hold data ([`Error::Slow`]). Callers
+    /// can say so instead of calling the file damaged.
     pub fn is_slow_to_unpack(&self) -> bool {
-        match self {
-            Error::Damaged(what) => {
-                what.contains(SLOW_SHAPE) || what == SLOW_NO_OUTPUT || what == SLOW_IDLE_RUN
-            }
-            _ => false,
-        }
+        matches!(self, Error::Slow(_))
     }
 }
 
@@ -54,6 +51,7 @@ impl fmt::Display for Error {
         match self {
             Error::Io(e) => write!(f, "reading the zip failed: {e}"),
             Error::Damaged(what) => write!(f, "the zip is damaged: {what}"),
+            Error::Slow(what) => write!(f, "the zip unpacks too slowly: {what}"),
             Error::LimitExceeded { what, max } => {
                 write!(f, "the zip goes over a limit: {what} (at most {max})")
             }
