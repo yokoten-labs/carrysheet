@@ -1,0 +1,296 @@
+# Release carrysheet-cli from a tag (issues 94, 95 and 97).
+#
+# Pushing tag vX.Y.Z (the workspace version in Cargo.toml) builds an archive
+# for each target below, checks each binary with scripts/release-check.mjs,
+# puts the license files and THIRD-PARTY-NOTICES.txt in every archive, writes
+# SHA256SUMS, attests where each file was built (GitHub artifact attestation)
+# and creates a DRAFT GitHub release with the notes from CHANGELOG.md. The
+# owner reads the draft and publishes it by hand. v0.1.0 ships unsigned;
+# signing comes in v0.2.0 (issues 11 and 104).
+#
+# Dry run: the same builds, archives and checksums, but no attestation and no
+# release; the archives stay as workflow artifacts for a few days. It runs
+#   - by hand: gh workflow run release.yml --ref <branch> (or "Run workflow"
+#     in the Actions tab; GitHub lists the workflow once it is on main);
+#   - on a pull request that changes the release machinery (paths below), so
+#     a change to it is tested before it merges. Other pull requests never
+#     run this workflow; ci.yml runs the release scripts' self-tests.
+#
+# Windows x86 (i686) is left out until issue 2 decides it.
+#
+# Every action is pinned to a full commit SHA; the comment says which tag
+# (see ci.yml for how to update one). No build cache: a release builds from
+# scratch, so nothing a pull request put in the cache can reach it.
+
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - about.toml
+      - scripts/notices.mjs
+      - scripts/release-check.mjs
+      - scripts/release-meta.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Same Rust as ci.yml; update both together.
+  RUST_TOOLCHAIN: "1.99.1"
+  CARGO_TERM_COLOR: always
+  # Only a pushed tag publishes; anything else is a dry run.
+  DRY_RUN: ${{ github.event_name != 'push' }}
+
+jobs:
+  prepare:
+    name: version, notes and third-party notices
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      # One version everywhere, CHANGELOG has Unreleased, license files in
+      # every publishable crate; on a tag, the tag names that version.
+      - name: Check the version
+        id: version
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          node scripts/release-meta.mjs check
+          if [ "$DRY_RUN" = false ]; then node scripts/release-meta.mjs tag "$REF"; fi
+          echo "version=$(node scripts/release-meta.mjs version)" >> "$GITHUB_OUTPUT"
+
+      # The release notes: the CHANGELOG section of this version. A dry run
+      # falls back to the Unreleased section.
+      - name: Release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          if ! node scripts/release-meta.mjs notes "$VERSION" > dist/notes.md; then
+            if [ "$DRY_RUN" = false ]; then exit 1; fi
+            echo "Dry run: no section for $VERSION yet; using Unreleased."
+            node scripts/release-meta.mjs notes Unreleased > dist/notes.md
+          fi
+
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+
+      # A prebuilt cargo-about, checksum-verified by the action.
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-about@0.9.2
+
+      # Fails when a shipped crate's license can't be read or isn't accepted
+      # (about.toml); notices.mjs fails when one has no license text.
+      - name: THIRD-PARTY-NOTICES.txt
+        run: |
+          cargo about generate --format json --locked --fail \
+            -m apps/carrysheet-cli/Cargo.toml -o target/about.json
+          node scripts/notices.mjs target/about.json dist/THIRD-PARTY-NOTICES.txt
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-docs
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          # The oldest supported Ubuntu, so the binary needs only an older
+          # glibc (2.35). Move up when GitHub retires the image.
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          # Built on Apple silicon for Intel; Xcode links both.
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            cross: true
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target "$TARGET"
+          rustup default "$RUST_TOOLCHAIN"
+          rustc --version
+
+      # Builds with build-machine paths remapped and fails if the binary
+      # holds a home folder, user name or email address.
+      - name: node scripts/release-check.mjs
+        env:
+          CI: "1"
+        run: node scripts/release-check.mjs "$TARGET"
+
+      - name: Smoke test
+        if: ${{ !matrix.cross }}
+        run: |
+          exe="target/$TARGET/release/carrysheet-cli"
+          [ -f "$exe.exe" ] && exe="$exe.exe"
+          out=$("$exe" --version)
+          echo "$out"
+          case "$out" in *"$VERSION"*) ;; *) echo "--version does not say $VERSION"; exit 1 ;; esac
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-docs
+          path: docs-dist
+
+      # carrysheet-cli-<version>-<target>/ with the program, its license
+      # (GPL), the libraries' licenses, LICENSING.md, the third-party notices,
+      # README and CHANGELOG; .zip for Windows, .tar.gz elsewhere.
+      - name: Archive
+        run: |
+          name="carrysheet-cli-$VERSION-$TARGET"
+          mkdir -p "stage/$name" out
+          exe=carrysheet-cli
+          case "$TARGET" in *windows*) exe=carrysheet-cli.exe ;; esac
+          cp "target/$TARGET/release/$exe" "stage/$name/"
+          cp README.md CHANGELOG.md LICENSING.md LICENSE-GPL LICENSE-MIT LICENSE-APACHE \
+            docs-dist/THIRD-PARTY-NOTICES.txt "stage/$name/"
+          cd stage
+          case "$TARGET" in
+            *windows*) 7z a -tzip -mx=9 "../out/$name.zip" "$name" > /dev/null ;;
+            *) tar -czf "../out/$name.tar.gz" "$name" ;;
+          esac
+          ls -l ../out
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: archive-${{ matrix.target }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  checksums:
+    name: check archives and write SHA256SUMS
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: archive-*
+          path: dist
+          merge-multiple: true
+
+      # Every target is there, and every archive holds the notices and the
+      # license files.
+      - name: Check the archives
+        run: |
+          cd dist
+          for t in x86_64-pc-windows-msvc x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \
+                   aarch64-apple-darwin x86_64-apple-darwin; do
+            a=$(ls "carrysheet-cli-$VERSION-$t".* 2>/dev/null || true)
+            if [ -z "$a" ]; then echo "No archive for $t."; exit 1; fi
+            case "$a" in *.zip) list=$(unzip -Z1 "$a") ;; *) list=$(tar -tzf "$a") ;; esac
+            for f in THIRD-PARTY-NOTICES.txt LICENSE-GPL LICENSE-MIT LICENSE-APACHE LICENSING.md; do
+              grep -qx "carrysheet-cli-$VERSION-$t/$f" <<< "$list" || { echo "$a has no $f."; exit 1; }
+            done
+          done
+
+      - name: SHA256SUMS
+        run: |
+          cd dist
+          sha256sum carrysheet-cli-* > SHA256SUMS
+          cat SHA256SUMS
+          { echo "### carrysheet-cli $VERSION"; [ "$DRY_RUN" = true ] && echo "Dry run: nothing published.";
+            echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: attest and create the draft release
+    needs: [prepare, checksums]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The owner can add required reviewers to this environment (Settings,
+    # Environments) so a pushed tag waits for approval before anything is
+    # published.
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-docs
+          path: docs-dist
+
+      - name: Check the checksums
+        run: cd dist && sha256sum --check --strict SHA256SUMS
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/carrysheet-cli-*
+
+      # A draft: nothing is public until the owner publishes it. --verify-tag
+      # refuses to create the tag if it is missing.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "v$VERSION" --draft --verify-tag \
+            --title "Carrysheet v$VERSION" --notes-file docs-dist/notes.md \
+            dist/carrysheet-cli-* dist/SHA256SUMS

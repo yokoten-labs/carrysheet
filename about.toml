@@ -1,0 +1,51 @@
+# cargo-about (https://github.com/EmbarkStudios/cargo-about): finds the
+# license text of every crate the release binary ships. Used only at release
+# time, through scripts/notices.mjs, which writes THIRD-PARTY-NOTICES.txt
+# from its JSON output (issue 95). Keep `accepted` in step with deny.toml's
+# [licenses] allow list.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unlicense",
+    "CC0-1.0",
+    "GPL-3.0-or-later",
+]
+# The release targets (.github/workflows/release.yml).
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+# Only what ends up in the binary: no dev-dependencies, no build scripts'
+# dependencies.
+ignore-dev-dependencies = true
+ignore-build-dependencies = true
+
+# Crates whose license files cargo-about does not find on its own. chrono
+# keeps both licenses in one LICENSE.txt (a built-in workaround); the windows
+# crates name theirs in lower case. A checksum ties each clarification to the
+# file it was checked against: when the file changes, the release fails
+# until someone looks again.
+workarounds = ["chrono"]
+
+[windows-sys.clarify]
+license = "MIT OR Apache-2.0"
+[[windows-sys.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+
+[windows-link.clarify]
+license = "MIT OR Apache-2.0"
+[[windows-link.clarify.files]]
+path = "license-mit"
+license = "MIT"
+checksum = "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
