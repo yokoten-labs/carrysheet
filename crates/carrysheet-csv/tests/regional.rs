@@ -815,6 +815,11 @@ proptest! {
         if format.scientific {
             format.grouped = false;
         }
+        // A plus sign before a whole number of eight or more digits reads back as text
+        // with the phone note, on purpose: plus_signed_output_reads_back covers that case.
+        if value.fract() == 0.0 && value.abs() >= 1e7 && !format.percent && !format.scientific && format.currency.is_none() {
+            format.plus = false;
+        }
         let rows = vec![vec![Value::Number(Number { value, format })]];
         let bytes = write_values(&rows, &convention, &WriteOptions::for_convention(&convention)).unwrap();
         let back = read_values(&bytes, &ReadOptions::default(), &convention.into()).unwrap();
