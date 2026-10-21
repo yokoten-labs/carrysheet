@@ -202,11 +202,13 @@ impl Class {
         }
         match (kind, self) {
             (ColumnKind::Text | ColumnKind::Empty, _) | (_, Class::Empty) => None,
-            _ if self.kind() != Some(kind) => Some(NoteKind::OtherKind(kind)),
-            (_, Class::NumberVia(_, note) | Class::DateVia(_, note)) => Some(*note),
+            // Before the kind check: these values are text until the decimal
+            // mark settles, so they would otherwise read as another kind.
             (ColumnKind::Number, Class::SpaceGrouped(Spaced::Unsettled)) => {
                 Some(NoteKind::BeforeSettled)
             }
+            _ if self.kind() != Some(kind) => Some(NoteKind::OtherKind(kind)),
+            (_, Class::NumberVia(_, note) | Class::DateVia(_, note)) => Some(*note),
             (ColumnKind::Date, Class::Date(_, true)) => Some(NoteKind::TwoDigitYears {
                 window_start: pivot,
             }),
