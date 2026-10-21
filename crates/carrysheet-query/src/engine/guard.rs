@@ -370,8 +370,8 @@ fn statement(action: &AuthAction<'_>) -> std::result::Result<(), String> {
 /// query broke the worker: after a large query, freed memory stays mapped,
 /// so under the worker's address-space cap a new thread could not map its
 /// signal stack, and Rust aborts the whole process then, which looked like
-/// a query that needed too much memory. One thread started before the cap
-/// maps nothing later.
+/// a query that needed too much memory. One thread, and room for the
+/// alarms, set up before the cap map nothing later.
 struct Timer {
     alarms: Mutex<Alarms>,
     wake: Condvar,
@@ -395,10 +395,20 @@ static TIMER: Timer = Timer {
 /// query reads the clock instead.
 static TIMER_RUNS: OnceLock<bool> = OnceLock::new();
 
+/// Alarms the list has room for from the start. A worker runs one query
+/// at a time, so it never grows the list after its memory cap.
+const ALARMS_RESERVED: usize = 16;
+
 /// Starts the timer thread if it is not running yet. Called on load, so a
-/// worker starts it before it caps its memory.
+/// worker starts it (and makes room for alarms) before it caps its memory.
 pub(crate) fn start_timer() -> bool {
     *TIMER_RUNS.get_or_init(|| {
+        TIMER
+            .alarms
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .waiting
+            .reserve(ALARMS_RESERVED);
         std::thread::Builder::new()
             .name("carrysheet-query-timer".to_owned())
             .stack_size(64 * 1024)
@@ -730,22 +740,54 @@ mod tests {
     }
 
     /// The one timer thread sets a query's flag at its deadline, and an
-    /// alarm dropped first (the query finished) never sets it.
+    /// alarm dropped before its deadline (the query finished) never sets it.
     #[test]
     fn the_shared_timer_sets_late_flags() {
         use std::time::Duration;
         assert!(start_timer());
         let late = Arc::new(AtomicBool::new(false));
         let finished = Arc::new(AtomicBool::new(false));
-        let soon = Instant::now() + Duration::from_millis(20);
-        let alarm = Watchdog::start(soon, Arc::clone(&late));
+        let started = Instant::now();
+        let alarm = Watchdog::start(started + Duration::from_millis(20), Arc::clone(&late));
         assert!(alarm.alarm.is_some());
-        drop(Watchdog::start(soon, Arc::clone(&finished)));
-        let waited = Instant::now();
-        while !late.load(Ordering::Relaxed) && waited.elapsed() < Duration::from_secs(5) {
+        // A second away, so a slow runner still drops it first.
+        let dropped = started + Duration::from_secs(1);
+        drop(Watchdog::start(dropped, Arc::clone(&finished)));
+        while !late.load(Ordering::Relaxed) && started.elapsed() < Duration::from_secs(5) {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(late.load(Ordering::Relaxed), "the deadline passed unseen");
+        std::thread::sleep(
+            (dropped + Duration::from_millis(200)).saturating_duration_since(Instant::now()),
+        );
         assert!(!finished.load(Ordering::Relaxed), "a dropped alarm fired");
+    }
+
+    /// An alarm added while the timer waits for a later one wakes it: the
+    /// earlier deadline is not held up until the later one.
+    #[test]
+    fn an_earlier_alarm_wakes_the_timer() {
+        use std::time::Duration;
+        assert!(start_timer());
+        let far = Arc::new(AtomicBool::new(false));
+        let near = Arc::new(AtomicBool::new(false));
+        let started = Instant::now();
+        let later = Watchdog::start(started + Duration::from_secs(30), Arc::clone(&far));
+        // Let the timer go to sleep on the later deadline.
+        std::thread::sleep(Duration::from_millis(50));
+        let sooner = Watchdog::start(
+            Instant::now() + Duration::from_millis(20),
+            Arc::clone(&near),
+        );
+        while !near.load(Ordering::Relaxed) && started.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            near.load(Ordering::Relaxed),
+            "the earlier deadline waited for the later one"
+        );
+        assert!(!far.load(Ordering::Relaxed), "the later alarm fired early");
+        drop(sooner);
+        drop(later);
     }
 }
