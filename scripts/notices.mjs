@@ -30,6 +30,7 @@ const PACKAGE = "carrysheet-cli";
 // The release targets; keep in step with about.toml and release.yml.
 export const TARGETS = [
   "x86_64-pc-windows-msvc",
+  "i686-pc-windows-msvc",
   "x86_64-unknown-linux-gnu",
   "aarch64-unknown-linux-gnu",
   "aarch64-apple-darwin",

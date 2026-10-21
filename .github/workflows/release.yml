@@ -124,6 +124,10 @@ jobs:
         include:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+          # Tier 2 (issue 2): built and smoke-tested on 64-bit Windows, not
+          # tested on a real 32-bit machine.
+          - target: i686-pc-windows-msvc
+            os: windows-latest
           # The oldest supported Ubuntu, so the binary needs only an older
           # glibc (2.35). Move up when GitHub retires the image.
           - target: x86_64-unknown-linux-gnu
@@ -225,7 +229,7 @@ jobs:
       - name: Check the archives
         run: |
           cd dist
-          for t in x86_64-pc-windows-msvc x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \
+          for t in x86_64-pc-windows-msvc i686-pc-windows-msvc x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \
                    aarch64-apple-darwin x86_64-apple-darwin; do
             a=$(ls "carrysheet-cli-$VERSION-$t".* 2>/dev/null || true)
             if [ -z "$a" ]; then echo "No archive for $t."; exit 1; fi
