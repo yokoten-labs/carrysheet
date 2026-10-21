@@ -15,6 +15,9 @@ path = "src/main.rs"
 [dependencies]
 carrysheet-commands = { path = "../../crates/carrysheet-commands", version = "0.1.0" }
 carrysheet-model = { path = "../../crates/carrysheet-model", version = "0.1.0" }
+# Read-only SQL over sheets; with the `query` feature this program is also
+# its query worker (`__query-worker`, see main.rs).
+carrysheet-query = { path = "../../crates/carrysheet-query", version = "0.1.0", optional = true }
 carrysheet-vba = { path = "../../crates/carrysheet-vba", version = "0.1.0" }
 # `macros` opens .xlsm/.xlsb packages: our hardened zip reader.
 carrysheet-zip = { path = "../../crates/carrysheet-zip", version = "0.1.0" }
@@ -29,6 +32,11 @@ rmcp = { version = "=3.5.1", default-features = false, features = ["server", "tr
 tokio = { version = "1", default-features = false, features = ["rt", "io-std"] }
 # Only to forward rmcp's warnings to our log; already a dependency of rmcp.
 tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+[features]
+# SQLite adds about 1.6 MB (+62%) to the binary, so it is off until the
+# command that uses it lands; that PR turns it on by default.
+query = ["dep:carrysheet-query"]
 
 [dev-dependencies]
 # The tests build zip packages byte by byte with carrysheet-zip's test
