@@ -1,0 +1,82 @@
+{
+  "schema": 1,
+  "title": "Volatile functions (values are recorded, not compared)",
+  "formats": ["xlsx"],
+  "cases": [
+    {
+      "id": "vol.now",
+      "note": "NOW changes on every recalculation; only the type (number) is stable.",
+      "volatile": true,
+      "formulas": { "A1": "=NOW()" }
+    },
+    {
+      "id": "vol.today",
+      "note": "TODAY is a whole number that changes daily.",
+      "volatile": true,
+      "formulas": { "A1": "=TODAY()", "A2": "=TODAY()=INT(TODAY())" }
+    },
+    {
+      "id": "vol.rand",
+      "note": "RAND is in [0,1).",
+      "volatile": true,
+      "formulas": { "A1": "=RAND()", "A2": "=AND(RAND()>=0,RAND()<1)" }
+    },
+    {
+      "id": "vol.randbetween",
+      "note": "RANDBETWEEN includes both ends.",
+      "volatile": true,
+      "formulas": { "A1": "=RANDBETWEEN(1,6)" }
+    },
+    {
+      "id": "vol.randarray",
+      "note": "RANDARRAY spills a 2x2 block of random numbers.",
+      "volatile": true,
+      "requires": ["dynamic-arrays"],
+      "formulas": { "A1": "=RANDARRAY(2,2)" }
+    },
+    {
+      "id": "vol.offset",
+      "note": "OFFSET is volatile even though its value is fixed here (7).",
+      "volatile": true,
+      "inputs": { "A1": 5, "A2": 7 },
+      "formulas": { "B1": "=OFFSET(A1,1,0)" }
+    },
+    {
+      "id": "vol.indirect",
+      "note": "INDIRECT is volatile; A1 and R1C1 styles.",
+      "volatile": true,
+      "inputs": { "A1": 5 },
+      "formulas": { "B1": "=INDIRECT(\"A1\")", "B2": "=INDIRECT(\"R1C1\",FALSE)" }
+    },
+    {
+      "id": "vol.cell-width",
+      "note": "CELL(\"width\") depends on the column width and the default font.",
+      "volatile": true,
+      "formulas": { "B1": "=CELL(\"width\",A1)" }
+    },
+    {
+      "id": "vol.info-recalc",
+      "note": "INFO(\"recalc\") reports the calculation mode; the export runs in manual mode, so expect Manual (or its translation).",
+      "volatile": true,
+      "formulas": { "A1": "=INFO(\"recalc\")" }
+    },
+    {
+      "id": "vol.depends-on-rand",
+      "note": "Cells that depend on a volatile cell recalculate too; these two have fixed values (0 and TRUE).",
+      "volatile": true,
+      "formulas": { "A1": "=RAND()", "B1": "=A1*0", "B2": "=ISNUMBER(A1)" }
+    },
+    {
+      "id": "vol.today-minus-today",
+      "note": "Volatile, but the value is always 0.",
+      "volatile": true,
+      "formulas": { "A1": "=TODAY()-TODAY()" }
+    },
+    {
+      "id": "vol.now-vs-today",
+      "note": "INT(NOW()) equals TODAY() except across midnight.",
+      "volatile": true,
+      "formulas": { "A1": "=INT(NOW())=TODAY()" }
+    }
+  ]
+}

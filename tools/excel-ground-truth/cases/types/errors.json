@@ -1,0 +1,247 @@
+{
+  "schema": 1,
+  "title": "Error values and how they propagate",
+  "formats": ["xlsx", "xls"],
+  "cases": [
+    {
+      "id": "err.div0",
+      "note": "Division by zero is #DIV/0!, not infinity.",
+      "formulas": { "A1": "=1/0", "A2": "=0/0" },
+      "expect": { "A1": "#DIV/0!", "A2": "#DIV/0!" }
+    },
+    {
+      "id": "err.na",
+      "note": "NA() makes #N/A.",
+      "formulas": { "A1": "=NA()" },
+      "expect": { "A1": "#N/A" }
+    },
+    {
+      "id": "err.sum-propagates-argument",
+      "note": "An error argument to SUM makes the whole SUM an error.",
+      "formulas": { "A1": "=SUM(1,NA())" },
+      "expect": { "A1": "#N/A" }
+    },
+    {
+      "id": "err.sum-propagates-range",
+      "note": "An error constant inside a summed range also propagates.",
+      "inputs": { "A1": 1, "A2": { "typed": "#N/A" }, "A3": 3 },
+      "formulas": { "B1": "=SUM(A1:A3)", "B2": "=ISERROR(A2)" },
+      "expect": { "B1": "#N/A", "B2": true }
+    },
+    {
+      "id": "err.average-empty-range",
+      "note": "AVERAGE of a range with no numbers divides by zero.",
+      "formulas": { "A1": "=AVERAGE(C1:C3)" },
+      "expect": { "A1": "#DIV/0!" }
+    },
+    {
+      "id": "err.iferror",
+      "note": "IFERROR catches every error type.",
+      "formulas": { "A1": "=IFERROR(1/0,\"x\")", "A2": "=IFERROR(NA(),\"y\")" },
+      "expect": { "A1": "x", "A2": "y" }
+    },
+    {
+      "id": "err.ifna-only-na",
+      "note": "IFNA catches only #N/A; other errors pass through.",
+      "formulas": { "A1": "=IFNA(NA(),1)", "A2": "=IFNA(1/0,1)" },
+      "expect": { "A1": 1, "A2": "#DIV/0!" }
+    },
+    {
+      "id": "err.is-functions",
+      "note": "ISERROR is true for all errors, ISERR for all but #N/A, ISNA only for #N/A.",
+      "formulas": { "A1": "=ISERROR(NA())", "A2": "=ISERR(NA())", "A3": "=ISNA(1/0)", "A4": "=ISERR(1/0)" },
+      "expect": { "A1": true, "A2": false, "A3": false, "A4": true }
+    },
+    {
+      "id": "err.error-type",
+      "note": "ERROR.TYPE numbers the errors; on a non-error it is itself #N/A.",
+      "formulas": {
+        "A1": "=ERROR.TYPE(#NULL!)",
+        "A2": "=ERROR.TYPE(1/0)",
+        "A3": "=ERROR.TYPE(NA())",
+        "A4": "=ERROR.TYPE(1)",
+        "A5": "=ERROR.TYPE(#VALUE!)"
+      },
+      "expect": { "A1": 1, "A2": 2, "A3": 7, "A4": "#N/A", "A5": 3 }
+    },
+    {
+      "id": "err.leftmost-error-wins",
+      "note": "With two errors in one expression, the one evaluated first (left) wins.",
+      "formulas": { "A1": "=1/0+NA()", "A2": "=NA()+1/0" },
+      "expect": { "A1": "#DIV/0!", "A2": "#N/A" }
+    },
+    {
+      "id": "err.sum-two-errors",
+      "note": "Which error SUM returns when two arguments are errors.",
+      "formulas": { "A1": "=SUM(NA(),1/0)", "A2": "=SUM(1/0,NA())", "A3": "=MAX(1/0,NA())" }
+    },
+    {
+      "id": "err.if-is-lazy",
+      "note": "IF evaluates only the chosen branch, so an error in the other branch does not matter.",
+      "formulas": { "A1": "=IF(TRUE,1,1/0)", "A2": "=IF(FALSE,1/0,2)" },
+      "expect": { "A1": 1, "A2": 2 }
+    },
+    {
+      "id": "err.if-condition-error",
+      "note": "An error in the IF condition is the result.",
+      "formulas": { "A1": "=IF(1/0,1,2)" },
+      "expect": { "A1": "#DIV/0!" }
+    },
+    {
+      "id": "err.choose-is-lazy",
+      "note": "CHOOSE evaluates only the chosen value.",
+      "formulas": { "A1": "=CHOOSE(2,1/0,5)" },
+      "expect": { "A1": 5 }
+    },
+    {
+      "id": "err.and-or-not-lazy",
+      "note": "AND and OR evaluate every argument: OR(TRUE,1/0) is an error, not TRUE.",
+      "formulas": { "A1": "=OR(TRUE,1/0)", "A2": "=AND(FALSE,NA())" },
+      "expect": { "A1": "#DIV/0!", "A2": "#N/A" }
+    },
+    {
+      "id": "err.count-error-argument",
+      "note": "COUNT with an error typed directly as an argument.",
+      "formulas": { "A1": "=COUNT(1,1/0)", "A2": "=COUNTA(1,1/0)" }
+    },
+    {
+      "id": "err.count-skips-error-cells",
+      "note": "COUNT skips error cells in a range; COUNTA counts them.",
+      "inputs": { "A1": 1, "A2": { "typed": "#N/A" }, "A3": 2 },
+      "formulas": { "B1": "=COUNT(A1:A3)", "B2": "=COUNTA(A1:A3)" },
+      "expect": { "B1": 2, "B2": 3 }
+    },
+    {
+      "id": "err.aggregate-ignores-errors",
+      "note": "AGGREGATE option 6 ignores error values.",
+      "inputs": { "A1": 1, "A2": { "typed": "#N/A" }, "A3": 2 },
+      "formulas": { "B1": "=AGGREGATE(9,6,A1:A3)" },
+      "expect": { "B1": 3 }
+    },
+    {
+      "id": "err.num",
+      "note": "Math domain errors are #NUM!.",
+      "formulas": { "A1": "=SQRT(-1)", "A2": "=LN(0)", "A3": "=FACT(-1)" },
+      "expect": { "A1": "#NUM!", "A2": "#NUM!", "A3": "#NUM!" }
+    },
+    {
+      "id": "err.zero-to-zero",
+      "note": "0^0 is #NUM! in Excel (1 in most languages).",
+      "formulas": { "A1": "=0^0", "A2": "=POWER(0,0)" },
+      "expect": { "A1": "#NUM!", "A2": "#NUM!" }
+    },
+    {
+      "id": "err.negative-base-fraction",
+      "note": "A negative number to a fractional power is #NUM!.",
+      "formulas": { "A1": "=(-8)^(1/3)", "A2": "=POWER(-8,1/3)" },
+      "expect": { "A1": "#NUM!", "A2": "#NUM!" }
+    },
+    {
+      "id": "err.negation-binds-tighter",
+      "note": "In Excel unary minus binds tighter than ^: -2^2 is 4, and -8^(1/3) is (-8)^(1/3), an error.",
+      "formulas": { "A1": "=-2^2", "A2": "=0-2^2", "A3": "=-(2^2)", "A4": "=-8^(1/3)" },
+      "expect": { "A1": 4, "A2": -4, "A3": -4, "A4": "#NUM!" }
+    },
+    {
+      "id": "err.value-text-math",
+      "note": "Adding a non-numeric text is #VALUE!.",
+      "formulas": { "A1": "=\"a\"+1" },
+      "expect": { "A1": "#VALUE!" }
+    },
+    {
+      "id": "err.ref-index",
+      "note": "INDEX past the end of a range is #REF!.",
+      "inputs": { "A1": 1, "A2": 2 },
+      "formulas": { "B1": "=INDEX(A1:A2,5)" },
+      "expect": { "B1": "#REF!" }
+    },
+    {
+      "id": "err.ref-offset",
+      "note": "OFFSET above row 1 is #REF! (OFFSET is volatile).",
+      "volatile": true,
+      "formulas": { "B1": "=OFFSET(A1,-1,0)" }
+    },
+    {
+      "id": "err.ref-indirect-missing-sheet",
+      "note": "INDIRECT to a sheet that does not exist is #REF! (INDIRECT is volatile).",
+      "volatile": true,
+      "formulas": { "A1": "=INDIRECT(\"NoSuchSheet!A1\")" }
+    },
+    {
+      "id": "err.ref-literal",
+      "note": "A #REF! written into a formula propagates.",
+      "formulas": { "A1": "=#REF!+1" },
+      "expect": { "A1": "#REF!" }
+    },
+    {
+      "id": "err.name",
+      "note": "Unknown functions and undefined names are #NAME?.",
+      "formulas": { "A1": "=NOSUCHFUNCTION(1)", "A2": "=nosuchname+1" },
+      "expect": { "A1": "#NAME?", "A2": "#NAME?" }
+    },
+    {
+      "id": "err.null-intersection",
+      "note": "The space operator intersects ranges; no overlap is #NULL!.",
+      "inputs": { "A1": 1, "A2": 2, "B1": 3, "B2": 4 },
+      "formulas": { "C1": "=SUM(A1:A2 B1:B2)", "C2": "=SUM(A1:B2 B1:B3)" },
+      "expect": { "C1": "#NULL!", "C2": 7 }
+    },
+    {
+      "id": "err.vlookup-not-found",
+      "note": "An exact VLOOKUP miss is #N/A.",
+      "inputs": { "A1": 1, "A2": 2, "A3": 3 },
+      "formulas": { "B1": "=VLOOKUP(99,A1:A3,1,FALSE)" },
+      "expect": { "B1": "#N/A" }
+    },
+    {
+      "id": "err.concat-error",
+      "note": "Joining text to an error is the error.",
+      "formulas": { "A1": "=\"x\"&NA()" },
+      "expect": { "A1": "#N/A" }
+    },
+    {
+      "id": "err.text-functions-of-error",
+      "note": "TEXT and LEN of an error return the error.",
+      "formulas": { "A1": "=TEXT(1/0,\"0\")", "A2": "=LEN(NA())" },
+      "expect": { "A1": "#DIV/0!", "A2": "#N/A" }
+    },
+    {
+      "id": "err.countif-matches-errors",
+      "note": "COUNTIF with the criteria \"#N/A\" counts error cells.",
+      "inputs": { "A1": { "typed": "#N/A" }, "A2": 1, "A3": { "typed": "#N/A" } },
+      "formulas": { "B1": "=COUNTIF(A1:A3,\"#N/A\")" },
+      "expect": { "B1": 2 }
+    },
+    {
+      "id": "err.n-and-t",
+      "note": "N and T pass errors through.",
+      "formulas": { "A1": "=N(NA())", "A2": "=T(NA())" },
+      "expect": { "A1": "#N/A", "A2": "#N/A" }
+    },
+    {
+      "id": "err.char-zero",
+      "note": "CHAR(0) is #VALUE!.",
+      "formulas": { "A1": "=CHAR(0)", "A2": "=CHAR(256)" },
+      "expect": { "A1": "#VALUE!", "A2": "#VALUE!" }
+    },
+    {
+      "id": "err.sumproduct-error-cell",
+      "note": "SUMPRODUCT does not skip error cells.",
+      "inputs": { "A1": 1, "A2": { "typed": "#DIV/0!" } },
+      "formulas": { "B1": "=SUMPRODUCT(A1:A2)" },
+      "expect": { "B1": "#DIV/0!" }
+    },
+    {
+      "id": "err.compare-errors",
+      "note": "Comparing two errors is an error, not TRUE.",
+      "formulas": { "A1": "=NA()=NA()" },
+      "expect": { "A1": "#N/A" }
+    },
+    {
+      "id": "err.date-out-of-range",
+      "note": "DATE past year 9999 is #NUM!.",
+      "formulas": { "A1": "=DATE(10000,1,1)" },
+      "expect": { "A1": "#NUM!" }
+    }
+  ]
+}
