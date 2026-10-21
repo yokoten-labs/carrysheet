@@ -2,7 +2,7 @@
 //! limits, the authorizer and the progress handler.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::time::Instant;
 
@@ -22,6 +22,15 @@ use crate::output::Limits;
 /// handler only counts and reads a flag the [`Watchdog`] sets, so checking
 /// this often costs little (about 5%).
 pub(crate) const STEPS_PER_CHECK: u64 = 10;
+
+/// Progress-handler calls between two reads of the clock. The timer's flag
+/// can come late: a system may put off waking a sleeping thread (macOS
+/// coalesces timers), and then a query of slow rows runs one more row
+/// before the flag stops it (issue 98). The clock is never late. Reading it
+/// on every call cost about 9% on a scan of cheap rows; every 8th call costs
+/// too little to measure, and after a slow row SQLite makes one call per 10
+/// steps of that row, so the next read comes at once.
+const CHECKS_PER_CLOCK: u64 = 8;
 
 /// Why the progress handler stopped a query.
 pub(crate) const STOPPED_NONE: u8 = 0;
@@ -184,7 +193,7 @@ pub(crate) fn lock(
     limits: &Limits,
     tables: &[String],
     seen: Arc<Mutex<Seen>>,
-    late: &Arc<AtomicBool>,
+    late: &Arc<Late>,
 ) -> Result<()> {
     let mut readable: HashSet<String> = tables.iter().map(|t| t.to_ascii_lowercase()).collect();
     readable.extend(ALLOWED_READS.iter().map(|t| (*t).to_owned()));
@@ -362,6 +371,69 @@ fn statement(action: &AuthAction<'_>) -> std::result::Result<(), String> {
     }
 }
 
+/// Whether the running query is past its time limit. The timer thread sets
+/// the flag at the deadline; [`Late::passed`] also reads the clock, so a
+/// timer that wakes late does not let a query run on.
+#[derive(Debug)]
+pub(crate) struct Late {
+    flag: AtomicBool,
+    /// The deadline, in nanoseconds after [`epoch`]; `u64::MAX` for none.
+    deadline: AtomicU64,
+}
+
+impl Default for Late {
+    fn default() -> Late {
+        Late {
+            flag: AtomicBool::new(false),
+            deadline: AtomicU64::new(u64::MAX),
+        }
+    }
+}
+
+/// The instant deadlines are counted from.
+fn epoch() -> Instant {
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    *EPOCH.get_or_init(Instant::now)
+}
+
+/// Nanoseconds from [`epoch`] to `at`, 0 if `at` is earlier.
+fn since_epoch(at: Instant) -> u64 {
+    u64::try_from(at.saturating_duration_since(epoch()).as_nanos()).unwrap_or(u64::MAX - 1)
+}
+
+impl Late {
+    /// Clears the flag and sets the deadline (`None`: no time limit).
+    fn start(&self, deadline: Option<Instant>) {
+        self.flag.store(false, Ordering::Relaxed);
+        self.deadline
+            .store(deadline.map_or(u64::MAX, since_epoch), Ordering::Relaxed);
+    }
+
+    /// Marks the query as past its time limit.
+    pub(crate) fn set(&self) {
+        self.flag.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether the flag is set; cheap, but only as prompt as the timer.
+    pub(crate) fn flagged(&self) -> bool {
+        self.flag.load(Ordering::Relaxed)
+    }
+
+    /// Whether the deadline has passed, by the flag or else the clock (and
+    /// then sets the flag).
+    pub(crate) fn passed(&self) -> bool {
+        if self.flagged() {
+            return true;
+        }
+        let deadline = self.deadline.load(Ordering::Relaxed);
+        if deadline != u64::MAX && since_epoch(Instant::now()) >= deadline {
+            self.set();
+            return true;
+        }
+        false
+    }
+}
+
 /// One timer thread for every query in this process: it sets each query's
 /// `late` flag once its deadline passes, so the progress handler reads a
 /// flag instead of the clock.
@@ -380,7 +452,7 @@ struct Timer {
 struct Alarms {
     next_id: u64,
     /// Each running query's id, deadline and `late` flag.
-    waiting: Vec<(u64, Instant, Arc<AtomicBool>)>,
+    waiting: Vec<(u64, Instant, Arc<Late>)>,
 }
 
 static TIMER: Timer = Timer {
@@ -427,7 +499,7 @@ impl Timer {
             let now = Instant::now();
             alarms.waiting.retain(|(_, deadline, late)| {
                 if *deadline <= now {
-                    late.store(true, Ordering::Relaxed);
+                    late.set();
                     false
                 } else {
                     true
@@ -462,7 +534,7 @@ pub(crate) struct Watchdog {
 impl Watchdog {
     /// Sets an alarm for `deadline`; without a timer thread, `alarm` is
     /// `None`.
-    fn start(deadline: Instant, late: Arc<AtomicBool>) -> Watchdog {
+    fn start(deadline: Instant, late: Arc<Late>) -> Watchdog {
         if !start_timer() {
             return Watchdog { alarm: None };
         }
@@ -495,33 +567,37 @@ pub(crate) fn watch(
     limits: &Limits,
     start: Instant,
     stopped: Arc<AtomicU8>,
-    late: &Arc<AtomicBool>,
+    late: &Arc<Late>,
 ) -> Result<Watchdog> {
     stopped.store(STOPPED_NONE, Ordering::Relaxed);
-    late.store(false, Ordering::Relaxed);
     let max_checks = limits.max_steps.div_ceil(STEPS_PER_CHECK).max(1);
-    let max_time = limits.max_time;
     let late = Arc::clone(late);
-    let deadline = start.checked_add(max_time);
+    let deadline = start.checked_add(limits.max_time);
+    late.start(deadline);
     let watchdog = match deadline {
         Some(deadline) => Watchdog::start(deadline, Arc::clone(&late)),
         None => Watchdog { alarm: None },
     };
-    // Without a timer thread, read the clock: slower, same limit.
-    let clock = deadline.is_some() && watchdog.alarm.is_none();
+    // Without a timer thread, read the clock every time: slower, same limit.
+    let every = if watchdog.alarm.is_none() {
+        1
+    } else {
+        CHECKS_PER_CLOCK
+    };
     let mut checks = 0u64;
     let period = i32::try_from(STEPS_PER_CHECK).unwrap_or(i32::MAX);
     conn.progress_handler(
         period,
         Some(move || {
             checks += 1;
-            if clock && start.elapsed() > max_time {
-                // Our functions read the flag too.
-                late.store(true, Ordering::Relaxed);
-            }
+            let time_up = if checks.is_multiple_of(every) {
+                late.passed()
+            } else {
+                late.flagged()
+            };
             let why = if checks > max_checks {
                 STOPPED_STEPS
-            } else if late.load(Ordering::Relaxed) {
+            } else if time_up {
                 STOPPED_TIME
             } else {
                 return false;
@@ -745,22 +821,22 @@ mod tests {
     fn the_shared_timer_sets_late_flags() {
         use std::time::Duration;
         assert!(start_timer());
-        let late = Arc::new(AtomicBool::new(false));
-        let finished = Arc::new(AtomicBool::new(false));
+        let late = Arc::new(Late::default());
+        let finished = Arc::new(Late::default());
         let started = Instant::now();
         let alarm = Watchdog::start(started + Duration::from_millis(20), Arc::clone(&late));
         assert!(alarm.alarm.is_some());
         // A second away, so a slow runner still drops it first.
         let dropped = started + Duration::from_secs(1);
         drop(Watchdog::start(dropped, Arc::clone(&finished)));
-        while !late.load(Ordering::Relaxed) && started.elapsed() < Duration::from_secs(5) {
+        while !late.flagged() && started.elapsed() < Duration::from_secs(5) {
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert!(late.load(Ordering::Relaxed), "the deadline passed unseen");
+        assert!(late.flagged(), "the deadline passed unseen");
         std::thread::sleep(
             (dropped + Duration::from_millis(200)).saturating_duration_since(Instant::now()),
         );
-        assert!(!finished.load(Ordering::Relaxed), "a dropped alarm fired");
+        assert!(!finished.flagged(), "a dropped alarm fired");
     }
 
     /// An alarm added while the timer waits for a later one wakes it: the
@@ -769,8 +845,8 @@ mod tests {
     fn an_earlier_alarm_wakes_the_timer() {
         use std::time::Duration;
         assert!(start_timer());
-        let far = Arc::new(AtomicBool::new(false));
-        let near = Arc::new(AtomicBool::new(false));
+        let far = Arc::new(Late::default());
+        let near = Arc::new(Late::default());
         let started = Instant::now();
         let later = Watchdog::start(started + Duration::from_secs(30), Arc::clone(&far));
         // Let the timer go to sleep on the later deadline.
@@ -779,15 +855,62 @@ mod tests {
             Instant::now() + Duration::from_millis(20),
             Arc::clone(&near),
         );
-        while !near.load(Ordering::Relaxed) && started.elapsed() < Duration::from_secs(5) {
+        while !near.flagged() && started.elapsed() < Duration::from_secs(5) {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(
-            near.load(Ordering::Relaxed),
+            near.flagged(),
             "the earlier deadline waited for the later one"
         );
-        assert!(!far.load(Ordering::Relaxed), "the later alarm fired early");
+        assert!(!far.flagged(), "the later alarm fired early");
         drop(sooner);
         drop(later);
+    }
+
+    /// The clock alone catches a deadline the timer has not flagged yet.
+    #[test]
+    fn a_late_timer_does_not_hide_the_deadline() {
+        let late = Late::default();
+        assert!(!late.passed(), "no deadline yet");
+        late.start(Some(Instant::now() + std::time::Duration::from_secs(60)));
+        assert!(!late.passed());
+        late.start(Some(Instant::now()));
+        assert!(!late.flagged());
+        assert!(late.passed());
+        assert!(late.flagged(), "the clock sets the flag for our functions");
+        late.start(None);
+        assert!(!late.passed());
+    }
+
+    /// The progress handler stops a query at its time limit even when the
+    /// timer never flags it, as when the system wakes the timer late.
+    #[test]
+    fn the_handler_reads_the_clock() {
+        use std::time::Duration;
+        let conn = locked();
+        let limits = Limits {
+            max_time: Duration::from_millis(50),
+            max_steps: u64::MAX,
+            ..Limits::default()
+        };
+        let stopped = Arc::new(AtomicU8::new(STOPPED_NONE));
+        let late = Arc::new(Late::default());
+        let started = Instant::now();
+        let watchdog = watch(&conn, &limits, started, Arc::clone(&stopped), &late).unwrap();
+        // No alarm: only the clock can stop the query now.
+        drop(watchdog);
+        let result = conn.query_row(
+            "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c",
+            [],
+            |r| r.get::<_, i64>(0),
+        );
+        let took = started.elapsed();
+        unwatch(&conn).unwrap();
+        assert_eq!(
+            result.unwrap_err().sqlite_error_code(),
+            Some(rusqlite::ErrorCode::OperationInterrupted)
+        );
+        assert_eq!(stopped.load(Ordering::Relaxed), STOPPED_TIME);
+        assert!(took < Duration::from_secs(5), "{took:?}");
     }
 }

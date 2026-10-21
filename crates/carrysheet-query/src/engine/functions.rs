@@ -10,10 +10,10 @@
 //! SQLite's algorithm. All of them read the watchdog flag every few KB and
 //! stop with an interrupt once the time limit has passed.
 
+use super::guard::Late;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::pattern;
 
@@ -32,7 +32,7 @@ pub(crate) fn register(
     conn: &Connection,
     max_bytes: usize,
     max_pattern: usize,
-    stop: &Arc<AtomicBool>,
+    stop: &Arc<Late>,
 ) -> Result<()> {
     let flags = FunctionFlags::SQLITE_UTF8
         | FunctionFlags::SQLITE_DETERMINISTIC
@@ -73,8 +73,8 @@ fn interrupted() -> rusqlite::Error {
     )
 }
 
-fn check(stop: &AtomicBool) -> Result<()> {
-    if stop.load(Ordering::Relaxed) {
+fn check(stop: &Late) -> Result<()> {
+    if stop.passed() {
         Err(interrupted())
     } else {
         Ok(())
@@ -89,12 +89,7 @@ fn sql_error(message: &str) -> rusqlite::Error {
 }
 
 /// `like(P, S)`, `like(P, S, E)` and `glob(P, S)`, as SQLite's `likeFunc`.
-fn like(
-    ctx: &Context<'_>,
-    info: pattern::Info,
-    max_pattern: usize,
-    stop: &AtomicBool,
-) -> Result<Out> {
+fn like(ctx: &Context<'_>, info: pattern::Info, max_pattern: usize, stop: &Late) -> Result<Out> {
     check(stop)?;
     let pat = text_arg(ctx, 0)?;
     if pat.as_ref().map_or(0, Vec::len) > max_pattern {
@@ -200,7 +195,7 @@ fn chars(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
 }
 
 /// `trim`, `ltrim`, `rtrim` with a set of characters.
-fn trim(ctx: &Context<'_>, left: bool, right: bool, stop: &AtomicBool) -> Result<Out> {
+fn trim(ctx: &Context<'_>, left: bool, right: bool, stop: &Late) -> Result<Out> {
     check(stop)?;
     let (Some(input), Some(set)) = (text_arg(ctx, 0)?, text_arg(ctx, 1)?) else {
         return Ok(Out::Null);
@@ -247,7 +242,7 @@ fn trim(ctx: &Context<'_>, left: bool, right: bool, stop: &AtomicBool) -> Result
 
 /// `instr(X, Y)`: the 1-based position of Y in X, in characters (in bytes when
 /// both are blobs); 0 when it is not there.
-fn instr(ctx: &Context<'_>, stop: &AtomicBool) -> Result<Out> {
+fn instr(ctx: &Context<'_>, stop: &Late) -> Result<Out> {
     check(stop)?;
     let (hay, needle) = (ctx.get_raw(0), ctx.get_raw(1));
     if matches!(hay, ValueRef::Null) || matches!(needle, ValueRef::Null) {
@@ -284,7 +279,7 @@ fn instr(ctx: &Context<'_>, stop: &AtomicBool) -> Result<Out> {
 }
 
 /// `replace(X, Y, Z)`: every Y in X (left to right, not overlapping) becomes Z.
-fn replace(ctx: &Context<'_>, max_bytes: usize, stop: &AtomicBool) -> Result<Out> {
+fn replace(ctx: &Context<'_>, max_bytes: usize, stop: &Late) -> Result<Out> {
     check(stop)?;
     let Some(input) = text_arg(ctx, 0)? else {
         return Ok(Out::Null);
@@ -351,7 +346,7 @@ fn matches<'a>(
     pattern: &'a [u8],
     table: &'a [usize],
     non_overlapping: bool,
-    stop: &'a AtomicBool,
+    stop: &'a Late,
 ) -> impl Iterator<Item = Result<usize>> + 'a {
     let mut k = 0;
     let mut i = 0;
@@ -361,7 +356,7 @@ fn matches<'a>(
             return None;
         }
         while i < text.len() {
-            if i.is_multiple_of(CHECK_EVERY) && stop.load(Ordering::Relaxed) {
+            if i.is_multiple_of(CHECK_EVERY) && stop.passed() {
                 done = true;
                 return Some(Err(interrupted()));
             }
@@ -388,7 +383,7 @@ mod tests {
 
     #[test]
     fn kmp_finds_every_match() {
-        let go = AtomicBool::new(false);
+        let go = Late::default();
         let found = |text: &[u8], pat: &[u8], apart: bool| -> Vec<usize> {
             let t = kmp_table(pat);
             matches(text, pat, &t, apart, &go)
@@ -398,7 +393,8 @@ mod tests {
         assert_eq!(found(b"aaaa", b"aa", false), [0, 1, 2]);
         assert_eq!(found(b"aaaa", b"aa", true), [0, 2]);
         assert_eq!(found(b"xababab", b"abab", false), [1, 3]);
-        let late = AtomicBool::new(true);
+        let late = Late::default();
+        late.set();
         let t = kmp_table(b"b");
         assert!(
             matches(b"aaaa", b"b", &t, false, &late)
@@ -671,7 +667,8 @@ mod tests {
     #[test]
     fn calls_stop_once_late() {
         let ours = Connection::open_in_memory().unwrap();
-        let late = Arc::new(AtomicBool::new(true));
+        let late = Arc::new(Late::default());
+        late.set();
         register(&ours, 1_000_000, 100, &late).unwrap();
         for expr in [
             "'a' LIKE 'a'",

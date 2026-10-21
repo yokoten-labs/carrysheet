@@ -7,7 +7,7 @@
 //! an interrupt error once the time limit has passed. (SQLite is in the
 //! public domain.)
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use super::guard::Late;
 
 /// How a pattern is read: SQLite's `compareInfo`.
 #[derive(Clone, Copy)]
@@ -67,7 +67,7 @@ pub(crate) fn compare(
     string: &[u8],
     info: Info,
     escape: u32,
-    stop: &AtomicBool,
+    stop: &Late,
 ) -> Result<bool, Stopped> {
     let mut info = info;
     // The ESCAPE character takes the place of a wildcard it equals.
@@ -152,7 +152,7 @@ struct Matcher<'a> {
     info: Info,
     /// The escape character (LIKE) or `[` (GLOB).
     match_other: u32,
-    stop: &'a AtomicBool,
+    stop: &'a Late,
     work: u32,
 }
 
@@ -164,7 +164,7 @@ impl Matcher<'_> {
             .wrapping_add(u32::try_from(units).unwrap_or(u32::MAX));
         if self.work >= CHECK_EVERY {
             self.work = 0;
-            return self.stop.load(Ordering::Relaxed);
+            return self.stop.passed();
         }
         false
     }
@@ -358,14 +358,15 @@ mod tests {
 
     #[test]
     fn a_late_flag_stops_a_long_match() {
-        let stop = AtomicBool::new(true);
+        let stop = Late::default();
+        stop.set();
         let text = "a".repeat(100_000);
         let pattern = format!("%{}b", "a".repeat(98));
         assert_eq!(
             compare(pattern.as_bytes(), text.as_bytes(), LIKE, 0, &stop),
             Err(Stopped)
         );
-        let go = AtomicBool::new(false);
+        let go = Late::default();
         assert_eq!(
             compare(pattern.as_bytes(), text.as_bytes(), LIKE, 0, &go),
             Ok(false)
