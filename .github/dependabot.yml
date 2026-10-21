@@ -1,0 +1,34 @@
+# Monthly, one grouped pull request, so updates don't each cost a review (core rule 8).
+# A release is taken only once it is a week old, so one pulled for being bad never
+# reaches you. The actions CI runs are always on. `yokoten init` adds a block below for
+# each package manager it finds (npm, cargo, pip, gomod, ...), at the root and one folder
+# down. `check --pr` holds these pull requests to the title rule, and shows the rest as notes.
+#
+# To add one it missed, copy a block. Change package-ecosystem, directory, the group
+# name, and the commit-message prefix (to chore). Keep the schedule, cooldown and groups:
+# then they come the same way, monthly, in one pull request, a week old. The ecosystem names:
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      cargo:
+        patterns: ['*']
+    commit-message:
+      prefix: chore
