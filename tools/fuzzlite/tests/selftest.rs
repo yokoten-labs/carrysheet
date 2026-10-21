@@ -319,7 +319,8 @@ fn a_missing_repro_file_does_not_show_the_home_folder() {
     let home_text = home.to_string_lossy();
     assert_eq!(o.status.code(), Some(1), "{err}");
     assert!(!err.contains(&*home_text), "{err}");
-    assert!(err.contains("~/missing.bin"), "{err}");
+    let shown = Path::new("~").join("missing.bin");
+    assert!(err.contains(&*shown.to_string_lossy()), "{err}");
     let _ = std::fs::remove_dir_all(&home);
 }
 
