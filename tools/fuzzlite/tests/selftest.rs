@@ -196,6 +196,9 @@ fn usage_errors_exit_2() {
     }
 }
 
+// Peak memory is read from /proc, so only Linux measures it; elsewhere
+// fuzzlite says at the start that memory is not measured (MEMORY_MEASURED).
+#[cfg(target_os = "linux")]
 #[test]
 fn a_memory_hungry_finish_is_an_amplification() {
     let out = out_dir("big");
@@ -316,7 +319,8 @@ fn a_missing_repro_file_does_not_show_the_home_folder() {
     let home_text = home.to_string_lossy();
     assert_eq!(o.status.code(), Some(1), "{err}");
     assert!(!err.contains(&*home_text), "{err}");
-    assert!(err.contains("~/missing.bin"), "{err}");
+    let shown = Path::new("~").join("missing.bin");
+    assert!(err.contains(&*shown.to_string_lossy()), "{err}");
     let _ = std::fs::remove_dir_all(&home);
 }
 
