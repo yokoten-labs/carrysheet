@@ -1,0 +1,156 @@
+{
+  "schema": 1,
+  "title": "The 1900 leap-year bug (1900 date system)",
+  "formats": ["xlsx", "xls"],
+  "settings": { "date1904": false },
+  "cases": [
+    {
+      "id": "leap1900.serial-60-text",
+      "note": "Excel copies Lotus 1-2-3 and treats 1900 as a leap year, so serial 60 is 1900-02-29, a day that never existed.",
+      "formulas": { "A1": "=TEXT(60,\"yyyy-mm-dd\")" },
+      "expect": { "A1": "1900-02-29" }
+    },
+    {
+      "id": "leap1900.date-feb-29",
+      "note": "DATE accepts the fake day and returns 60 instead of rolling over to March 1.",
+      "formulas": { "A1": "=DATE(1900,2,29)" },
+      "expect": { "A1": 60 }
+    },
+    {
+      "id": "leap1900.date-feb-28-and-mar-1",
+      "note": "Serials 59 and 61 sit on both sides of the fake day; a naive calendar gives 59 and 60.",
+      "formulas": { "A1": "=DATE(1900,2,28)", "A2": "=DATE(1900,3,1)" },
+      "expect": { "A1": 59, "A2": 61 }
+    },
+    {
+      "id": "leap1900.typed-feb-29",
+      "note": "Typing 1900-02-29 makes a real date (serial 60), not text, even though the day is invalid in every real calendar.",
+      "inputs": { "A1": { "typed": "1900-02-29" } },
+      "formulas": { "B1": "=A1", "B2": "=ISNUMBER(A1)" },
+      "expect": { "B1": 60, "B2": true }
+    },
+    {
+      "id": "leap1900.datevalue-feb-29",
+      "note": "DATEVALUE parses the fake day as well.",
+      "formulas": { "A1": "=DATEVALUE(\"1900-02-29\")" },
+      "expect": { "A1": 60 }
+    },
+    {
+      "id": "leap1900.parts-of-60",
+      "note": "YEAR/MONTH/DAY of serial 60 must return 1900, 2, 29.",
+      "formulas": { "A1": "=YEAR(60)", "A2": "=MONTH(60)", "A3": "=DAY(60)" },
+      "expect": { "A1": 1900, "A2": 2, "A3": 29 }
+    },
+    {
+      "id": "leap1900.weekday-serial-1",
+      "note": "Excel says 1900-01-01 was a Sunday (1); it was really a Monday. Weekdays before March 1900 are off by one.",
+      "formulas": { "A1": "=WEEKDAY(1)" },
+      "expect": { "A1": 1 }
+    },
+    {
+      "id": "leap1900.weekday-serial-60",
+      "note": "The fake day gets a weekday too (Wednesday, 4).",
+      "formulas": { "A1": "=WEEKDAY(60)" },
+      "expect": { "A1": 4 }
+    },
+    {
+      "id": "leap1900.weekday-serial-61",
+      "note": "From March 1, 1900 the weekdays are right again (Thursday, 5).",
+      "formulas": { "A1": "=WEEKDAY(61)" },
+      "expect": { "A1": 5 }
+    },
+    {
+      "id": "leap1900.serial-0-text",
+      "note": "Serial 0 shows as the impossible date 1900-01-00.",
+      "formulas": { "A1": "=TEXT(0,\"yyyy-mm-dd\")" },
+      "expect": { "A1": "1900-01-00" }
+    },
+    {
+      "id": "leap1900.serial-0-parts",
+      "note": "YEAR/MONTH/DAY of 0 return 1900, 1, 0 rather than an error.",
+      "formulas": { "A1": "=YEAR(0)", "A2": "=MONTH(0)", "A3": "=DAY(0)" },
+      "expect": { "A1": 1900, "A2": 1, "A3": 0 }
+    },
+    {
+      "id": "leap1900.date-day-zero",
+      "note": "DATE(1900,1,0) is serial 0, not 1899-12-31.",
+      "formulas": { "A1": "=DATE(1900,1,0)" },
+      "expect": { "A1": 0 }
+    },
+    {
+      "id": "leap1900.year-below-1900",
+      "note": "DATE adds 1900 to years 0-1899, so 1899 becomes 3799, not December 1899.",
+      "formulas": { "A1": "=DATE(1899,12,31)", "A2": "=YEAR(DATE(1899,12,31))" },
+      "expect": { "A2": 3799 }
+    },
+    {
+      "id": "leap1900.year-zero",
+      "note": "DATE(0,1,1) means 1900-01-01, serial 1.",
+      "formulas": { "A1": "=DATE(0,1,1)" },
+      "expect": { "A1": 1 }
+    },
+    {
+      "id": "leap1900.negative-serial",
+      "note": "Negative serials are not dates in the 1900 system: formatting and DAY must give errors.",
+      "formulas": { "A1": "=TEXT(-1,\"yyyy-mm-dd\")", "A2": "=DAY(-1)" },
+      "expect": { "A2": "#NUM!" }
+    },
+    {
+      "id": "leap1900.max-serial",
+      "note": "2958465 is 9999-12-31, the last date; one more is out of range.",
+      "formulas": { "A1": "=TEXT(2958465,\"yyyy-mm-dd\")", "A2": "=DAY(2958466)", "A3": "=DATE(9999,12,31)" },
+      "expect": { "A1": "9999-12-31", "A2": "#NUM!", "A3": 2958465 }
+    },
+    {
+      "id": "leap1900.year-10000",
+      "note": "DATE with year 10000 is #NUM!, not a wrap-around.",
+      "formulas": { "A1": "=DATE(10000,1,1)" },
+      "expect": { "A1": "#NUM!" }
+    },
+    {
+      "id": "leap1900.subtract-across",
+      "note": "Subtracting dates across the fake day counts it: Feb 28 to Mar 1 1900 is 2 days.",
+      "formulas": { "A1": "=DATE(1900,3,1)-DATE(1900,2,28)" },
+      "expect": { "A1": 2 }
+    },
+    {
+      "id": "leap1900.datedif-across",
+      "note": "DATEDIF counts the fake day too.",
+      "formulas": { "A1": "=DATEDIF(DATE(1900,2,28),DATE(1900,3,1),\"d\")" },
+      "expect": { "A1": 2 }
+    },
+    {
+      "id": "leap1900.days-across",
+      "note": "DAYS counts the fake day too.",
+      "formulas": { "A1": "=DAYS(DATE(1900,3,1),DATE(1900,2,28))" },
+      "expect": { "A1": 2 }
+    },
+    {
+      "id": "leap1900.eomonth-feb",
+      "note": "End of February 1900: does EOMONTH return the fake 29th (60) or the 28th (59)?",
+      "formulas": { "A1": "=EOMONTH(DATE(1900,2,1),0)" }
+    },
+    {
+      "id": "leap1900.edate-jan-31",
+      "note": "One month after 1900-01-31 is clamped to the end of February; which end, 28 or the fake 29?",
+      "formulas": { "A1": "=EDATE(DATE(1900,1,31),1)" }
+    },
+    {
+      "id": "leap1900.yearfrac-1900",
+      "note": "Actual/actual YEARFRAC over 1900 depends on whether 1900 has 365 or 366 days.",
+      "formulas": { "A1": "=YEARFRAC(DATE(1900,1,1),DATE(1901,1,1),1)" }
+    },
+    {
+      "id": "leap1900.dayname-60",
+      "note": "The day name of the fake day; the name text also depends on the Excel language.",
+      "formulas": { "A1": "=TEXT(60,\"dddd\")" }
+    },
+    {
+      "id": "leap1900.display-format-60",
+      "note": "A cell holding 60 with a date format must display the fake day.",
+      "inputs": { "A1": { "value": 60, "format": "yyyy-mm-dd" } },
+      "formulas": { "B1": { "f": "=A1", "format": "yyyy-mm-dd" } },
+      "expect": { "B1": 60 }
+    }
+  ]
+}

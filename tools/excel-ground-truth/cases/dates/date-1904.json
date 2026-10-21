@@ -1,0 +1,116 @@
+{
+  "schema": 1,
+  "title": "The 1904 date system",
+  "formats": ["xlsx", "xls"],
+  "settings": { "date1904": true },
+  "cases": [
+    {
+      "id": "d1904.serial-0-text",
+      "note": "In the 1904 system serial 0 is 1904-01-01; the same number means 1900-01-00 in the 1900 system.",
+      "formulas": { "A1": "=TEXT(0,\"yyyy-mm-dd\")" },
+      "expect": { "A1": "1904-01-01" }
+    },
+    {
+      "id": "d1904.date-epoch",
+      "note": "DATE(1904,1,1) is 0 and the next day is 1.",
+      "formulas": { "A1": "=DATE(1904,1,1)", "A2": "=DATE(1904,1,2)" },
+      "expect": { "A1": 0, "A2": 1 }
+    },
+    {
+      "id": "d1904.date-2000",
+      "note": "Serials are 1462 lower than in the 1900 system: 2000-01-01 is 35064, not 36526.",
+      "formulas": { "A1": "=DATE(2000,1,1)" },
+      "expect": { "A1": 35064 }
+    },
+    {
+      "id": "d1904.before-epoch",
+      "note": "Dates before 1904 cannot be made with DATE in this system.",
+      "formulas": { "A1": "=DATE(1903,12,31)" }
+    },
+    {
+      "id": "d1904.leap-day-1900",
+      "note": "The fake 1900-02-29 does not exist here; it is also before the epoch.",
+      "formulas": { "A1": "=DATE(1900,2,29)" }
+    },
+    {
+      "id": "d1904.parts-of-0",
+      "note": "YEAR/MONTH/DAY of 0 give 1904, 1, 1 (not 1900, 1, 0).",
+      "formulas": { "A1": "=YEAR(0)", "A2": "=MONTH(0)", "A3": "=DAY(0)" },
+      "expect": { "A1": 1904, "A2": 1, "A3": 1 }
+    },
+    {
+      "id": "d1904.weekday-0-and-1",
+      "note": "1904-01-01 was a Friday (6) and 1904-01-02 a Saturday (7); weekdays are right from the start.",
+      "formulas": { "A1": "=WEEKDAY(0)", "A2": "=WEEKDAY(1)" },
+      "expect": { "A1": 6, "A2": 7 }
+    },
+    {
+      "id": "d1904.negative-time-text",
+      "note": "The 1904 system can show negative times; TEXT of -1 hour gives -1:00 instead of an error.",
+      "formulas": { "A1": "=TEXT(TIME(1,0,0)-TIME(2,0,0),\"h:mm\")" }
+    },
+    {
+      "id": "d1904.negative-time-display",
+      "note": "A negative time with a time format displays with a minus sign in the 1904 system (#### in the 1900 system).",
+      "formulas": { "A1": { "f": "=TIME(1,0,0)-TIME(2,0,0)", "format": "h:mm" } }
+    },
+    {
+      "id": "d1904.negative-date-text",
+      "note": "What a negative date serial formats to in the 1904 system.",
+      "formulas": { "A1": "=TEXT(-1,\"yyyy-mm-dd\")" }
+    },
+    {
+      "id": "d1904.datevalue",
+      "note": "DATEVALUE returns the 1904-based serial.",
+      "formulas": { "A1": "=DATEVALUE(\"2000-01-01\")" },
+      "expect": { "A1": 35064 }
+    },
+    {
+      "id": "d1904.typed-date",
+      "note": "A typed date is stored as a 1904-based serial.",
+      "inputs": { "A1": { "typed": "2000-01-01" } },
+      "formulas": { "B1": "=A1" },
+      "expect": { "B1": 35064 }
+    },
+    {
+      "id": "d1904.same-number-other-date",
+      "note": "The stored number 45000 is 2023-03-15 in the 1900 system but four years and a day later here.",
+      "inputs": { "A1": { "value": 45000, "format": "yyyy-mm-dd" } },
+      "formulas": { "B1": "=TEXT(A1,\"yyyy-mm-dd\")" },
+      "expect": { "B1": "2027-03-16" }
+    },
+    {
+      "id": "d1904.difference-unchanged",
+      "note": "Differences between dates are the same in both systems.",
+      "formulas": { "A1": "=DATE(2024,3,1)-DATE(2024,2,1)" },
+      "expect": { "A1": 29 }
+    },
+    {
+      "id": "d1904.two-digit-year",
+      "note": "Years 0-1899 still get 1900 added, so DATE(4,1,1) is 1904-01-01, serial 0.",
+      "formulas": { "A1": "=DATE(4,1,1)" }
+    },
+    {
+      "id": "d1904.max-date",
+      "note": "9999-12-31 is 2957003 here (2958465 - 1462).",
+      "formulas": { "A1": "=DATE(9999,12,31)" },
+      "expect": { "A1": 2957003 }
+    },
+    {
+      "id": "d1904.eomonth-before-epoch",
+      "note": "EOMONTH that lands before the epoch.",
+      "formulas": { "A1": "=EOMONTH(DATE(1904,1,15),-1)" }
+    },
+    {
+      "id": "d1904.yearfrac",
+      "note": "YEARFRAC over a whole leap year is still exactly 1.",
+      "formulas": { "A1": "=YEARFRAC(DATE(2023,1,1),DATE(2024,1,1),1)" },
+      "expect": { "A1": 1 }
+    },
+    {
+      "id": "d1904.date-display",
+      "note": "Displayed text of a date cell uses the 1904 epoch.",
+      "formulas": { "A1": { "f": "=1", "format": "yyyy-mm-dd" } }
+    }
+  ]
+}

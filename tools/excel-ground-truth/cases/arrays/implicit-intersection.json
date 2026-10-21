@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "title": "Implicit intersection (@) and legacy array formulas",
+  "formats": ["xlsx"],
+  "inputs": { "A1": 10, "A2": 20, "A3": 30, "A4": 40, "A5": 50 },
+  "cases": [
+    {
+      "id": "ii.legacy-same-row",
+      "note": "A pre-dynamic-array formula =A1:A5 in row 2 takes the value from row 2 (implicit intersection). Excel 365 shows it as =@A1:A5.",
+      "formulas": { "B2": { "f": "=A1:A5", "set": "formula" } },
+      "expect": { "B2": 20 }
+    },
+    {
+      "id": "ii.legacy-no-overlap",
+      "note": "In a row outside the range there is nothing to intersect: #VALUE!.",
+      "formulas": { "B7": { "f": "=A1:A5", "set": "formula" } },
+      "expect": { "B7": "#VALUE!" }
+    },
+    {
+      "id": "ii.at-operator-same-row",
+      "note": "The @ operator does implicit intersection explicitly.",
+      "requires": ["dynamic-arrays"],
+      "formulas": { "B3": "=@A1:A5" },
+      "expect": { "B3": 30 }
+    },
+    {
+      "id": "ii.at-operator-no-overlap",
+      "note": "@ outside the range is #VALUE!.",
+      "requires": ["dynamic-arrays"],
+      "formulas": { "B9": "=@A1:A5" },
+      "expect": { "B9": "#VALUE!" }
+    },
+    {
+      "id": "ii.dynamic-no-at",
+      "note": "The same formula entered as a dynamic-array formula spills all five values.",
+      "requires": ["dynamic-arrays"],
+      "formulas": { "B1": "=A1:A5" }
+    },
+    {
+      "id": "ii.legacy-row-range",
+      "note": "Implicit intersection also works across columns: =D1:H1 in column F takes F1.",
+      "inputs": { "D1": 1, "E1": 2, "F1": 3, "G1": 4, "H1": 5 },
+      "formulas": { "F3": { "f": "=D1:H1", "set": "formula" } },
+      "expect": { "F3": 3 }
+    },
+    {
+      "id": "ii.legacy-sum-of-product",
+      "note": "SUM(A*B) entered the old way, without Ctrl+Shift+Enter: Excel 365 may add @ and give a different result than the array version.",
+      "inputs": { "B1": 1, "B2": 2, "B3": 3 },
+      "formulas": { "C2": { "f": "=SUM(A1:A3*B1:B3)", "set": "formula" } }
+    },
+    {
+      "id": "ii.cse-sum-of-product",
+      "note": "The same formula entered with Ctrl+Shift+Enter (FormulaArray) multiplies element by element: 10+40+90.",
+      "inputs": { "B1": 1, "B2": 2, "B3": 3 },
+      "formulas": { "C2": { "f": "=SUM(A1:A3*B1:B3)", "set": "array" } },
+      "expect": { "C2": 140 }
+    },
+    {
+      "id": "ii.cse-multi-cell",
+      "note": "A legacy multi-cell array formula fills exactly the selected range.",
+      "formulas": { "C1:C3": { "f": "=A1:A3*2", "set": "array" } }
+    },
+    {
+      "id": "ii.cse-range-too-large",
+      "note": "A legacy array formula entered into more cells than the result has fills the extra cells with #N/A.",
+      "formulas": { "C1:C5": { "f": "=A1:A3*2", "set": "array" } }
+    },
+    {
+      "id": "ii.at-on-function-result",
+      "note": "@ on an array returned by a function takes its first element.",
+      "requires": ["dynamic-arrays"],
+      "formulas": { "C4": "=@SEQUENCE(3)" }
+    },
+    {
+      "id": "ii.at-single-cell",
+      "note": "@ on a single cell changes nothing.",
+      "requires": ["dynamic-arrays"],
+      "formulas": { "C1": "=@A1" },
+      "expect": { "C1": 10 }
+    },
+    {
+      "id": "ii.legacy-index-zero",
+      "note": "INDEX(range,0) returns the whole column; entered the old way it is intersected with the formula's row.",
+      "formulas": { "B2": { "f": "=INDEX(A1:A5,0)", "set": "formula" } }
+    },
+    {
+      "id": "ii.legacy-if-on-range",
+      "note": "IF(A1:A5>25,...) entered the old way tests only the value in the formula's row.",
+      "formulas": { "B3": { "f": "=IF(A1:A5>25,\"big\",\"small\")", "set": "formula" } },
+      "expect": { "B3": "big" }
+    },
+    {
+      "id": "ii.legacy-whole-column",
+      "note": "A whole-column reference entered the old way intersects with the formula's row.",
+      "formulas": { "C4": { "f": "=A:A*2", "set": "formula" } },
+      "expect": { "C4": 80 }
+    }
+  ]
+}

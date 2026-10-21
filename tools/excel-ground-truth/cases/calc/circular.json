@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "title": "Circular references with iteration off",
+  "formats": ["xlsx"],
+  "settings": { "iteration": false },
+  "cases": [
+    {
+      "id": "circ.self",
+      "note": "With iteration off Excel does not calculate a circular cell; it usually shows 0.",
+      "formulas": { "A1": "=A1+1" }
+    },
+    {
+      "id": "circ.two-cell",
+      "note": "Two cells referring to each other.",
+      "formulas": { "A1": "=B1+1", "B1": "=A1+1" }
+    },
+    {
+      "id": "circ.sum-includes-itself",
+      "note": "A total that includes its own cell.",
+      "inputs": { "A1": 1, "A2": 2, "A3": 3 },
+      "formulas": { "A4": "=SUM(A1:A4)" }
+    },
+    {
+      "id": "circ.dependent",
+      "note": "A normal cell reading a circular cell.",
+      "formulas": { "A1": "=A1+1", "B1": "=A1+5" }
+    },
+    {
+      "id": "circ.through-indirect",
+      "note": "A circle that exists only at calculation time, through INDIRECT.",
+      "volatile": true,
+      "formulas": { "A1": "=INDIRECT(\"A1\")+1" }
+    },
+    {
+      "id": "circ.through-offset",
+      "note": "A circle through OFFSET.",
+      "volatile": true,
+      "formulas": { "A1": "=OFFSET(A1,0,0)+1" }
+    },
+    {
+      "id": "circ.row-of-self",
+      "note": "ROW and COLUMN of the own cell read only its position, so they are not circular.",
+      "formulas": { "A1": "=ROW(A1)", "B1": "=COLUMN(B1)" },
+      "expect": { "A1": 1, "B1": 2 }
+    },
+    {
+      "id": "circ.cell-address-of-self",
+      "note": "CELL(\"address\") of the own cell is not circular either (CELL is volatile).",
+      "volatile": true,
+      "formulas": { "A1": "=CELL(\"address\",A1)" }
+    },
+    {
+      "id": "circ.isblank-self",
+      "note": "ISBLANK of the own cell: circular or not?",
+      "formulas": { "A1": "=ISBLANK(A1)" }
+    },
+    {
+      "id": "circ.branch-not-taken",
+      "note": "The circular part is in an IF branch that is not taken; Excel still sees the reference.",
+      "inputs": { "B1": false },
+      "formulas": { "A1": "=IF(B1,A1+1,7)" }
+    }
+  ]
+}

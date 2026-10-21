@@ -1,0 +1,144 @@
+{
+  "schema": 1,
+  "title": "Chinese and Japanese text, and characters outside the BMP",
+  "formats": ["xlsx", "xls"],
+  "cases": [
+    {
+      "id": "cjk.len",
+      "note": "LEN counts characters: two Chinese characters are 2.",
+      "formulas": { "A1": "=LEN(\"中文\")" },
+      "expect": { "A1": 2 }
+    },
+    {
+      "id": "cjk.lenb",
+      "note": "LENB counts 2 bytes per CJK character only when a double-byte language is the default editing language; otherwise it equals LEN. Locale trap.",
+      "formulas": { "A1": "=LENB(\"中文\")", "A2": "=LENB(\"ab中\")" }
+    },
+    {
+      "id": "cjk.find-and-findb",
+      "note": "FIND counts characters; FINDB counts bytes under a double-byte language.",
+      "formulas": { "A1": "=FIND(\"文\",\"中文\")", "A2": "=FINDB(\"文\",\"中文\")" },
+      "expect": { "A1": 2 }
+    },
+    {
+      "id": "cjk.leftb-half-character",
+      "note": "LEFTB with an odd byte count cuts a double-byte character in half; what is returned in its place?",
+      "formulas": { "A1": "=LEFTB(\"中文字\",3)", "A2": "=LEN(LEFTB(\"中文字\",3))" }
+    },
+    {
+      "id": "cjk.mid",
+      "note": "MID on mixed kanji and kana counts characters.",
+      "formulas": { "A1": "=MID(\"日本語のテキスト\",3,3)" },
+      "expect": { "A1": "語のテ" }
+    },
+    {
+      "id": "cjk.upper-fullwidth",
+      "note": "UPPER also upper-cases full-width Latin letters.",
+      "formulas": { "A1": "=UPPER(\"ａｂｃ\")", "A2": "=LOWER(\"ΑΒΓ\")" },
+      "expect": { "A1": "ＡＢＣ", "A2": "αβγ" }
+    },
+    {
+      "id": "cjk.asc-and-dbcs",
+      "note": "ASC turns full-width into half-width and DBCS the other way, but only under a double-byte language.",
+      "formulas": { "A1": "=ASC(\"ＡＢＣ１２３\")", "A2": "=DBCS(\"abc123\")" }
+    },
+    {
+      "id": "cjk.code-of-cjk",
+      "note": "CODE returns a code in the Windows ANSI code page (936 for Chinese), so the result depends on the machine.",
+      "formulas": { "A1": "=CODE(\"中\")", "A2": "=CHAR(CODE(\"中\"))" }
+    },
+    {
+      "id": "cjk.unicode-and-unichar",
+      "note": "UNICODE and UNICHAR use code points and do not depend on the locale.",
+      "formulas": { "A1": "=UNICODE(\"中\")", "A2": "=UNICHAR(26085)" },
+      "expect": { "A1": 20013, "A2": "日" }
+    },
+    {
+      "id": "cjk.emoji-length",
+      "note": "Excel counts UTF-16 code units: one emoji is LEN 2. UNICODE still returns the full code point.",
+      "formulas": { "A1": "=LEN(\"😀\")", "A2": "=UNICODE(\"😀\")" },
+      "expect": { "A1": 2, "A2": 128512 }
+    },
+    {
+      "id": "cjk.emoji-split",
+      "note": "LEFT of an emoji by 1 returns half a surrogate pair (written as \\ud83d in the JSON).",
+      "formulas": { "A1": "=LEFT(\"😀a\",1)", "A2": "=LEN(LEFT(\"😀a\",1))" }
+    },
+    {
+      "id": "cjk.width-comparison",
+      "note": "EXACT tells full-width a from a; does = treat them as equal too?",
+      "formulas": { "A1": "=EXACT(\"ａ\",\"a\")", "A2": "=\"ａ\"=\"a\"" },
+      "expect": { "A1": false }
+    },
+    {
+      "id": "cjk.search-width",
+      "note": "Does SEARCH ignore character width as well as case?",
+      "formulas": { "A1": "=SEARCH(\"Ａ\",\"xａ\")", "A2": "=SEARCH(\"a\",\"xＡ\")" }
+    },
+    {
+      "id": "cjk.substitute",
+      "note": "SUBSTITUTE removes a CJK character.",
+      "formulas": { "A1": "=SUBSTITUTE(\"日本語\",\"本\",\"\")" },
+      "expect": { "A1": "日語" }
+    },
+    {
+      "id": "cjk.rept",
+      "note": "REPT repeats CJK text.",
+      "formulas": { "A1": "=REPT(\"中\",3)" },
+      "expect": { "A1": "中中中" }
+    },
+    {
+      "id": "cjk.dbnum-formats",
+      "note": "[DBNum1] and [DBNum2] write numbers with Chinese numerals; the exact output depends on the locale.",
+      "formulas": { "A1": "=TEXT(1234,\"[DBNum1]\")", "A2": "=TEXT(1234,\"[DBNum2]\")" }
+    },
+    {
+      "id": "cjk.numberstring",
+      "note": "NUMBERSTRING exists only in Chinese Excel; elsewhere #NAME?.",
+      "formulas": { "A1": "=NUMBERSTRING(1234,1)" }
+    },
+    {
+      "id": "cjk.trim-ideographic-space",
+      "note": "TRIM removes only the ASCII space; the ideographic space U+3000 stays.",
+      "formulas": { "A1": "=LEN(TRIM(\"　中　\"))", "A2": "=LEN(TRIM(\"  中  \"))" },
+      "expect": { "A2": 1 }
+    },
+    {
+      "id": "cjk.halfwidth-katakana",
+      "note": "Half-width ｶﾞ is two characters (ka + voiced mark); ASC of full-width ガ gives that pair under a double-byte language.",
+      "formulas": { "A1": "=LEN(\"ｶﾞ\")", "A2": "=ASC(\"ガ\")" },
+      "expect": { "A1": 2 }
+    },
+    {
+      "id": "cjk.compare-order",
+      "note": "The order of CJK text in comparisons follows the collation of the locale.",
+      "formulas": { "A1": "=\"中\"<\"日\"", "A2": "=\"あ\"<\"ア\"", "A3": "=\"a\"<\"中\"" }
+    },
+    {
+      "id": "cjk.match-exact",
+      "note": "Exact MATCH on CJK text.",
+      "inputs": { "A1": "中", "A2": "日", "A3": "韩" },
+      "formulas": { "B1": "=MATCH(\"日\",A1:A3,0)" },
+      "expect": { "B1": 2 }
+    },
+    {
+      "id": "cjk.text-cell-length",
+      "note": "LEN and LENB of a cell holding CJK text.",
+      "inputs": { "A1": "東京都" },
+      "formulas": { "B1": "=LEN(A1)", "B2": "=LENB(A1)" },
+      "expect": { "B1": 3 }
+    },
+    {
+      "id": "cjk.proper-mixed",
+      "note": "PROPER capitalises letters after any non-letter, including after CJK characters.",
+      "formulas": { "A1": "=PROPER(\"hello wORLD 中文abc\")" }
+    },
+    {
+      "id": "cjk.countif-wildcard",
+      "note": "COUNTIF wildcards count characters, not bytes.",
+      "inputs": { "A1": "中文", "A2": "中", "A3": "中文字" },
+      "formulas": { "B1": "=COUNTIF(A1:A3,\"中?\")", "B2": "=COUNTIF(A1:A3,\"中*\")" },
+      "expect": { "B1": 1, "B2": 3 }
+    }
+  ]
+}

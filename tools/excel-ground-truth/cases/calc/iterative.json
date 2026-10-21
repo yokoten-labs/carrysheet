@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "title": "Iterative calculation with circular references (iteration on: 100 steps, max change 0.001)",
+  "formats": ["xlsx"],
+  "settings": { "iteration": true, "maxIterations": 100, "maxChange": 0.001 },
+  "cases": [
+    {
+      "id": "iter.self-increment",
+      "note": "=A1+1 referring to itself: each iteration adds 1, so one full recalculation should stop at the iteration limit.",
+      "formulas": { "A1": "=A1+1" }
+    },
+    {
+      "id": "iter.converge-to-two",
+      "note": "=(A1+2)/2 converges to 2; Excel stops when the change is below 0.001, so the value is close to but not exactly 2.",
+      "formulas": { "A1": "=(A1+2)/2" }
+    },
+    {
+      "id": "iter.two-cell-loop",
+      "note": "A1 and B1 refer to each other; the order Excel evaluates them decides the final pair.",
+      "formulas": { "A1": "=B1+1", "B1": "=A1+1" }
+    },
+    {
+      "id": "iter.counter-with-cap",
+      "note": "A counter that stops itself at 5.",
+      "formulas": { "A1": "=IF(A1>=5,A1,A1+1)" },
+      "expect": { "A1": 5 }
+    },
+    {
+      "id": "iter.interest-loop",
+      "note": "B = 1000 + 5% of B converges to about 1052.63.",
+      "inputs": { "A1": 1000 },
+      "formulas": { "B1": "=A1+C1", "C1": "=B1*0.05" }
+    },
+    {
+      "id": "iter.diverging",
+      "note": "=A1*2+1 grows without limit; after 100 iterations it is about 2^100.",
+      "formulas": { "A1": "=A1*2+1" }
+    },
+    {
+      "id": "iter.newton-sqrt2",
+      "note": "Newton's method for the square root of 2, starting from 0 (guarded).",
+      "formulas": { "A1": "=(A1+2/IF(A1=0,1,A1))/2" }
+    },
+    {
+      "id": "iter.error-in-loop",
+      "note": "An error inside a circular formula stays an error.",
+      "formulas": { "A1": "=A1+1/0" },
+      "expect": { "A1": "#DIV/0!" }
+    },
+    {
+      "id": "iter.sum-includes-itself",
+      "note": "A total that includes its own cell.",
+      "inputs": { "A1": 1, "A2": 2, "A3": 3 },
+      "formulas": { "A4": "=SUM(A1:A4)" }
+    },
+    {
+      "id": "iter.dependent-of-loop",
+      "note": "A normal cell that reads a converging circular cell.",
+      "formulas": { "A1": "=(A1+2)/2", "B1": "=A1*10" }
+    },
+    {
+      "id": "iter.text-growing",
+      "note": "Text that appends to itself on each iteration.",
+      "formulas": { "A1": "=A1&\"x\"" }
+    },
+    {
+      "id": "iter.slow-convergence",
+      "note": "Moves 1% toward 10 per step: stops at the 100-step limit long before the 0.001 change limit.",
+      "formulas": { "A1": "=A1+(10-A1)*0.01" }
+    }
+  ]
+}
