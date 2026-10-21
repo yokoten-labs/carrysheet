@@ -508,8 +508,8 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: "mcp_serve",
         cli_path: &["mcp", "serve"],
-        summary: "Run the MCP server over stdio for AI agents (HTTP is not built yet)",
-        description: "MCP server: serves Carrysheet's tools to an AI client over stdio. Clients start it; people rarely run it by hand.",
+        summary: "Run the MCP server for AI agents, over stdio or local HTTP",
+        description: "MCP server: serves Carrysheet's tools to an AI client over stdio, or over HTTP on this computer only (127.0.0.1 or [::1]) with a token and read-only by default. Clients start it; people rarely run it by hand.",
         args: &[
             Arg {
                 name: "root",
@@ -523,7 +523,7 @@ pub const COMMANDS: &[Command] = &[
                 ty: ArgType::Boolean,
                 required: false,
                 positional: false,
-                description: "Offer only tools that never change files. Default: false.",
+                description: "Offer only tools that never change files. Default: false over stdio; over HTTP, on unless --allow-writes.",
             },
             Arg {
                 name: "log_file",
@@ -537,7 +537,21 @@ pub const COMMANDS: &[Command] = &[
                 ty: ArgType::Text,
                 required: false,
                 positional: false,
-                description: "Serve HTTP on 127.0.0.1:PORT instead of stdio, for tests and tunnels. Not built yet.",
+                description: "Serve HTTP on 127.0.0.1:PORT or [::1]:PORT instead of stdio; port 0 picks a free one. Clients need the token printed at start. Default: stdio.",
+            },
+            Arg {
+                name: "token_file",
+                ty: ArgType::Path,
+                required: false,
+                positional: false,
+                description: "With --http: write the token to this file (owner-only on Linux and macOS) instead of showing it on stderr. Default: shown once on stderr.",
+            },
+            Arg {
+                name: "allow_writes",
+                ty: ArgType::Boolean,
+                required: false,
+                positional: false,
+                description: "With --http: also offer tools that change files. Default: false, so HTTP is read-only.",
             },
         ],
         changes_files: false,
