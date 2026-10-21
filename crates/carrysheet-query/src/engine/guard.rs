@@ -3,8 +3,7 @@
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::time::Instant;
 
 use rusqlite::config::DbConfig;
@@ -363,52 +362,115 @@ fn statement(action: &AuthAction<'_>) -> std::result::Result<(), String> {
     }
 }
 
-/// Sets a flag once a deadline passes, so the progress handler reads a flag
-/// instead of the clock. Stops its thread when dropped.
+/// One timer thread for every query in this process: it sets each query's
+/// `late` flag once its deadline passes, so the progress handler reads a
+/// flag instead of the clock.
+///
+/// It is started once, when the first sheets load. A thread started per
+/// query broke the worker: after a large query, freed memory stays mapped,
+/// so under the worker's address-space cap a new thread could not map its
+/// signal stack, and Rust aborts the whole process then, which looked like
+/// a query that needed too much memory. One thread started before the cap
+/// maps nothing later.
+struct Timer {
+    alarms: Mutex<Alarms>,
+    wake: Condvar,
+}
+
+struct Alarms {
+    next_id: u64,
+    /// Each running query's id, deadline and `late` flag.
+    waiting: Vec<(u64, Instant, Arc<AtomicBool>)>,
+}
+
+static TIMER: Timer = Timer {
+    alarms: Mutex::new(Alarms {
+        next_id: 0,
+        waiting: Vec::new(),
+    }),
+    wake: Condvar::new(),
+};
+
+/// Whether the timer thread started; false if it could not, and then each
+/// query reads the clock instead.
+static TIMER_RUNS: OnceLock<bool> = OnceLock::new();
+
+/// Starts the timer thread if it is not running yet. Called on load, so a
+/// worker starts it before it caps its memory.
+pub(crate) fn start_timer() -> bool {
+    *TIMER_RUNS.get_or_init(|| {
+        std::thread::Builder::new()
+            .name("carrysheet-query-timer".to_owned())
+            .stack_size(64 * 1024)
+            .spawn(|| TIMER.run())
+            .is_ok()
+    })
+}
+
+impl Timer {
+    /// Never returns. Nothing panics while holding the lock, and a poisoned
+    /// lock is taken anyway: a timer that stopped would leave queries
+    /// without a time limit.
+    fn run(&self) {
+        let mut alarms = self.alarms.lock().unwrap_or_else(PoisonError::into_inner);
+        loop {
+            let now = Instant::now();
+            alarms.waiting.retain(|(_, deadline, late)| {
+                if *deadline <= now {
+                    late.store(true, Ordering::Relaxed);
+                    false
+                } else {
+                    true
+                }
+            });
+            let next = alarms
+                .waiting
+                .iter()
+                .map(|(_, deadline, _)| *deadline)
+                .min();
+            alarms = match next {
+                Some(deadline) => {
+                    self.wake
+                        .wait_timeout(alarms, deadline - now)
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .0
+                }
+                None => self
+                    .wake
+                    .wait(alarms)
+                    .unwrap_or_else(PoisonError::into_inner),
+            };
+        }
+    }
+}
+
+/// One query's alarm on the timer thread; removed when dropped.
 pub(crate) struct Watchdog {
-    done: Arc<(Mutex<bool>, Condvar)>,
-    thread: Option<JoinHandle<()>>,
+    alarm: Option<u64>,
 }
 
 impl Watchdog {
-    /// Starts the timer thread; without one, `thread` is `None`.
+    /// Sets an alarm for `deadline`; without a timer thread, `alarm` is
+    /// `None`.
     fn start(deadline: Instant, late: Arc<AtomicBool>) -> Watchdog {
-        let done = Arc::new((Mutex::new(false), Condvar::new()));
-        let shared = Arc::clone(&done);
-        let thread = std::thread::Builder::new()
-            .name("carrysheet-query-timer".to_owned())
-            .stack_size(64 * 1024)
-            .spawn(move || {
-                let (finished, wake) = &*shared;
-                let Ok(mut finished) = finished.lock() else {
-                    return;
-                };
-                while !*finished {
-                    let now = Instant::now();
-                    if now >= deadline {
-                        late.store(true, Ordering::Relaxed);
-                        return;
-                    }
-                    match wake.wait_timeout(finished, deadline - now) {
-                        Ok((guard, _)) => finished = guard,
-                        Err(_) => return,
-                    }
-                }
-            })
-            .ok();
-        Watchdog { done, thread }
+        if !start_timer() {
+            return Watchdog { alarm: None };
+        }
+        let mut alarms = TIMER.alarms.lock().unwrap_or_else(PoisonError::into_inner);
+        let id = alarms.next_id;
+        alarms.next_id += 1;
+        alarms.waiting.push((id, deadline, late));
+        drop(alarms);
+        TIMER.wake.notify_one();
+        Watchdog { alarm: Some(id) }
     }
 }
 
 impl Drop for Watchdog {
     fn drop(&mut self) {
-        let (finished, wake) = &*self.done;
-        if let Ok(mut finished) = finished.lock() {
-            *finished = true;
-        }
-        wake.notify_one();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+        if let Some(id) = self.alarm {
+            let mut alarms = TIMER.alarms.lock().unwrap_or_else(PoisonError::into_inner);
+            alarms.waiting.retain(|(other, _, _)| *other != id);
         }
     }
 }
@@ -433,13 +495,10 @@ pub(crate) fn watch(
     let deadline = start.checked_add(max_time);
     let watchdog = match deadline {
         Some(deadline) => Watchdog::start(deadline, Arc::clone(&late)),
-        None => Watchdog {
-            done: Arc::default(),
-            thread: None,
-        },
+        None => Watchdog { alarm: None },
     };
     // Without a timer thread, read the clock: slower, same limit.
-    let clock = deadline.is_some() && watchdog.thread.is_none();
+    let clock = deadline.is_some() && watchdog.alarm.is_none();
     let mut checks = 0u64;
     let period = i32::try_from(STEPS_PER_CHECK).unwrap_or(i32::MAX);
     conn.progress_handler(
@@ -668,5 +727,25 @@ mod tests {
         assert_eq!(used("ENABLE_STAT4"), 0);
         assert_eq!(used("OMIT_DEPRECATED"), 1);
         assert_eq!(used("OMIT_SHARED_CACHE"), 1);
+    }
+
+    /// The one timer thread sets a query's flag at its deadline, and an
+    /// alarm dropped first (the query finished) never sets it.
+    #[test]
+    fn the_shared_timer_sets_late_flags() {
+        use std::time::Duration;
+        assert!(start_timer());
+        let late = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+        let soon = Instant::now() + Duration::from_millis(20);
+        let alarm = Watchdog::start(soon, Arc::clone(&late));
+        assert!(alarm.alarm.is_some());
+        drop(Watchdog::start(soon, Arc::clone(&finished)));
+        let waited = Instant::now();
+        while !late.load(Ordering::Relaxed) && waited.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(late.load(Ordering::Relaxed), "the deadline passed unseen");
+        assert!(!finished.load(Ordering::Relaxed), "a dropped alarm fired");
     }
 }

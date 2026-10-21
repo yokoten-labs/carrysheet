@@ -91,6 +91,8 @@ impl Local {
     /// [`Limits::max_load_time`].
     pub(crate) fn load(inputs: &[TableInput], limits: Limits) -> Result<Local, QueryError> {
         let start = Instant::now();
+        // Before a worker caps its memory: see guard::Timer.
+        guard::start_timer();
         check_size(inputs, &limits)?;
         let mut taken = Names::default();
         let tables: Vec<TableInfo> = inputs
