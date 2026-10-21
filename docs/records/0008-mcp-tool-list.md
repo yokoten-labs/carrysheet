@@ -5,31 +5,29 @@ Date: 2026-10-20 (UTC)
 
 ## Context
 
-Issue 62: the MCP `tools/list` answer is close to its 10,000-character budget, and more tools are planned. This record decides how the list grows. The owner decides; the lead wrote this proposal from the facts below.
+Issue 62: the MCP `tools/list` answer is close to its 10,000-character budget, and more tools are planned. This record decides how the list grows. The facts below led to the decision at the end.
 
 ### Where the 10,000 comes from
 
-It is **our own number, not a client limit.** It first appears in the draft `docs/agents.md` (branch agent-compat, commit 77edbf7, 2026-10-19): "All tool definitions together stay under ~10k characters." The command layer made it a hard lint rule the same day (`MAX_TOOLS_CHARS` in `crates/carrysheet-commands/src/schema/lint.rs`, commit f9b6632). No commit gives a reason. The reason that holds today is record 0005: the same tools must work for a local model with a 4k–8k context, and some clients load every tool into every request.
+It is **our own number, not a client limit.** It first appears in the design rules in `docs/agents.md`: "All tool definitions together stay under ~10k characters." The command layer made it a hard lint rule (`MAX_TOOLS_CHARS` in `crates/carrysheet-commands/src/schema/lint.rs`). No note from that time gives a reason. The reason that holds today is record 0005: the same tools must work for a local model with a 4k–8k context, and some clients load every tool into every request.
 
 ### What we measured
 
-Each tool is counted as compact JSON (name, description, input schema, annotations), the same way the lint counts. Debug builds of `carrysheet-cli mcp serve`, asked for `tools/list` over stdio, 2026-10-20.
+Each tool is counted as compact JSON (name, description, input schema, annotations), the same way the lint counts. Debug builds of `carrysheet-cli mcp serve`, asked for `tools/list` over stdio, 2026-10-20. We measured three states of the code: the first eight tools; the same eight with the GridCraft kernel added; and nine tools, with `macros`.
 
-| Branch (commit) | Tools | Total chars | Descriptions | Input schemas | of which argument text | Annotations |
+| State | Tools | Total chars | Descriptions | Input schemas | of which argument text | Annotations |
 |---|---|---|---|---|---|---|
-| foundation (d27dd58) | 8 | 8,617 | 1,440 | 5,950 | 2,245 | 715 |
-| 45-gridcraft (323eaaa) | 8 | 8,779 | 1,486 | 6,066 | 2,361 | 715 |
-| 22-macros-command (3c24478) | 9 | 9,745 | 1,683 | 6,682 | 2,594 | 804 |
+| Eight tools | 8 | 8,617 | 1,440 | 5,950 | 2,245 | 715 |
+| Eight tools, with the GridCraft kernel | 8 | 8,779 | 1,486 | 6,066 | 2,361 | 715 |
+| Nine tools, with `macros` | 9 | 9,745 | 1,683 | 6,682 | 2,594 | 804 |
 
-Foundation 4376c38 did not change the command table, so its numbers are the same as d27dd58. The 9,745 differs from the issue's 9,752 by 7 characters, probably a later wording change on that branch.
-
-Per tool, on 22-macros-command:
+Per tool, with nine tools:
 
 | Tool | Chars | Arguments |
 |---|---|---|
-| edit | 2,076 (2,212 on 45-gridcraft) | 6, with a nested op object |
+| edit | 2,076 (2,212 with the GridCraft kernel) | 6, with a nested op object |
 | read | 1,490 | 7 |
-| convert | 1,330 (1,370 on 45-gridcraft) | 7 |
+| convert | 1,330 (1,370 with the GridCraft kernel) | 7 |
 | macros | 1,128 | 4 |
 | sanitize | 969 | 4 |
 | eval | 724 | 3 |
@@ -44,7 +42,7 @@ Where the characters go:
 - **Annotations: 804** (8%), all four set on every tool, as ChatGPT requires.
 - The rest is names, types and enums.
 
-In tokens: the 9,745-character list is **2,312 tokens** with the Qwen 3.5 tokenizer (local Ollama, about 4.2 characters per token). For a local model with an 8k context, that is 29% of the context before the user says anything.
+In tokens: the 9,745-character list is **2,312 tokens** with the Qwen 3.5 tokenizer, run locally (about 4.2 characters per token). For a local model with an 8k context, that is 29% of the context before the user says anything.
 
 ### What is planned
 
@@ -98,7 +96,7 @@ Every client can only remove tools on its side (Codex, Gemini, VS Code, Cursor, 
 
 - **GitHub's MCP server** ([README](https://github.com/github/github-mcp-server)): `--toolsets repos,issues,...` (or `GITHUB_TOOLSETS`); a `default` toolset (context, repos, issues, pull_requests, users) when none is given; `all` for everything; `--tools` adds single tools; `--read-only` wins over both; an unknown name stops the server at start. Its README: "Enabling only the toolsets that you need can help the LLM with tool choice and reduce the context size." A beta `--dynamic-toolsets` mode gives the model `list_available_toolsets`, `get_toolset_tools` and `enable_toolset`, which add tools while it runs.
 - **GitHub Copilot** cut its built-in tools to a 13-tool core and groups the rest as virtual tools. [blog](https://github.blog/ai-and-ml/github-copilot/how-were-making-github-copilot-smarter-with-fewer-tools/)
-- **haris-musa/excel-mcp-server** halved its `tools/list` by trimming schemas and dropping pretty-printed JSON (from `research/mcp-client-compat.md`, branch agent-compat).
+- **haris-musa/excel-mcp-server** halved its `tools/list` by trimming schemas and dropping pretty-printed JSON (from `research/mcp-client-compat.md`).
 
 ## Options
 
@@ -121,8 +119,8 @@ The owner accepted this on 2026-10-20, with `macros` in its own toolset (not in 
 A combination: **(a) toolsets, with (e1), (e2) and (c) to keep the default list small.**
 
 1. **The default list stays at 10,000 characters or less.** The default list is what a client gets with no flags. This keeps the promise to local models and to clients that load every tool. The number is ours (see Context) and can change by a new record.
-2. **Fold first.** A new feature becomes an argument or an edit op of an existing tool when it is the same verb on the same file. A new tool needs a verb no tool has. Already decided this way: comments (issue 64). Proposed: connections in `overview` and `check` (issue 26 already says so).
-3. **Toolsets, named like GitHub's.** `carrysheet-cli mcp serve --toolsets default,macros --tools diff`. `default` is used when no toolset is given; `all` turns on everything; `--read-only` wins over both; an unknown name stops the server at start with a three-part error. Proposed sets:
+2. **Fold first.** A new feature becomes an argument or an edit op of an existing tool when it is the same verb on the same file. A new tool needs a verb no tool has. Already decided this way: comments (issue 64). Decided: connections in `overview` and `check` (issue 26 already says so).
+3. **Toolsets, named like GitHub's.** `carrysheet-cli mcp serve --toolsets default,macros --tools diff`. `default` is used when no toolset is given; `all` turns on everything; `--read-only` wins over both; an unknown name stops the server at start with a three-part error. The sets:
 
    | Toolset | Tools | Default? |
    |---|---|---|
@@ -140,7 +138,7 @@ A combination: **(a) toolsets, with (e1), (e2) and (c) to keep the default list 
 
 ### The test
 
-The lint already fails when all MCP tools together pass `MAX_TOOLS_CHARS` (`lint.rs`, test at line 556). Change it to measure the default list, and add a guard on the real server:
+The lint already fails when all MCP tools together pass `MAX_TOOLS_CHARS` (`lint.rs`, the test `the_mcp_tool_list_leaves_room`). Change it to measure the default list, and add a guard on the real server:
 
 - `crates/carrysheet-commands`: `default_tool_list_fits_budget` sums `tool_definition(c)` over the tools in the `default` toolset and fails over `MAX_TOOLS_CHARS` (10,000), with a message that says what happened, why (this record), and the fix (move a tool to a toolset, fold it into another tool, or shorten descriptions). It prints the size and the room left.
 - `crates/carrysheet-commands`: `every_tool_fits` fails when one tool passes 2,500 characters (edit is 2,212 today), and `all_toolsets_fit` fails when `all` passes 20,000, so the opt-in sets stay sane too.
