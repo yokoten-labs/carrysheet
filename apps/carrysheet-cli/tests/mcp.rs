@@ -335,6 +335,41 @@ fn stdio_session_lists_and_calls_tools() {
     assert!(!stderr.contains(scratch.path("home").to_str().unwrap()));
 }
 
+/// Tool errors name the argument or value at fault, cut short: a huge
+/// argument name, tool name or path cannot make a huge answer.
+#[test]
+fn tool_errors_are_cut_short() {
+    let scratch = Scratch::new();
+    let mut server = Server::start(&scratch, &[]);
+    initialize(&mut server, "2025-11-25");
+    let long = "x".repeat(50_000);
+    let mut unknown = serde_json::Map::new();
+    unknown.insert("path".into(), json!("book.xlsx"));
+    unknown.insert(long.clone(), json!(1));
+    for (id, name, arguments) in [
+        (2, "read", Value::Object(unknown)),
+        (3, "check", json!({ "path": format!("{long}.xlsx") })),
+        (4, "read", json!({ "path": "book.xlsx", "range": long })),
+        (5, long.as_str(), json!({})),
+    ] {
+        let r = call(&mut server, id, name, arguments);
+        let e = tool_error(&r);
+        for part in ["what", "fix", "why"] {
+            let text = e[part].as_str().unwrap();
+            assert!(
+                text.chars().count() <= 200,
+                "{part}: {} characters",
+                text.len()
+            );
+        }
+        let size = r.to_string().len();
+        assert!(size < 2_000, "call {id}: {size} bytes");
+    }
+    let (code, stderr) = server.finish();
+    assert_eq!(code, 0, "{stderr}");
+    assert!(stderr.len() < 5_000, "{} bytes of log", stderr.len());
+}
+
 #[cfg(unix)]
 #[test]
 fn links_out_of_the_root_are_refused() {
@@ -430,10 +465,30 @@ fn bad_options_fail_before_serving() {
     assert!(o.stdout.is_empty());
     assert!(String::from_utf8_lossy(&o.stderr).contains("--root"));
 
-    let o = run(&["mcp", "serve", "--http", "127.0.0.1:9", "--json"]);
-    assert_eq!(o.status.code(), Some(1));
-    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
-    assert_eq!(v["error"]["code"], "not_implemented");
+    // --http listens on loopback only: other addresses are usage errors.
+    for address in ["0.0.0.0:0", "[::]:0", "192.168.1.20:8080", "localhost:8080"] {
+        let o = run(&["mcp", "serve", "--http", address, "--json"]);
+        assert_eq!(o.status.code(), Some(2), "{address}");
+        let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+        assert_eq!(v["error"]["code"], "usage", "{v}");
+        assert!(
+            v["error"]["fix"]
+                .as_str()
+                .unwrap()
+                .contains("127.0.0.1:PORT"),
+            "{v}"
+        );
+    }
+    let o = run(&["mcp", "serve", "--http", "0.0.0.0:0"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        err.contains("DNS rebinding") && err.contains("other machines"),
+        "{err}"
+    );
+    // HTTP-only options need --http.
+    let o = run(&["mcp", "serve", "--allow-writes"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("only with --http"));
 
     // stdin closed at once: no session, nothing on stdout, a clean exit.
     let o = run(&[
@@ -489,4 +544,341 @@ fn startup_is_fast() {
     assert!(startup < STARTUP_LIMIT, "startup took {startup:?}");
     let (code, _) = server.finish();
     assert_eq!(code, 0);
+}
+
+/// An HTTP server started by a test. It runs until stopped, so it is
+/// killed when dropped if it still runs: a failing test must not leave it
+/// behind (a leaked one once held the build lock for 40 minutes).
+struct Running(Child);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if let Ok(None) = self.0.try_wait() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
+impl std::ops::Deref for Running {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Running {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.0
+    }
+}
+
+/// Sends one HTTP/1.1 request on a new connection and returns the status
+/// and body.
+fn http_post(port: u16, headers: &[String], body: &str) -> (u16, String) {
+    use std::net::TcpStream;
+    let mut raw = String::from("POST /mcp HTTP/1.1\r\n");
+    for h in headers {
+        raw.push_str(h);
+        raw.push_str("\r\n");
+    }
+    raw.push_str(&format!(
+        "Host: 127.0.0.1:{port}\r\nContent-Type: application/json\r\n\
+         Accept: application/json, text/event-stream\r\nContent-Length: {}\r\n\
+         Connection: close\r\n\r\n{body}",
+        body.len()
+    ));
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream.set_read_timeout(Some(WAIT)).unwrap();
+    stream.write_all(raw.as_bytes()).unwrap();
+    let mut answer = String::new();
+    let _ = stream.read_to_string(&mut answer);
+    let (head, body) = answer.split_once("\r\n\r\n").unwrap();
+    let status = head.split(' ').nth(1).unwrap().parse().unwrap();
+    (status, body.to_owned())
+}
+
+/// The real binary with `--http 127.0.0.1:0`: it prints the address and
+/// the token once on stderr, keeps stdout empty, keeps the token out of the
+/// log, and answers MCP requests that carry it.
+#[test]
+fn http_serves_with_a_token_shown_once() {
+    let scratch = Scratch::new();
+    let log = scratch.path("home/server.log");
+    let mut child = Command::new(BIN)
+        .args(["mcp", "serve", "--root"])
+        .arg(scratch.path("root"))
+        .args(["--http", "127.0.0.1:0", "--log-file"])
+        .arg(&log)
+        .current_dir(scratch.path("home"))
+        .env("HOME", scratch.path("home"))
+        .env("USERPROFILE", scratch.path("home"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map(Running)
+        .unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let (mut port, mut token) = (None, None);
+    let mut shown = String::new();
+    while port.is_none() || token.is_none() {
+        let mut line = String::new();
+        assert!(stderr.read_line(&mut line).unwrap() > 0, "{shown}");
+        shown.push_str(&line);
+        if let Some(rest) = line
+            .trim()
+            .strip_prefix("carrysheet-cli: MCP over HTTP at http://127.0.0.1:")
+        {
+            port = Some(rest.trim_end_matches("/mcp").parse::<u16>().unwrap());
+        }
+        if let Some(rest) = line
+            .trim()
+            .strip_prefix("carrysheet-cli: token (shown once, never logged): ")
+        {
+            token = Some(rest.to_owned());
+        }
+    }
+    let (port, token) = (port.unwrap(), token.unwrap());
+    assert_ne!(port, 0);
+    assert_eq!(token.len(), 64);
+
+    let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"carrysheet-test","version":"1"}}}"#;
+    let (status, body) = http_post(port, &[], init);
+    assert_eq!(status, 401, "{body}");
+    assert!(!body.contains(&token));
+    let bearer = format!("Authorization: Bearer {token}");
+    let (status, body) = http_post(port, std::slice::from_ref(&bearer), init);
+    assert_eq!(status, 200, "{body}");
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["result"]["serverInfo"]["name"], "carrysheet");
+    let list = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#;
+    let (status, body) = http_post(
+        port,
+        &[bearer, "MCP-Protocol-Version: 2025-11-25".into()],
+        list,
+    );
+    assert_eq!(status, 200, "{body}");
+    let v: Value = serde_json::from_str(&body).unwrap();
+    // Read-only by default over HTTP.
+    assert_eq!(
+        tool_names(&v["result"]),
+        ["overview", "read", "eval", "check", "macros", "feedback"]
+    );
+
+    let clean = stop(&mut child);
+    let mut out = Vec::new();
+    child.stdout.take().unwrap().read_to_end(&mut out).unwrap();
+    assert!(out.is_empty(), "stdout: {}", String::from_utf8_lossy(&out));
+    let mut rest = String::new();
+    let _ = stderr.read_to_string(&mut rest);
+    shown.push_str(&rest);
+    assert_eq!(shown.matches(&token).count(), 1, "{shown}");
+    let log = std::fs::read_to_string(&log).unwrap();
+    assert!(!log.contains(&token), "{log}");
+    assert!(log.contains("(read-only)"), "{log}");
+    if clean {
+        // Refusals are summed up when the server stops.
+        assert!(
+            log.contains("1 requests refused (1 missing or wrong token (401))"),
+            "{log}"
+        );
+        assert!(log.contains("mcp serve stopped: SIGTERM"), "{log}");
+    }
+}
+
+/// `--token-file` gets the token instead of stderr; `--allow-writes` offers
+/// the tools that change files and warns in the log.
+#[test]
+fn http_token_file_and_allow_writes() {
+    let scratch = Scratch::new();
+    let token_file = scratch.path("home/token");
+    let mut child = Command::new(BIN)
+        .args(["mcp", "serve", "--root"])
+        .arg(scratch.path("root"))
+        .args(["--http", "127.0.0.1:0", "--allow-writes", "--token-file"])
+        .arg(&token_file)
+        .current_dir(scratch.path("home"))
+        .env("HOME", scratch.path("home"))
+        .env("USERPROFILE", scratch.path("home"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map(Running)
+        .unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let mut shown = String::new();
+    let mut port = None;
+    while !shown.contains("warning: --allow-writes") {
+        let mut line = String::new();
+        assert!(stderr.read_line(&mut line).unwrap() > 0, "{shown}");
+        if let Some(rest) = line
+            .trim()
+            .strip_prefix("carrysheet-cli: MCP over HTTP at http://127.0.0.1:")
+        {
+            port = Some(rest.trim_end_matches("/mcp").parse::<u16>().unwrap());
+        }
+        shown.push_str(&line);
+    }
+    let port = port.unwrap();
+    assert!(shown.contains("token written to ~/token"), "{shown}");
+    let token = std::fs::read_to_string(&token_file).unwrap();
+    assert_eq!(token.len(), 64);
+    assert!(!shown.contains(&token), "{shown}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&token_file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+    }
+    let list = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#;
+    let (status, body) = http_post(
+        port,
+        &[
+            format!("Authorization: Bearer {token}"),
+            "MCP-Protocol-Version: 2025-11-25".into(),
+        ],
+        list,
+    );
+    assert_eq!(status, 200, "{body}");
+    let v: Value = serde_json::from_str(&body).unwrap();
+    assert!(tool_names(&v["result"]).contains(&"edit".to_owned()));
+    let clean = stop(&mut child);
+    if cfg!(unix) {
+        assert!(clean, "the server did not stop cleanly");
+        assert!(!token_file.exists(), "the token file was left behind");
+    }
+}
+
+/// Starts `mcp serve --http 127.0.0.1:0` under `ulimit` settings for open
+/// files, and reads the port and token it prints.
+#[cfg(unix)]
+fn start_with_file_limit(
+    scratch: &Scratch,
+    ulimit: &str,
+    log: &std::path::Path,
+) -> (Running, u16, String) {
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(format!("{ulimit} && exec \"$0\" \"$@\""))
+        .arg(BIN)
+        .args(["mcp", "serve", "--root"])
+        .arg(scratch.path("root"))
+        .args(["--http", "127.0.0.1:0", "--log-file"])
+        .arg(log)
+        .current_dir(scratch.path("home"))
+        .env("HOME", scratch.path("home"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map(Running)
+        .unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let (mut port, mut token) = (None, None);
+    let mut shown = String::new();
+    while port.is_none() || token.is_none() {
+        let mut line = String::new();
+        assert!(stderr.read_line(&mut line).unwrap() > 0, "{shown}");
+        shown.push_str(&line);
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("carrysheet-cli: MCP over HTTP at http://127.0.0.1:")
+        {
+            port = Some(rest.trim_end_matches("/mcp").parse::<u16>().unwrap());
+        }
+        if let Some(rest) = line.strip_prefix("carrysheet-cli: token (shown once, never logged): ")
+        {
+            token = Some(rest.to_owned());
+        }
+    }
+    (child, port.unwrap(), token.unwrap())
+}
+
+/// With few open files allowed (as on macOS, which starts programs with
+/// 256), the server allows fewer connections, so a new one is still
+/// accepted and the oldest one without a token is closed to make room. A
+/// real client gets through, and the log stays short.
+#[cfg(unix)]
+#[test]
+fn http_low_file_limit_still_makes_room() {
+    let scratch = Scratch::new();
+    let log = scratch.path("home/server.log");
+    // Hard limit 64: the soft limit cannot be raised.
+    let (mut child, port, token) =
+        start_with_file_limit(&scratch, "ulimit -Sn 64 && ulimit -Hn 64", &log);
+    // Many more connections than the server allows, none with a token.
+    let idle: Vec<_> = (0..100)
+        .map(|_| std::net::TcpStream::connect(("127.0.0.1", port)).unwrap())
+        .collect();
+    let list = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#;
+    let asked = Instant::now();
+    let (status, body) = http_post(
+        port,
+        &[
+            format!("Authorization: Bearer {token}"),
+            "MCP-Protocol-Version: 2025-11-25".into(),
+        ],
+        list,
+    );
+    assert_eq!(status, 200, "{body}");
+    // Let in by making room, not by waiting for the idle connections to
+    // time out (3 s).
+    let waited = asked.elapsed();
+    assert!(waited < Duration::from_secs(2), "{waited:?}");
+    drop(idle);
+    let clean = stop(&mut child);
+    assert!(clean, "the server did not stop cleanly");
+    let log = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        log.contains("http: up to 8 connections at once (open-file limit 64)"),
+        "{log}"
+    );
+    assert!(
+        log.contains("connections without a token closed to make room"),
+        "{log}"
+    );
+    assert!(!log.contains("could not be accepted"), "{log}");
+    assert!(log.lines().count() < 15, "{log}");
+
+    // Soft limit 64 under a higher hard limit: raised at start.
+    let scratch = Scratch::new();
+    let log = scratch.path("home/server.log");
+    let (mut child, _, _) =
+        start_with_file_limit(&scratch, "ulimit -Sn 64 && ulimit -Hn 4096", &log);
+    assert!(stop(&mut child), "the server did not stop cleanly");
+    let log = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        log.contains(
+            "http: up to 256 connections at once (open-file limit raised from 64 to 4096)"
+        ),
+        "{log}"
+    );
+}
+
+/// Stops a server: SIGTERM on Linux and macOS, which it handles cleanly,
+/// and a hard kill elsewhere. True when it exited cleanly with code 0.
+fn stop(child: &mut std::process::Child) -> bool {
+    #[cfg(unix)]
+    {
+        let sent = Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status()
+            .unwrap();
+        assert!(sent.success());
+        let deadline = Instant::now() + WAIT;
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                return status.code() == Some(0);
+            }
+            assert!(Instant::now() < deadline, "the server did not stop");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        false
+    }
 }
