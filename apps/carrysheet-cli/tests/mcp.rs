@@ -546,6 +546,33 @@ fn startup_is_fast() {
     assert_eq!(code, 0);
 }
 
+/// An HTTP server started by a test. It runs until stopped, so it is
+/// killed when dropped if it still runs: a failing test must not leave it
+/// behind (a leaked one once held the build lock for 40 minutes).
+struct Running(Child);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if let Ok(None) = self.0.try_wait() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
+impl std::ops::Deref for Running {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Running {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.0
+    }
+}
+
 /// Sends one HTTP/1.1 request on a new connection and returns the status
 /// and body.
 fn http_post(port: u16, headers: &[String], body: &str) -> (u16, String) {
@@ -590,6 +617,7 @@ fn http_serves_with_a_token_shown_once() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
+        .map(Running)
         .unwrap();
     let mut stderr = BufReader::new(child.stderr.take().unwrap());
     let (mut port, mut token) = (None, None);
@@ -677,6 +705,7 @@ fn http_token_file_and_allow_writes() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
+        .map(Running)
         .unwrap();
     let mut stderr = BufReader::new(child.stderr.take().unwrap());
     let mut shown = String::new();
@@ -729,7 +758,7 @@ fn start_with_file_limit(
     scratch: &Scratch,
     ulimit: &str,
     log: &std::path::Path,
-) -> (std::process::Child, u16, String) {
+) -> (Running, u16, String) {
     let mut child = Command::new("sh")
         .arg("-c")
         .arg(format!("{ulimit} && exec \"$0\" \"$@\""))
@@ -744,6 +773,7 @@ fn start_with_file_limit(
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
+        .map(Running)
         .unwrap();
     let mut stderr = BufReader::new(child.stderr.take().unwrap());
     let (mut port, mut token) = (None, None);

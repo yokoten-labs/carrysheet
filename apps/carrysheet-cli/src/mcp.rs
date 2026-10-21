@@ -589,6 +589,10 @@ fn serve_http(
             token.reveal()
         ),
     };
+    let stop = {
+        let _inside = runtime.enter();
+        StopSignal::listen()
+    };
     // Straight to stderr, never through the log, which may be a file: the
     // address so clients can find the server (port 0 picked it), and the
     // token unless it went to --token-file.
@@ -632,7 +636,7 @@ fn serve_http(
         let listener = tokio::net::TcpListener::from_std(listener)?;
         let stopped_by = stopped_by.clone();
         let shutdown = async move {
-            let why = stop_signal().await;
+            let why = stop.wait().await;
             *stopped_by.lock().unwrap_or_else(PoisonError::into_inner) = why;
         };
         http::serve(listener, server, token, limits, log.clone(), shutdown).await
@@ -660,35 +664,53 @@ fn serve_http(
     }
 }
 
-/// Waits for Ctrl+C, or on Linux and macOS also SIGTERM, and says which.
-/// If no handler can be set up, it waits forever: the server is then
-/// stopped the hard way, as before.
-async fn stop_signal() -> &'static str {
-    let ctrl_c = async {
-        if tokio::signal::ctrl_c().await.is_err() {
-            std::future::pending::<()>().await;
-        }
-    };
+/// Ctrl+C, or on Linux and macOS also SIGTERM. Made before the address is
+/// printed, so that a signal sent as soon as a client (or a test) sees the
+/// address stops the server cleanly; a SIGTERM handler set up later left a
+/// gap in which it killed the process instead. If no handler can be set
+/// up, waiting goes on forever: the server is then stopped the hard way.
+struct StopSignal {
     #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-        let terminate = async {
-            match signal(SignalKind::terminate()) {
-                Ok(mut term) => {
-                    term.recv().await;
-                }
-                Err(_) => std::future::pending::<()>().await,
-            }
-        };
-        tokio::select! {
-            () = ctrl_c => "Ctrl+C",
-            () = terminate => "SIGTERM",
+    terminate: Option<tokio::signal::unix::Signal>,
+}
+
+impl StopSignal {
+    /// Must be called inside `runtime`.
+    fn listen() -> StopSignal {
+        StopSignal {
+            #[cfg(unix)]
+            terminate: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .ok(),
         }
     }
-    #[cfg(not(unix))]
-    {
-        ctrl_c.await;
-        "Ctrl+C"
+
+    /// Waits for a signal and says which.
+    async fn wait(self) -> &'static str {
+        let ctrl_c = async {
+            if tokio::signal::ctrl_c().await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        };
+        #[cfg(unix)]
+        {
+            let terminate = async {
+                match self.terminate {
+                    Some(mut term) => {
+                        term.recv().await;
+                    }
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            tokio::select! {
+                () = ctrl_c => "Ctrl+C",
+                () = terminate => "SIGTERM",
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            ctrl_c.await;
+            "Ctrl+C"
+        }
     }
 }
 

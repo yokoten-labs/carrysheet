@@ -134,7 +134,9 @@ const RESERVED_FILES: u64 = 64;
 
 /// The soft open-file limit is raised to at most this. Enough for
 /// [`Limits::max_connections`] and [`RESERVED_FILES`] with room to spare;
-/// macOS refuses an unlimited soft limit, so ask for a number.
+/// macOS refuses an unlimited soft limit, so ask for a number. Unix only,
+/// like the limit itself.
+#[cfg(unix)]
 const WANTED_FILES: u64 = 4096;
 
 /// The open-file limit at start, and after raising it.
@@ -1116,8 +1118,23 @@ pub async fn serve(
         })
     };
 
+    // One permit per accepted socket, held until the socket is closed. A
+    // connection closed to make room keeps its socket until its task runs,
+    // and on this single-threaded runtime the accept loop can take a whole
+    // backlog first (2026-10-21: 2 accepts failed for lack of file handles
+    // under a limit of 64). Waiting here for a socket to really close keeps
+    // the sockets at most one over the connection limit.
+    let sockets = Arc::new(Semaphore::new(limits.max_connections + 1));
     tokio::pin!(shutdown);
     loop {
+        let socket = tokio::select! {
+            () = &mut shutdown => break,
+            permit = sockets.clone().acquire_owned() => match permit {
+                Ok(permit) => permit,
+                // Never closed.
+                Err(_) => break,
+            },
+        };
         let accepted = tokio::select! {
             () = &mut shutdown => break,
             accepted = listener.accept() => accepted,
@@ -1154,6 +1171,8 @@ pub async fn serve(
         let closed = admitted.closed.take();
         let auth_timeout = limits.auth_timeout;
         tokio::spawn(async move {
+            // Dropped after `connection`, which owns the socket.
+            let _socket = socket;
             let _admitted = admitted;
             // Closed if no request passes the token check in time.
             let unchecked = async {
