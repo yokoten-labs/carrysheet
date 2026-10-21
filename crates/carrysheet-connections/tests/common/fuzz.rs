@@ -76,7 +76,7 @@ fn secret(rng: &mut Rng) -> String {
             Alpha::Print => print[rng.below(print.len())],
             Alpha::PrintUni => {
                 if rng.chance(15) {
-                    s.push_str(rng.pick(UNICODE));
+                    s.push_str(rng.pick::<&str>(UNICODE));
                     continue;
                 }
                 print[rng.below(print.len())]
@@ -175,7 +175,7 @@ fn cs_value(rng: &mut Rng, s: &str) -> (String, &'static str) {
 }
 
 fn sep(rng: &mut Rng) -> &'static str {
-    rng.pick(&["=", "=", " = ", "=\r\n", "=\n  ", " =\t"])
+    rng.pick::<&str>(&["=", "=", " = ", "=\r\n", "=\n  ", " =\t"])
 }
 
 fn filler_pairs(rng: &mut Rng) -> String {
@@ -231,7 +231,7 @@ fn connection_string(rng: &mut Rng, s: &str, depth: u32) -> (String, String) {
 }
 
 fn url_key(rng: &mut Rng) -> &'static str {
-    rng.pick(&[
+    rng.pick::<&str>(&[
         "sig",
         "access_token",
         "code",
@@ -353,7 +353,7 @@ fn url(rng: &mut Rng, s: &str, depth: u32) -> (String, String, Vec<String>) {
 }
 
 fn m_key(rng: &mut Rng) -> &'static str {
-    rng.pick(&[
+    rng.pick::<&str>(&[
         "Password",
         "password",
         "ApiKey",
