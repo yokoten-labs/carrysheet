@@ -92,6 +92,11 @@ pub enum CsvError {
         /// The encoding name.
         encoding: &'static str,
     },
+    /// A regional convention cannot work.
+    InvalidConvention {
+        /// What is wrong with it.
+        problem: &'static str,
+    },
     /// Reading from or writing to the stream failed.
     Io(std::io::Error),
 }
@@ -156,6 +161,9 @@ impl CsvError {
             Self::CannotWriteEncoding { encoding } => {
                 format!("Text cannot be written in the {encoding} encoding.")
             }
+            Self::InvalidConvention { problem } => {
+                format!("The regional convention cannot work: {problem}.")
+            }
             Self::Io(e) => format!("Reading or writing the data failed: {e}."),
         }
     }
@@ -189,6 +197,9 @@ impl CsvError {
             Self::CannotWriteEncoding { .. } => {
                 "This encoding exists only to read broken legacy data.".to_owned()
             }
+            Self::InvalidConvention { .. } => {
+                "Numbers and dates written that way could not be read back.".to_owned()
+            }
             Self::Io(_) => "The operating system reported an error.".to_owned(),
         }
     }
@@ -218,6 +229,9 @@ impl CsvError {
             }
             Self::BomNotAvailable { .. } => "Turn the byte order mark off.".to_owned(),
             Self::CannotWriteEncoding { .. } => "Save as UTF-8 instead.".to_owned(),
+            Self::InvalidConvention { .. } => {
+                "Choose different characters, or start from a preset such as `Convention::GERMANY`.".to_owned()
+            }
             Self::Io(_) => {
                 "Check the path, the permissions and the free disk space, then try again.".to_owned()
             }
