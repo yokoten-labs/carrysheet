@@ -153,6 +153,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "carrysheet-bench"
+version = "0.1.0"
+dependencies = [
+ "carrysheet-biff",
+ "carrysheet-crypto",
+ "carrysheet-csv",
+ "carrysheet-numbers",
+ "carrysheet-vba",
+]
+
+[[package]]
 name = "carrysheet-biff"
 version = "0.1.0"
 dependencies = [
