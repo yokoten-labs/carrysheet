@@ -158,10 +158,10 @@ fn source_bomb_hits_the_limit() {
 /// The 479 KB file decompresses to 256 MiB of source, inside the default
 /// limits, and reading took 12.7 s and about 300 MiB in a release build.
 /// Decompressing is fast (26 ms per 16 MiB); the time goes into what
-/// follows for each 16 MiB source (about 0.8 s each). Run with
-/// `cargo test --release -p carrysheet-vba --test hostile -- --ignored`.
+/// follows for each 16 MiB source (about 0.8 s each). Fixed by one source
+/// budget for the whole project, tied to the storage size
+/// (`Limits::max_source_ratio`).
 #[test]
-#[ignore = "fuzzlite finding: 16 module bombs take 12.7 s to read; not fixed yet"]
 fn bomb_behind_every_module_reads_fast() {
     let modules: Vec<ModuleSpec> = (0..16)
         .map(|i| ModuleSpec::standard(&format!("M{i}"), "x"))
@@ -182,6 +182,40 @@ fn bomb_behind_every_module_reads_fast() {
         "a {}-byte file took {took:?}",
         bin.len()
     );
+}
+
+/// The bombs above run out the project's source budget, not one stream's
+/// limit: the second module stops the read.
+#[test]
+fn bombs_share_one_project_budget() {
+    let modules: Vec<ModuleSpec> = (0..3)
+        .map(|i| ModuleSpec::standard(&format!("M{i}"), "x"))
+        .collect();
+    let mut s = Streams::new(1252, &modules);
+    for i in 0..3 {
+        let mut stream = vec![0; 700];
+        stream.extend(common::bomb(1000)); // 6 KB that expands to 4 MB
+        s.set(&format!("VBA/M{i}"), stream);
+    }
+    let limits = Limits {
+        max_decompressed_bytes: 5 << 20,
+        ..Limits::default()
+    };
+    match VbaPart::from_bin(s.to_bin()).read(&limits) {
+        Err(e @ VbaError::LimitExceeded { limit, max }) => {
+            assert_eq!(limit, "decompressed source bytes in the project");
+            assert_eq!(max, 5 << 20);
+            assert_explained(&e);
+        }
+        other => panic!("expected LimitExceeded, got {other:?}"),
+    }
+    // A generous ratio lets the same file read.
+    let generous = Limits {
+        max_source_ratio: 1_000,
+        ..limits
+    };
+    let p = VbaPart::from_bin(s.to_bin()).read(&generous).unwrap();
+    assert!(p.modules.iter().all(|m| m.error.is_none()));
 }
 
 #[test]
@@ -405,7 +439,9 @@ fn probe_overlapping_offsets_into_one_stream() {
 #[test]
 fn probe_many_sources_full_of_hits() {
     // 400 distinct sources of 10,240 `Kill a` lines each: once the flag list
-    // is full, later sources are not scanned and keep no hits.
+    // is full, later sources are not scanned and keep no hits. The 100 KB
+    // file expands to 32 MiB of source, past the default source ratio, so
+    // the ratio is raised to reach the scan.
     let n = 400;
     let modules: Vec<ModuleSpec> = (0..n)
         .map(|i| {
@@ -428,8 +464,12 @@ fn probe_many_sources_full_of_hits() {
         s.set(&format!("VBA/M{i}"), packed.clone());
     }
     let bin = s.to_bin();
+    let limits = Limits {
+        max_source_ratio: 1_000,
+        ..Limits::default()
+    };
     let started = std::time::Instant::now();
-    let p = read_vba_project_bin(&bin).unwrap();
+    let p = VbaPart::from_bin(bin).read(&limits).unwrap();
     let took = started.elapsed();
     eprintln!("400 sources full of hits: {took:?}");
     assert_eq!(p.modules[0].line_count, 10_240);

@@ -75,6 +75,14 @@ pub struct Limits {
     pub max_entries: usize,
     /// Bytes one compressed container may decompress to.
     pub max_decompressed_bytes: usize,
+    /// Bytes all module sources of a project may decompress to together,
+    /// as a multiple of the VBA storage's size. Real source compresses two
+    /// to four times, and the storage also holds compiled code, so real
+    /// projects stay far below this; a small file whose every module hides
+    /// a decompression bomb does not. A project may always decompress
+    /// [`Limits::max_decompressed_bytes`] in all, however small it is, and
+    /// never more than [`Limits::max_storage_bytes`].
+    pub max_source_ratio: usize,
     /// Modules in one project.
     pub max_modules: usize,
     /// References in one project.
@@ -92,6 +100,7 @@ impl Default for Limits {
             max_storage_bytes: 256 << 20,
             max_entries: 20_000,
             max_decompressed_bytes: 16 << 20,
+            max_source_ratio: 32,
             max_modules: 4_096,
             max_references: 4_096,
             max_flags: 10_000,
@@ -431,7 +440,10 @@ pub(crate) fn read_kept(kept: &KeptStorage, limits: &Limits) -> Result<VbaProjec
     let mut modules = Vec::with_capacity(dir.modules.len());
     let mut flags = Vec::new();
     let mut cut_reported = false;
-    let mut sources = Sources::default();
+    let mut sources = Sources {
+        budget: source_budget(kept, limits),
+        ..Sources::default()
+    };
     for raw in &dir.modules {
         let mbcs_name = decode(&raw.name, encoding);
         let name = match raw.name_unicode.as_deref() {
@@ -560,6 +572,21 @@ struct SourceInfo {
 /// Compressed bytes read beyond the storage size before it is a limit.
 const COMPRESSED_SLACK: usize = 64 * 1024;
 
+/// Bytes all module sources of the project may decompress to together:
+/// [`Limits::max_source_ratio`] times the storage size, at least one
+/// stream's worth and at most [`Limits::max_storage_bytes`]. One budget
+/// for the whole project, so a bomb in every module costs no more than
+/// one.
+fn source_budget(kept: &KeptStorage, limits: &Limits) -> usize {
+    kept.total_bytes()
+        .saturating_mul(limits.max_source_ratio)
+        .max(limits.max_decompressed_bytes)
+        .min(limits.max_storage_bytes)
+}
+
+/// The limit name for the project-wide source budget.
+const PROJECT_SOURCE_LIMIT: &str = "decompressed source bytes in the project";
+
 /// Decompressed sources, so modules that share a stream and offset cost
 /// one decompression, and the budgets that bound the work.
 #[derive(Default)]
@@ -569,6 +596,9 @@ struct Sources {
     scans: HashMap<(String, u32, bool), Rc<risk::Scan>>,
     /// Bytes produced by decompression, failed attempts included.
     decompressed: usize,
+    /// Bytes decompression may produce for the whole project, from
+    /// [`source_budget`].
+    budget: usize,
     /// Compressed bytes handed to the decompressor. Modules of a real
     /// project never overlap, so this stays within the storage size;
     /// modules pointing at many offsets of one stream would not.
@@ -644,14 +674,20 @@ impl Sources {
                     budget,
                 ));
             }
-            let (result, produced) =
-                decompress::decompress_counted(compressed, limits.max_decompressed_bytes);
+            // Decompress no further than what is left of the project's
+            // budget, so the module that runs it out stops there instead
+            // of producing a whole stream first.
+            let left = self.budget.saturating_sub(self.decompressed);
+            if left == 0 {
+                return Err(VbaError::limit(PROJECT_SOURCE_LIMIT, self.budget));
+            }
+            let cap = limits.max_decompressed_bytes.min(left);
+            let (result, produced) = decompress::decompress_counted(compressed, cap);
             self.decompressed = self.decompressed.saturating_add(produced);
-            if self.decompressed > limits.max_storage_bytes {
-                return Err(VbaError::limit(
-                    "decompressed source bytes in the project",
-                    limits.max_storage_bytes,
-                ));
+            if matches!(result, Err(VbaError::LimitExceeded { .. }))
+                && cap < limits.max_decompressed_bytes
+            {
+                return Err(VbaError::limit(PROJECT_SOURCE_LIMIT, self.budget));
             }
             let entry = match result {
                 Ok(bytes) => {
