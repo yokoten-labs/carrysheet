@@ -34,7 +34,7 @@ You must never copy, translate or closely paraphrase code from GPL, LGPL, AGPL o
 
 ## Command line and MCP
 
-The CLI and MCP server follow `docs/agents.md` (see PR #1 until it is merged). In short: `--json` everywhere with JSON-only stdout; exit codes 0 done, 1 failed, 2 usage, 3 nothing to do; never prompt without a terminal; `--dry-run` on every command that changes a file; MCP schemas that Claude, Gemini and OpenAI strict mode all accept.
+The CLI and MCP server follow `docs/agents.md`. In short: `--json` everywhere with JSON-only stdout; exit codes 0 done, 1 failed, 2 usage, 3 nothing to do; never prompt without a terminal; `--dry-run` on every command that changes a file; MCP schemas that Claude, Gemini and OpenAI strict mode all accept.
 
 ## Working on this machine
 
