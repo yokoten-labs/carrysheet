@@ -49,4 +49,6 @@ It formats, lints and tests the crates you changed and the crates that use them,
 
 ## License
 
-The libraries in `crates/` are MIT OR Apache-2.0, at your choice. The programs in `apps/`, including `carrysheet-cli`, are GPL-3.0-or-later. Files you make with Carrysheet are yours. The name and logo are not licensed; forks need their own name. See [LICENSING.md](LICENSING.md) and [TRADEMARKS.md](TRADEMARKS.md).
+The libraries in `crates/` are MIT OR Apache-2.0, at your choice. 
+The programs in `apps/`, including `carrysheet-cli`, are GPL-3.0-or-later. Files you make with Carrysheet are yours. 
+The name and logo are not licensed; forks need their own name. See [LICENSING.md](LICENSING.md) and [TRADEMARKS.md](TRADEMARKS.md).
