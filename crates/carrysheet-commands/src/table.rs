@@ -83,7 +83,7 @@ pub const DRY_RUN: Arg = Arg {
     ty: ArgType::Boolean,
     required: false,
     positional: false,
-    description: "List the changes without writing anything. Default: false.",
+    description: "List the changes, write nothing. Default: false.",
 };
 
 impl Arg {
@@ -146,7 +146,7 @@ const RESPONSE_FORMAT: Arg = Arg {
     ty: ArgType::Enum(&["concise", "detailed"]),
     required: false,
     positional: false,
-    description: "concise (default) keeps output small; detailed adds types, formats and formulas.",
+    description: "concise (default), or detailed: adds types, formats and formulas.",
 };
 
 const fn path_arg(description: &'static str) -> Arg {
@@ -159,14 +159,14 @@ const fn path_arg(description: &'static str) -> Arg {
     }
 }
 
-const WORKBOOK: Arg = path_arg("The workbook file: xlsx, xlsm, xlsb, xls or csv.");
+const WORKBOOK: Arg = path_arg("The workbook: xlsx, xlsm, xlsb, xls or csv.");
 
 const OUTPUT: Arg = Arg {
     name: "output",
     ty: ArgType::Path,
     required: false,
     positional: false,
-    description: "Where to write. Default: a new file beside the original.",
+    description: "Default: a new file beside the original.",
 };
 
 const OVERWRITE: Arg = Arg {
@@ -174,7 +174,7 @@ const OVERWRITE: Arg = Arg {
     ty: ArgType::Boolean,
     required: false,
     positional: false,
-    description: "Replace an existing file. Default: false, which refuses.",
+    description: "Replace an existing file. Default: false.",
 };
 
 /// The `confirm` argument of commands that can delete or overwrite.
@@ -183,7 +183,17 @@ pub const CONFIRM: Arg = Arg {
     ty: ArgType::Boolean,
     required: false,
     positional: false,
-    description: "Must be true to delete sheets, rows or columns, or to overwrite a file. Default: false. Not needed with dry_run.",
+    description: "Must be true to delete sheets, rows or columns or overwrite a file (not with dry_run). Default: false.",
+};
+
+/// The `confirm_loss` argument of commands that save: separate from
+/// `confirm`, so agreeing to delete rows never also agrees to drop macros.
+pub const CONFIRM_LOSS: Arg = Arg {
+    name: "confirm_loss",
+    ty: ArgType::Boolean,
+    required: false,
+    positional: false,
+    description: "Must be true to save a file that loses content (macros, charts...), listed by dry_run in save.lost. Default: false.",
 };
 
 /// MCP clients `mcp install` and `mcp doctor` know.
@@ -232,7 +242,7 @@ const EDIT_OP_FIELDS: &[Arg] = &[
         ty: ArgType::Text,
         required: true,
         positional: false,
-        description: "A range like Sheet1!B2:B9 for cell, row and column ops; a sheet name for sheet ops.",
+        description: "A range like Sheet1!B2:B9, or a sheet name for sheet ops.",
     },
     Arg {
         name: "value",
@@ -249,7 +259,7 @@ const EDIT_OP_FIELDS: &[Arg] = &[
         },
         required: false,
         positional: false,
-        description: "How many rows or columns to insert or delete. Default: 1.",
+        description: "Rows or columns to insert or delete, from the start of target. Default: as many as target spans.",
     },
 ];
 
@@ -259,7 +269,7 @@ pub const COMMANDS: &[Command] = &[
         name: "overview",
         cli_path: &["overview"],
         summary: "Show sheets, used ranges, headers and formula counts of a workbook",
-        description: "Workbook overview: sheets, used ranges, header rows, column types, formula and error counts. Call this first on any workbook, before read or edit.",
+        description: "Workbook overview: sheets, used ranges, header rows, formula and error counts. Call first on any workbook.",
         args: &[WORKBOOK, RESPONSE_FORMAT],
         changes_files: false,
         annotations: READ_ONLY,
@@ -269,7 +279,7 @@ pub const COMMANDS: &[Command] = &[
         name: "read",
         cli_path: &["read"],
         summary: "Read a range as a table of values or formulas, a page at a time",
-        description: "Read cells: a range as a compact table with A1 addresses, values or formulas, paged. Use after overview to look at data. Returns next_cursor when more rows or columns remain.",
+        description: "Read a range as a compact table with A1 addresses, values or formulas, paged. Use after overview. Returns next_cursor when more remains.",
         args: &[
             WORKBOOK,
             Arg {
@@ -311,7 +321,7 @@ pub const COMMANDS: &[Command] = &[
                 ty: ArgType::Text,
                 required: false,
                 positional: false,
-                description: "next_cursor from the previous page, to continue; range is then ignored. Keep max_rows the same.",
+                description: "next_cursor from the previous page; range is then ignored. Keep max_rows the same.",
             },
             RESPONSE_FORMAT,
         ],
@@ -323,7 +333,7 @@ pub const COMMANDS: &[Command] = &[
         name: "eval",
         cli_path: &["eval"],
         summary: "Compute a formula against a workbook without saving",
-        description: "Evaluate a formula against the workbook and return the result, without changing the file. Use to test a formula before writing it with edit.",
+        description: "Evaluate a formula against the workbook without changing it. Use to test a formula before writing it with edit.",
         args: &[
             WORKBOOK,
             Arg {
@@ -338,7 +348,7 @@ pub const COMMANDS: &[Command] = &[
                 ty: ArgType::Text,
                 required: false,
                 positional: false,
-                description: "The sheet unqualified references point at. Default: the first sheet.",
+                description: "Where unqualified references point. Default: the first sheet.",
             },
         ],
         changes_files: false,
@@ -349,7 +359,7 @@ pub const COMMANDS: &[Command] = &[
         name: "check",
         cli_path: &["check"],
         summary: "Find formula errors, external links and what a save would lose",
-        description: "Check a workbook for problems: error cells (#REF! and others), external links, macros, and what would be lost saving as xls or csv. Use before convert or after edit.",
+        description: "Check a workbook for problems: error cells (#REF!...), external links, macros, and what xls or csv would lose. Use before convert or after edit.",
         args: &[WORKBOOK, RESPONSE_FORMAT],
         changes_files: false,
         annotations: READ_ONLY,
@@ -381,7 +391,7 @@ pub const COMMANDS: &[Command] = &[
                 ty: ArgType::Text,
                 required: false,
                 positional: false,
-                description: "next_cursor from the last answer, to continue the source. Turns on include_source (--source).",
+                description: "next_cursor from the last answer. Turns on include_source (--source).",
             },
         ],
         changes_files: false,
@@ -392,7 +402,7 @@ pub const COMMANDS: &[Command] = &[
         name: "convert",
         cli_path: &["convert"],
         summary: "Save a workbook as xlsx, xls or csv, to a new file",
-        description: "Convert a workbook to xlsx, xls or csv, writing a new file. Use when another program needs a different format. Run check first to see what the format cannot hold.",
+        description: "Convert a workbook to xlsx, xls or csv as a new file. Use dry_run first to see what the format cannot hold.",
         args: &[
             WORKBOOK,
             Arg {
@@ -416,8 +426,16 @@ pub const COMMANDS: &[Command] = &[
                 positional: false,
                 description: "For csv, the sheet to write. Default: the first sheet.",
             },
+            Arg {
+                name: "csv_raw",
+                ty: ArgType::Boolean,
+                required: false,
+                positional: false,
+                description: "For csv, write text starting with = + - @ as is. Default: false: a ' before it stops apps running it as a formula.",
+            },
             OVERWRITE,
             CONFIRM,
+            CONFIRM_LOSS,
         ],
         changes_files: true,
         annotations: Annotations {
@@ -432,7 +450,7 @@ pub const COMMANDS: &[Command] = &[
         name: "edit",
         cli_path: &["edit"],
         summary: "Change cells, rows and sheets in one all-or-nothing batch",
-        description: "Edit a workbook: a batch of operations (set values or formulas, insert or delete rows and columns, add, rename or delete sheets), applied all or nothing. Writes a new file unless overwrite is true. Use dry_run first to see the change list.",
+        description: "Edit a workbook: a batch of operations on values, formulas, rows, columns and sheets, applied all or nothing. Writes a new file unless overwrite is true. Dropping content (macros, charts) needs confirm_loss. Use dry_run first.",
         args: &[
             WORKBOOK,
             Arg {
@@ -445,6 +463,7 @@ pub const COMMANDS: &[Command] = &[
             OUTPUT,
             OVERWRITE,
             CONFIRM,
+            CONFIRM_LOSS,
         ],
         changes_files: true,
         annotations: Annotations {
@@ -459,7 +478,7 @@ pub const COMMANDS: &[Command] = &[
         name: "sanitize",
         cli_path: &["sanitize"],
         summary: "Make a copy safe to share: made-up values, same formulas and layout",
-        description: "Sanitize a workbook for sharing: writes a copy with text and numbers replaced by made-up values and document properties removed, keeping formulas, formatting and structure. Use before attaching a file to a bug report.",
+        description: "Sanitize for sharing: writes a copy with made-up text and numbers and no document properties, keeping formulas, formatting and structure. Use before attaching a file to a bug report.",
         args: &[
             WORKBOOK,
             OUTPUT,
@@ -484,7 +503,7 @@ pub const COMMANDS: &[Command] = &[
         name: "feedback",
         cli_path: &["feedback"],
         summary: "Draft a bug report or idea with environment details; never sends",
-        description: "Feedback draft: writes a bug report, file problem or idea with Carrysheet's version and platform, and the link to post it. Never sends anything; a person submits it. Use when Carrysheet misbehaves.",
+        description: "Feedback draft: a bug report, file problem or idea with Carrysheet's version, platform and the link to post it. Never sends anything; a person submits it. Use when Carrysheet misbehaves.",
         args: &[
             Arg {
                 name: "kind",

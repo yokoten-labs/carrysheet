@@ -51,13 +51,12 @@ pub enum ErrorCode {
     OutsideRoot,
     /// The file format is not one Carrysheet reads or writes.
     UnsupportedFormat,
+    /// The file is damaged or not what its name says; treated as hostile.
+    DamagedFile,
+    /// The file is larger, or holds more, than Carrysheet accepts.
+    LimitExceeded,
     /// The workbook has no sheet with that name.
     NoSuchSheet,
-    /// The file is damaged, or its structure is not what its format says.
-    DamagedFile,
-    /// The file is over a safety limit on sizes or counts (for example a
-    /// zip bomb); it is refused rather than read.
-    LimitExceeded,
     /// A confirmation was needed and the answer was no (or nobody could answer).
     Declined,
     /// Deleting or overwriting needs `confirm: true`, and it was not given.
@@ -66,7 +65,8 @@ pub enum ErrorCode {
     Formula,
     /// Reading or writing failed.
     Io,
-    /// A bug in Carrysheet.
+    /// A bug in Carrysheet (including a caught panic in the kernel).
+    #[serde(rename = "internal_error")]
     Internal,
 }
 
@@ -84,14 +84,14 @@ impl ErrorCode {
             ErrorCode::PermissionDenied => "permission_denied",
             ErrorCode::OutsideRoot => "outside_root",
             ErrorCode::UnsupportedFormat => "unsupported_format",
-            ErrorCode::NoSuchSheet => "no_such_sheet",
             ErrorCode::DamagedFile => "damaged_file",
             ErrorCode::LimitExceeded => "limit_exceeded",
+            ErrorCode::NoSuchSheet => "no_such_sheet",
             ErrorCode::Declined => "declined",
             ErrorCode::ConfirmationRequired => "confirmation_required",
             ErrorCode::Formula => "formula",
             ErrorCode::Io => "io",
-            ErrorCode::Internal => "internal",
+            ErrorCode::Internal => "internal_error",
         }
     }
 
@@ -282,6 +282,12 @@ mod tests {
             "not_implemented"
         );
         assert_eq!(ErrorCode::FileNotFound.to_string(), "file_not_found");
+        assert_eq!(
+            serde_json::to_value(ErrorCode::Internal).unwrap(),
+            ErrorCode::Internal.as_str()
+        );
+        assert_eq!(ErrorCode::Internal.as_str(), "internal_error");
+        assert_eq!(ErrorCode::DamagedFile.as_str(), "damaged_file");
         assert_eq!(ErrorCode::DamagedFile.to_string(), "damaged_file");
         assert_eq!(ErrorCode::LimitExceeded.to_string(), "limit_exceeded");
         assert_eq!(ErrorCode::LimitExceeded.exit_code(), ExitCode::Failed);

@@ -3,7 +3,7 @@
 use std::io::{BufRead, IsTerminal, Write};
 
 /// How the program was started, for deciding whether it may ask questions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Context {
     /// `--json`: an agent is reading, so never ask.
     pub json: bool,
@@ -11,6 +11,9 @@ pub struct Context {
     pub yes: bool,
     /// stdin and stderr are both terminals, so a person can answer.
     pub interactive: bool,
+    /// `--max-seconds`: the time one command may take; `None` is the
+    /// default for agents (`limits::MAX_CALL_SECONDS`).
+    pub max_seconds: Option<f64>,
 }
 
 impl Context {
@@ -19,6 +22,7 @@ impl Context {
             json,
             yes,
             interactive: std::io::stdin().is_terminal() && std::io::stderr().is_terminal(),
+            max_seconds: None,
         }
     }
 }
@@ -60,6 +64,7 @@ mod tests {
             json,
             yes,
             interactive,
+            max_seconds: None,
         }
     }
 

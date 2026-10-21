@@ -1,0 +1,55 @@
+# GridCraft's kernel crates, vendored at upstream commit 823c565 (v0.8.0).
+# See README.md for what was copied and changed.
+#
+# This is a workspace of its own, excluded from Carrysheet's: the copied
+# crates keep upstream's settings (inherited from here) and are not linted
+# by Carrysheet's workspace lints or clippy.toml. Carrysheet builds them as
+# path dependencies of crates/carrysheet-kernel, resolved in Carrysheet's
+# Cargo.lock.
+
+[workspace]
+resolver = "3"
+members = ["crates/base/*", "crates/book/*", "crates/draw/*", "crates/xlsx", "crates/engine"]
+
+[workspace.package]
+version = "0.8.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.90"
+repository = "https://github.com/storytold/gridcraft"
+
+[workspace.dependencies]
+# internal (paths regrouped; versions added so cargo-deny sees no wildcards)
+gridcraft-core = { path = "crates/base/core", version = "0.8.0" }
+gridcraft-numfmt = { path = "crates/base/numfmt", version = "0.8.0" }
+gridcraft-formula = { path = "crates/base/formula", version = "0.8.0" }
+gridcraft-functions = { path = "crates/base/functions", version = "0.8.0" }
+gridcraft-model = { path = "crates/book/model", version = "0.8.0" }
+gridcraft-calc = { path = "crates/book/calc", version = "0.8.0" }
+gridcraft-chart = { path = "crates/draw/chart", version = "0.8.0" }
+gridcraft-pdf = { path = "crates/draw/pdf", version = "0.8.0" }
+gridcraft-xlsx = { path = "crates/xlsx", version = "0.8.0" }
+gridcraft-engine = { path = "crates/engine", version = "0.8.0" }
+
+# foundation (as upstream, except zip: see README.md)
+thiserror = "2"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+log = "0.4"
+regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
+quick-xml = "0.41"
+zip = { version = "=9.0.2", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+sha2 = { version = "0.11", default-features = false }
+aes = { version = "0.9", default-features = false }
+sha1 = { version = "0.11", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"

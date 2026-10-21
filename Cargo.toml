@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "tools/*"]
-exclude = ["research/kernel-bench"]
+# vendor/gridcraft is a workspace of its own (see its Cargo.toml).
+exclude = ["research/kernel-bench", "vendor/gridcraft"]
 
 [workspace.package]
 edition = "2024"
@@ -18,10 +19,15 @@ all = { level = "warn", priority = -1 }
 # messages go to stderr. The CLI writes stdout only through output.rs.
 print_stdout = "deny"
 
-# Dev builds and tests inflate with an optimized miniz_oxide: unoptimized,
-# it is about 30 times slower per deflate block, so the hostile tests'
-# time limits would measure the build profile instead of the reader.
+# Dev builds and tests inflate with an optimized miniz_oxide (and flate2,
+# which the kernel's zip reading uses): unoptimized, it is about 30 times
+# slower per deflate block, so the hostile tests' time limits would measure
+# the build profile instead of the reader. In the kernel, a hostile part of
+# many tiny blocks took 8 to 9 s of a command's 10 s budget.
 [profile.dev.package.miniz_oxide]
+opt-level = 3
+
+[profile.dev.package.flate2]
 opt-level = 3
 
 # Release builds: small and fast binaries. Measured on carrysheet-cli 0.1.0,

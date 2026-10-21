@@ -15,6 +15,13 @@ use serde_json::{Value, json};
 
 use crate::error::{CommandError, ErrorCode};
 
+pub mod edit;
+pub mod run;
+pub mod save;
+
+pub use edit::{CellChange, EditKind, EditOp, EditResult, EditTarget, OpResult, Scalar, parse_ops};
+pub use save::{Encoded, Loss, PartCounts, SaveReport};
+
 #[cfg(any(test, feature = "test-engine"))]
 mod memory;
 #[cfg(any(test, feature = "test-engine"))]
@@ -30,13 +37,23 @@ pub enum FileFormat {
 }
 
 impl FileFormat {
-    /// The format named by an extension (any case), such as `xlsx`.
+    /// The format named by an extension (any case), such as `xlsx`. The
+    /// macro-enabled `xlsm` is the same package format as `xlsx`.
     pub fn from_extension(ext: &str) -> Option<FileFormat> {
         match ext.to_ascii_lowercase().as_str() {
-            "xlsx" => Some(FileFormat::Xlsx),
+            "xlsx" | "xlsm" => Some(FileFormat::Xlsx),
             "xls" => Some(FileFormat::Xls),
             "csv" => Some(FileFormat::Csv),
             _ => None,
+        }
+    }
+
+    /// The format as written in arguments and results: `xlsx`, `xls`, `csv`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FileFormat::Xlsx => "xlsx",
+            FileFormat::Xls => "xls",
+            FileFormat::Csv => "csv",
         }
     }
 
@@ -66,6 +83,9 @@ pub struct Overview {
     /// `1900` or `1904`.
     pub date_system: String,
     pub defined_names: usize,
+    /// What the engine skipped or repaired while reading the file.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 impl Overview {
@@ -89,6 +109,7 @@ impl Overview {
                 .collect(),
             date_system: wb.date_system.as_str().to_owned(),
             defined_names: wb.defined_names.len(),
+            warnings: Vec::new(),
         }
     }
 }
@@ -141,6 +162,9 @@ pub struct ReadRequest {
     pub max_columns: u32,
     /// Cells per page.
     pub max_cells: u32,
+    /// `response_format: detailed`: each cell as an object with its value,
+    /// type, formula and number format, whatever `mode` says.
+    pub detailed: bool,
 }
 
 impl Default for ReadRequest {
@@ -152,6 +176,7 @@ impl Default for ReadRequest {
             max_rows: DEFAULT_PAGE_ROWS,
             max_columns: DEFAULT_PAGE_COLUMNS,
             max_cells: DEFAULT_PAGE_CELLS,
+            detailed: false,
         }
     }
 }
@@ -362,6 +387,75 @@ pub struct ReadPage {
     /// Where the next page starts, to pass back as the next request's
     /// cursor; `null` on the last page.
     pub next_cursor: Option<ReadCursor>,
+    /// Cells whose text or formula was cut to keep the answer small.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cut: Option<CutText>,
+}
+
+/// Most cells named in [`CutText::cells`].
+pub const MAX_LISTED_CUT: usize = 20;
+
+/// Text cut from an answer, and how to get the rest.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CutText {
+    /// Each text and formula was cut at this many characters.
+    pub max_chars: usize,
+    /// The cells cut, like `Sheet1!A1`, at most [`MAX_LISTED_CUT`].
+    pub cells: Vec<String>,
+    /// All cells cut.
+    pub total: u64,
+    pub hint: String,
+}
+
+impl CutText {
+    fn new(max_chars: usize) -> CutText {
+        CutText {
+            max_chars,
+            cells: Vec::new(),
+            total: 0,
+            hint: String::new(),
+        }
+    }
+
+    fn add(&mut self, cell: String) {
+        self.total += 1;
+        if self.cells.len() < MAX_LISTED_CUT {
+            self.cells.push(cell);
+        }
+    }
+
+    /// `None` when nothing was cut; else with the hint filled in.
+    fn finish(mut self) -> Option<CutText> {
+        let first = self.cells.first()?.clone();
+        self.hint = format!(
+            "{} cell(s) hold more than {} characters and were cut. Read fewer cells at a time to see more of each (up to {}), or get the rest of one with eval, like MID({first},{},{}).",
+            self.total,
+            self.max_chars,
+            crate::limits::MAX_CELL_TEXT_CHARS,
+            self.max_chars + 1,
+            crate::limits::MAX_CELL_TEXT_CHARS,
+        );
+        Some(self)
+    }
+}
+
+/// `text` cut at `max` characters, or `None` when it is not longer. Counts
+/// characters without looking past `max + 1` of them.
+pub fn cut_text(text: &str, max: usize) -> Option<String> {
+    if text.len() <= max {
+        return None;
+    }
+    let (end, _) = text.char_indices().nth(max)?;
+    Some(text.get(..end).unwrap_or(text).to_owned())
+}
+
+/// Characters each text in a page of `cells` cells may keep, so the page
+/// stays under [`crate::limits::MAX_RESPONSE_TEXT_CHARS`].
+pub fn text_room(cells: u64) -> usize {
+    let each = crate::limits::MAX_RESPONSE_TEXT_CHARS as u64 / cells.max(1);
+    usize::try_from(each)
+        .unwrap_or(usize::MAX)
+        .clamp(16, crate::limits::MAX_CELL_TEXT_CHARS)
 }
 
 /// What `eval` returns.
@@ -372,6 +466,9 @@ pub struct Evaluation {
     pub value: Value,
     /// `empty`, `number`, `text`, `bool` or `error`.
     pub kind: String,
+    /// Says that long text in the value was cut, and how to get the rest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cut: Option<String>,
 }
 
 /// A cell value as JSON: numbers and booleans as themselves, errors as
@@ -423,6 +520,69 @@ pub trait Engine {
 
     /// Writes the book to `path` in `format`.
     fn save(&self, book: &Self::Book, path: &Path, format: FileFormat) -> Result<(), CommandError>;
+
+    /// Applies operations in order, all or nothing: on an error the book
+    /// is left as it was, or must not be used again.
+    fn edit(&self, _book: &mut Self::Book, _ops: &[EditOp]) -> Result<EditResult, CommandError> {
+        Err(CommandError::new(
+            ErrorCode::NotImplemented,
+            format!("the {} engine cannot edit", self.name()),
+            "this engine only reads",
+            "Use the real engine.",
+        ))
+    }
+
+    /// Encodes the book for `path` in `format`, and says what the saved
+    /// file would lose compared with the file that was opened. Nothing is
+    /// written. For csv, `sheet` picks the sheet (default: the first).
+    fn encode(
+        &self,
+        _book: &Self::Book,
+        _path: &Path,
+        _format: FileFormat,
+        _sheet: Option<&str>,
+    ) -> Result<Encoded, CommandError> {
+        Err(CommandError::new(
+            ErrorCode::NotImplemented,
+            format!("the {} engine cannot encode files", self.name()),
+            "this engine keeps workbooks in memory only",
+            "Use the real engine.",
+        ))
+    }
+
+    /// [`Engine::encode`] with all the options. Engines that write csv
+    /// override it to honour `csv_raw`.
+    fn encode_with(
+        &self,
+        book: &Self::Book,
+        path: &Path,
+        format: FileFormat,
+        options: &EncodeOptions<'_>,
+    ) -> Result<Encoded, CommandError> {
+        self.encode(book, path, format, options.sheet)
+    }
+
+    /// Starts one command's budget: the work and time limits cover every
+    /// call that follows (open, work, save) until [`Engine::end_call`].
+    /// `seconds` replaces the engine's time limit (the CLI's
+    /// `--max-seconds`); `None` keeps it.
+    fn begin_call(&self, _seconds: Option<f64>) {}
+
+    /// Ends the budget [`Engine::begin_call`] started: an error when a
+    /// limit ran out during the command, whatever the calls returned.
+    fn end_call(&self) -> Result<(), CommandError> {
+        Ok(())
+    }
+}
+
+/// How [`Engine::encode_with`] writes a file.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EncodeOptions<'a> {
+    /// For csv, the sheet to write; `None` means the first.
+    pub sheet: Option<&'a str>,
+    /// For csv, write text starting with `=`, `+`, `-`, `@`, tab or return
+    /// as it is, instead of with a `'` in front (formula injection).
+    pub csv_raw: bool,
 }
 
 fn no_such_sheet(name: &str) -> CommandError {
@@ -481,20 +641,109 @@ pub fn clip_to_used(wanted: Range, used: Range) -> Option<Range> {
     ))
 }
 
-/// One page of a range of a model [`Workbook`]. Engines that keep a
-/// [`Workbook`] can use this directly for [`Engine::read_range`].
-pub fn read_workbook(book: &Workbook, request: &ReadRequest) -> Result<ReadPage, CommandError> {
-    let named = match &request.cursor {
+/// One cell as a read sees it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CellInfo {
+    /// The value; for a formula, its computed result.
+    pub value: CellValue,
+    /// The formula without `=`, such as `SUM(A1:A3)`.
+    pub formula: Option<String>,
+    /// The number format code, such as `0.00%`; `None` for General.
+    pub format: Option<String>,
+}
+
+/// A sheet a read can page through. Engines implement it on their own
+/// sheet type, so [`read_page`] works for every engine.
+pub trait SheetView {
+    fn name(&self) -> &str;
+    /// The smallest range holding every cell with content; `None` when empty.
+    fn used_range(&self) -> Option<Range>;
+    /// The cell at a 0-based row and column; `None` when empty.
+    fn cell(&self, row: u32, col: u32) -> Option<CellInfo>;
+
+    /// [`SheetView::cell`] with its text and formula cut at `max_chars`
+    /// characters, and whether anything was cut. Engines whose cells can
+    /// hold huge texts cut them before copying.
+    fn cell_cut(&self, row: u32, col: u32, max_chars: usize) -> Option<(CellInfo, bool)> {
+        let mut info = self.cell(row, col)?;
+        let mut cut = false;
+        if let CellValue::Text(t) = &info.value
+            && let Some(short) = cut_text(t, max_chars)
+        {
+            info.value = CellValue::Text(short);
+            cut = true;
+        }
+        if let Some(short) = info.formula.as_deref().and_then(|f| cut_text(f, max_chars)) {
+            info.formula = Some(short);
+            cut = true;
+        }
+        Some((info, cut))
+    }
+}
+
+impl SheetView for carrysheet_model::Sheet {
+    fn name(&self) -> &str {
+        carrysheet_model::Sheet::name(self)
+    }
+
+    fn used_range(&self) -> Option<Range> {
+        carrysheet_model::Sheet::used_range(self)
+    }
+
+    fn cell(&self, row: u32, col: u32) -> Option<CellInfo> {
+        self.get(row, col).map(|c| CellInfo {
+            value: c.value.clone(),
+            formula: c.formula.clone(),
+            format: None,
+        })
+    }
+}
+
+/// How one cell is shown in a page.
+fn cell_json(cell: Option<CellInfo>, request: &ReadRequest) -> Value {
+    let Some(cell) = cell else {
+        return Value::Null;
+    };
+    if request.detailed {
+        let mut obj = serde_json::Map::new();
+        obj.insert("value".into(), value_json(&cell.value));
+        obj.insert("type".into(), json!(cell.value.kind()));
+        if let Some(f) = &cell.formula {
+            obj.insert("formula".into(), json!(format!("={f}")));
+        }
+        if let Some(fmt) = &cell.format {
+            obj.insert("format".into(), json!(fmt));
+        }
+        return Value::Object(obj);
+    }
+    match (request.mode, &cell.formula) {
+        (ReadMode::Values, _) | (ReadMode::Formulas, None) => value_json(&cell.value),
+        (ReadMode::Formulas, Some(f)) => Value::String(format!("={f}")),
+        (ReadMode::Both, f) => json!({
+            "value": value_json(&cell.value),
+            "formula": f.as_ref().map(|f| format!("={f}")),
+        }),
+    }
+}
+
+/// The sheet a request reads: the cursor's, else the range's, else `None`
+/// for the first sheet.
+pub fn requested_sheet(request: &ReadRequest) -> Option<&str> {
+    match &request.cursor {
         Some(cursor) => Some(cursor.sheet()),
         None => request.range.as_ref().and_then(|r| r.sheet.as_deref()),
-    };
-    let sheet = pick_sheet(book, named, None)?;
+    }
+}
+
+/// One page of a range of one sheet: the sheet [`requested_sheet`] names.
+pub fn read_page(sheet: &dyn SheetView, request: &ReadRequest) -> Result<ReadPage, CommandError> {
     let empty_page = || ReadPage {
         sheet: sheet.name().to_owned(),
         range: None,
         columns: Vec::new(),
         rows: Vec::new(),
         next_cursor: None,
+        cut: None,
     };
     let cursor = match &request.cursor {
         Some(cursor) => cursor.clone(),
@@ -510,22 +759,21 @@ pub fn read_workbook(book: &Workbook, request: &ReadRequest) -> Result<ReadPage,
         }
     };
     let (page, next_cursor) = cursor.plan(request)?;
+    let room = text_room(page.cell_count());
+    let mut cut = CutText::new(room);
+    let sheet_name = carrysheet_model::format_sheet_name(sheet.name());
     let rows = (page.start.row..=page.end.row)
         .map(|r| ReadRow {
             row: r + 1,
             cells: (page.start.col..=page.end.col)
-                .map(|c| match sheet.get(r, c) {
-                    None => Value::Null,
-                    Some(cell) => match (request.mode, &cell.formula) {
-                        (ReadMode::Values, _) | (ReadMode::Formulas, None) => {
-                            value_json(&cell.value)
+                .map(|c| {
+                    let cell = sheet.cell_cut(r, c, room).map(|(info, was_cut)| {
+                        if was_cut {
+                            cut.add(format!("{sheet_name}!{}{}", column_to_letters(c), r + 1));
                         }
-                        (ReadMode::Formulas, Some(f)) => Value::String(format!("={f}")),
-                        (ReadMode::Both, f) => json!({
-                            "value": value_json(&cell.value),
-                            "formula": f.as_ref().map(|f| format!("={f}")),
-                        }),
-                    },
+                        info
+                    });
+                    cell_json(cell, request)
                 })
                 .collect(),
         })
@@ -538,7 +786,15 @@ pub fn read_workbook(book: &Workbook, request: &ReadRequest) -> Result<ReadPage,
             .collect(),
         rows,
         next_cursor,
+        cut: cut.finish(),
     })
+}
+
+/// One page of a range of a model [`Workbook`]. Engines that keep a
+/// [`Workbook`] can use this directly for [`Engine::read_range`].
+pub fn read_workbook(book: &Workbook, request: &ReadRequest) -> Result<ReadPage, CommandError> {
+    let sheet = pick_sheet(book, requested_sheet(request), None)?;
+    read_page(sheet, request)
 }
 
 #[cfg(test)]

@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 carrysheet-commands = { path = "../../crates/carrysheet-commands", version = "0.1.0" }
+carrysheet-kernel = { path = "../../crates/carrysheet-kernel", version = "0.1.0" }
 carrysheet-model = { path = "../../crates/carrysheet-model", version = "0.1.0" }
 carrysheet-vba = { path = "../../crates/carrysheet-vba", version = "0.1.0" }
 # `macros` opens .xlsm/.xlsb packages: our hardened zip reader.
