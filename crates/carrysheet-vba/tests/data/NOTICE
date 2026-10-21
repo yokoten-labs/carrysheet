@@ -1,0 +1,33 @@
+Test files in this folder
+=========================
+
+Every file here comes from the test data of Apache POI
+(test-data/spreadsheet in https://github.com/apache/poi), which is licensed
+under the Apache License, Version 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+
+Apache POI's NOTICE file says:
+
+    Apache POI
+    Copyright 2003-2026 The Apache Software Foundation
+
+    This product includes software developed at
+    The Apache Software Foundation (https://www.apache.org/).
+
+Files
+-----
+
+SimpleMacro.xls             unchanged; .xls with a _VBA_PROJECT_CUR storage,
+                            five modules (Module1, ThisWorkbook, Sheet1-3)
+SimpleMacro.vba             unchanged; the source of TestMacro in Module1
+SimpleMacro-vbaProject.bin  xl/vbaProject.bin extracted unchanged from POI's
+                            SimpleMacro.xlsm (the zip entry's bytes as is)
+62624.bin                   unchanged; a vbaProject.bin with 13 modules and
+                            non-ASCII module names (Módulo1)
+60273.xls                   unchanged; Excel for the Mac, code page 10000,
+                            source lines end with CR only
+59830.xls                   unchanged; 29 modules and a control reference
+                            (Microsoft Forms)
+
+Risk flags, damaged input and VBA stomping are tested with projects built in
+code (tests/common/mod.rs), not with real malware.

@@ -1,0 +1,39 @@
+[package]
+name = "carrysheet-cli"
+version = "0.1.0"
+description = "Carrysheet on the command line, with an MCP server for AI agents."
+license = "GPL-3.0-or-later"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "carrysheet-cli"
+path = "src/main.rs"
+
+[dependencies]
+carrysheet-commands = { path = "../../crates/carrysheet-commands", version = "0.1.0" }
+carrysheet-model = { path = "../../crates/carrysheet-model", version = "0.1.0" }
+carrysheet-vba = { path = "../../crates/carrysheet-vba", version = "0.1.0" }
+# `macros` opens .xlsm/.xlsb packages: our hardened zip reader.
+carrysheet-zip = { path = "../../crates/carrysheet-zip", version = "0.1.0" }
+clap = { version = "4.5", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "color", "string", "wrap_help"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# MCP server over stdio. Exact pin: the Rust SDK is beta for the 2026-07-28 spec.
+rmcp = { version = "=3.5.1", default-features = false, features = ["server", "transport-io"] }
+# Supply chain: Cargo.lock holds tokio 1.53.3, not 1.54.0 (released the day
+# before this was added); tokio-util 0.7.20, uuid 1.28.0 and schemars 1.2.3
+# were each at least a week old. Take new releases only once they have aged a
+# week: `cargo update -p <crate> --precise <version>`.
+tokio = { version = "1", default-features = false, features = ["rt", "io-std"] }
+# Only to forward rmcp's warnings to our log; already a dependency of rmcp.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+# The tests build zip packages byte by byte with carrysheet-zip's test
+# builder (included by path), which deflates with flate2.
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,17 @@
+# Regenerates src/proto/*.rs from the trimmed definitions in ../proto.
+# Not part of the Carrysheet workspace and not shipped with the crate.
+# Run it from the crate folder; see README.md, "Protobuf definitions".
+[package]
+name = "carrysheet-numbers-codegen"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+prost-build = "0.14.4"
+protox = "0.10.0"
+prost-types = "0.14.4"
+heck = "0.5.0"

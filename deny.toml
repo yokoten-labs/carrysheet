@@ -1,0 +1,102 @@
+# cargo-deny policy: which dependencies Carrysheet may use.
+# Run: cargo deny check   (install: cargo install --locked cargo-deny)
+# More in docs/dependencies.md.
+
+[graph]
+# Check the dependency graph for every platform we ship, not only the one
+# that runs the check, so a Windows-only or macOS-only crate is checked too.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu",
+    "i686-pc-windows-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+all-features = true
+
+[advisories]
+# The RustSec advisory database (the default, written out so it is visible).
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# A yanked version was pulled by its author, usually for a bug or a security
+# problem. Never ship one.
+yanked = "deny"
+# Unmaintained or unsound crates fail anywhere in the graph, not only our
+# direct dependencies. A known case we accept goes in `ignore` with a reason
+# and an `expiry`, so it is looked at again.
+unmaintained = "all"
+unsound = "all"
+# zip 8.x (RUSTSEC-2026-0367/0368/0369): unsafe permissions and symlinks in
+# ZipArchive::extract. Only calamine 0.36 pulls zip in, as a dev-dependency of
+# carrysheet-biff for its differential test, which never extracts an archive.
+# The fix is zip 9, which needs calamine 0.37 (released 2026-10-18, inside the
+# 7-day wait). Move to calamine 0.37 and drop these after 2026-10-25.
+ignore = [
+    { id = "RUSTSEC-2026-0367", reason = "dev-only zip via calamine 0.36; extract() unused" },
+    { id = "RUSTSEC-2026-0368", reason = "dev-only zip via calamine 0.36; extract() unused" },
+    { id = "RUSTSEC-2026-0369", reason = "dev-only zip via calamine 0.36; extract() unused" },
+]
+
+[licenses]
+# Allowed for everything, because crates/ (MIT OR Apache-2.0) may only use
+# permissive licenses: people must be able to use our libraries in closed
+# products. Not here on purpose: MPL-2.0, LGPL, GPL, AGPL, and anything
+# unknown. A dependency licensed "X OR Y" passes if either side is allowed.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unlicense",
+    "CC0-1.0",
+]
+# The list is a policy, not an inventory: don't warn for unused entries.
+unused-allowed-license = "allow"
+# Detected license files must match closely before they count.
+confidence-threshold = 0.93
+# Dev-dependencies (e.g. proptest) are not shipped, so they are not checked.
+include-dev = false
+
+# Per-folder rules. cargo-deny has one allow-list for the whole workspace and
+# cannot say "only for apps/". So:
+#  - our own GPL programs in apps/ get an exception for their own license;
+#  - a GPL-compatible dependency that only an app may use (MPL-2.0, LGPL,
+#    GPL-3.0) gets a license exception here AND a [bans] `deny` entry with
+#    `wrappers` naming the apps, so a library in crates/ can't take it in
+#    directly. Example (keep both halves together):
+#      exceptions: { crate = "some-mpl-crate", allow = ["MPL-2.0"] }
+#      bans.deny:  { crate = "some-mpl-crate", wrappers = ["carrysheet-cli"], reason = "MPL-2.0: apps only" }
+#    Note `wrappers` stops other direct users only; reviewers still check that
+#    no permissive crate in crates/ pulls it in through a third crate.
+exceptions = [
+    { crate = "carrysheet-cli", allow = ["GPL-3.0-or-later"] },
+]
+
+[licenses.private]
+# Our crates are checked like everyone else's (none set publish = false yet).
+ignore = false
+
+[bans]
+# Two versions of one crate cost build time and binary size, but are often
+# out of our hands (a dependency lags behind). Warn, and fix when we can.
+multiple-versions = "warn"
+# `version = "*"` takes whatever is newest, which breaks the lockfile review
+# and the 7-day cooldown. Path dependencies also need a version.
+wildcards = "deny"
+highlight = "all"
+deny = []
+skip = []
+
+[sources]
+# Only crates.io. A git or other registry dependency skips crates.io's
+# immutable versions and the advisory database, so it needs a deliberate
+# change here.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

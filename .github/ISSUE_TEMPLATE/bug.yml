@@ -1,0 +1,44 @@
+name: Bug
+description: Carrysheet did something wrong or crashed.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. carrysheet-cli convert report.xls --to xlsx
+        2. ...
+  - type: input
+    id: version
+    attributes:
+      label: Carrysheet version
+      description: Run `carrysheet-cli --version`, or use `carrysheet-cli feedback`, which fills this in for you.
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and 32/64-bit
+      placeholder: Windows 11 23H2, 64-bit
+  - type: dropdown
+    id: via
+    attributes:
+      label: How were you using it?
+      options:
+        - Command line
+        - MCP (through an AI agent)
+        - Desktop app
+        - Web trial page
+  - type: input
+    id: agent
+    attributes:
+      label: If through an AI agent, which one and which version?
+      placeholder: Claude Code 2.x, Codex CLI, Cursor, ...

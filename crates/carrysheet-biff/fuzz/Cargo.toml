@@ -1,0 +1,25 @@
+[package]
+name = "carrysheet-biff-fuzz"
+version = "0.0.0"
+description = "cargo-fuzz targets for carrysheet-biff (needs a nightly toolchain)"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+carrysheet-biff = { path = ".." }
+
+[[bin]]
+name = "read"
+path = "fuzz_targets/read.rs"
+test = false
+doc = false
+bench = false
+
+# Its own workspace, so the stable workspace never builds it.
+[workspace]
+members = ["."]

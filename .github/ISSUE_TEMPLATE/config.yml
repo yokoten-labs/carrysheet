@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and discussion
+    url: https://github.com/yokoten-labs/carrysheet/discussions
+    about: Ask how to do something, or talk about ideas.
+  - name: Email (no GitHub account needed, any language)
+    url: mailto:support@carrysheet.com
+    about: For anything you'd rather not post in public. Security problems go through private reporting instead; see SECURITY.md.

@@ -1,0 +1,50 @@
+// Trimmed from numbers-parser (https://github.com/masaccio/numbers-parser),
+// files src/protos/TSPArchiveMessages.proto and src/protos/TSPMessages.proto
+// at commit a6affe5599c8373f575192ac5777d0c6426da696.
+// Copyright 2021 Jon Connell. MIT License; full text in THIRD-PARTY.md.
+// numbers-parser builds on keynote-parser (Copyright 2019-2025 Peter Sobot,
+// MIT) and iWorkFileFormat (Copyright 2013 Sean Patrick O'Brien, MIT).
+//
+// Only the messages and fields this crate reads are kept. Field numbers and
+// types are unchanged, so dropped fields are skipped as unknown fields.
+
+syntax = "proto2";
+
+package TSP;
+
+// From TSPArchiveMessages.proto.
+message ArchiveInfo {
+  optional uint64 identifier = 1;
+  repeated .TSP.MessageInfo message_infos = 2;
+  optional bool should_merge = 3;
+}
+
+// From TSPArchiveMessages.proto.
+message MessageInfo {
+  required uint32 type = 1;
+  repeated uint32 version = 2 [packed = true];
+  required uint32 length = 3;
+  repeated uint64 object_references = 5 [packed = true];
+  repeated uint64 data_references = 6 [packed = true];
+  optional uint32 base_message_index = 7;
+}
+
+// From TSPMessages.proto.
+message Reference {
+  required uint64 identifier = 1;
+}
+
+// From TSPMessages.proto.
+message UUID {
+  required uint64 lower = 1;
+  required uint64 upper = 2;
+}
+
+// From TSPMessages.proto.
+message CFUUIDArchive {
+  optional bytes uuid_bytes = 1;
+  optional uint32 uuid_w0 = 2;
+  optional uint32 uuid_w1 = 3;
+  optional uint32 uuid_w2 = 4;
+  optional uint32 uuid_w3 = 5;
+}

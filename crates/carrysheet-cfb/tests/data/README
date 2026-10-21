@@ -1,0 +1,28 @@
+Test files in this folder
+=========================
+
+Both files were made by us for this crate, with the `cfb` crate 0.15.0
+(MIT, https://github.com/mdsteele/rust-cfb), so the reader is tested on
+files from an independent writer.
+
+v3.cfb   version 3 (512-byte sectors), 55,296 bytes
+v4.cfb   version 4 (4096-byte sectors), 69,632 bytes
+
+Each holds the same entries:
+
+    /Small                   100 bytes, state bits 0x12345678
+    /Big                    5000 bytes (regular sectors)
+    /Empty                     0 bytes
+    /Sub                    storage, state bits 0x0BADF00D
+    /Sub/Inner              4095 bytes (the largest mini stream)
+    /Sub/Exact              4096 bytes (the smallest regular stream)
+    /Sub/Deeper             storage
+    /Sub/Deeper/Leaf          64 bytes
+    /\x05SummaryInformation  200 bytes
+    /Ünïcode 名前            300 bytes
+    /N00 ... /N39           10 + 37 * i bytes, so the directory spans
+                            several sectors
+
+Stream number i (counting from 1 in the order above, N00 being the 9th)
+holds `data(i, len)` from tests/common/mod.rs: xorshift32 bytes seeded
+with i. Storage times are the time the files were made.

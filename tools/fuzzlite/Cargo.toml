@@ -1,0 +1,25 @@
+[package]
+name = "fuzzlite"
+version = "0.1.0"
+description = "A mutation fuzzer for Carrysheet's file readers that runs on stable Rust with no extra tools"
+license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[[bin]]
+name = "fuzzlite"
+path = "src/main.rs"
+
+[dependencies]
+carrysheet-biff = { path = "../../crates/carrysheet-biff", version = "0.1.0" }
+carrysheet-csv = { path = "../../crates/carrysheet-csv", version = "0.1.0" }
+carrysheet-vba = { path = "../../crates/carrysheet-vba", version = "0.1.0" }
+# Rebuilds compound files after a format-aware mutation. The readers use the
+# same version, so this adds nothing to Cargo.lock.
+cfb = "0.15"
+
+[lints]
+workspace = true

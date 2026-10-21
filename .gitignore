@@ -1,0 +1,7 @@
+target/
+# Generated test files and run output from the kernel bench
+research/kernel-bench/data/
+research/kernel-bench/results/raw/
+# Fuzzing output
+fuzz/artifacts/
+fuzz/corpus/

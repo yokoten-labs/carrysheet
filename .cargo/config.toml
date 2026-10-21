@@ -1,0 +1,7 @@
+# `cargo wasm-check`: build every library for the browser
+# (wasm32-unknown-unknown). Programs that cannot run there are left out:
+# carrysheet-cli needs a terminal, stdio and tokio. A new library is checked
+# without any change here; a new program must be added to the --exclude list.
+# See docs/web-build.md.
+[alias]
+wasm-check = ["build", "--target", "wasm32-unknown-unknown", "--locked", "--workspace", "--exclude", "carrysheet-cli"]

@@ -1,0 +1,79 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "tools/*"]
+exclude = ["research/kernel-bench"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.90"
+repository = "https://github.com/yokoten-labs/carrysheet"
+homepage = "https://carrysheet.com"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+# stdout belongs to results (`--json`) and to MCP's JSON-RPC in `mcp serve`;
+# messages go to stderr. The CLI writes stdout only through output.rs.
+print_stdout = "deny"
+
+# Dev builds and tests inflate with an optimized miniz_oxide: unoptimized,
+# it is about 30 times slower per deflate block, so the hostile tests'
+# time limits would measure the build profile instead of the reader.
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+
+# Release builds: small and fast binaries. Measured on carrysheet-cli 0.1.0,
+# x86_64-unknown-linux-gnu, rustc 1.99.1, one build job:
+#   default profile                          1,522,184 bytes, 22 s
+#   lto fat,  cgu 1, strip, opt-level 3        912,592 bytes, 21 s  <- chosen
+#   lto thin, cgu 1, strip, opt-level 3        990,112 bytes, 21 s
+#   lto fat,  cgu 1, strip, opt-level "s"      725,240 bytes, 18 s
+#   lto fat,  cgu 1, strip, opt 3, abort       819,864 bytes, 22 s
+# Fat LTO builds as fast as thin here and is 8% smaller. Opt-level 3 over "s":
+# parsing and recalculating big files is where people feel speed, and 190 KB
+# is not. Path remapping for releases lives in scripts/release-check.mjs, not
+# here, so dev builds keep real paths for debugging.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+opt-level = 3
+# "unwind" is the default. No reader relies on catch_unwind any more
+# (carrysheet-cfb returns errors, issue 42); moving to "abort" (8% smaller,
+# see above) is a separate decision.
+panic = "unwind"
+# Overflow checks stay on in releases (issue 59): a size or offset from a
+# hostile file that overflows should stop (a panic) rather than wrap and be
+# misread. Measured with a bench outside the repo that reads each crate's
+# tests/data, median of 3 runs [spread], checks off -> this profile:
+#   biff, 47 .xls x 50             215 ms [214-228] -> 220 ms [218-237]  +2%
+#   numbers, 10 files x 200        820 ms [810-824] -> 828 ms [808-918]  +1%
+#   vba, 5 files x 500            1607 ms [1587-1632] -> 1631 ms [1618-1652]  +2%
+#   csv, generated 100 MB          696 ms [686-838] -> 631 ms [613-688]  none
+#   crypto, 3 .xls x 200            20 ms [20-22] -> 19 ms [19-22]       none
+#   crypto, 4 .xlsx x 5            250 ms [236-251] -> 237 ms [230-249]  none
+#   carrysheet-cli binary          2,615,496 -> 2,644,984 bytes          +1%
+# With sha1 and sha2 checked too, .xlsx decrypt was 9% slower (241 -> 263
+# ms): their rounds run 100,000 times per password and add with wrapping on
+# purpose. They read no sizes from files, so only they are left unchecked.
+# clippy::arithmetic_side_effects on the five parser crates found 320 sites;
+# none overflows from file data (sizes are u16/u32 widened, or checked
+# first), so the lint is not turned on.
+overflow-checks = true
+
+[profile.release.package.sha1]
+overflow-checks = false
+
+[profile.release.package.sha2]
+overflow-checks = false
+
+# Fuzzing (tools/fuzzlite): release speed with integer overflow checks on,
+# so an overflow the reader would wrap silently becomes a panic finding.
+# Release has them on too (above); this line keeps fuzzing checked if that
+# ever changes.
+# Build: cargo build --profile fuzz -p fuzzlite (binary in target/fuzz/).
+[profile.fuzz]
+inherits = "release"
+overflow-checks = true

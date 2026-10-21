@@ -1,0 +1,5 @@
+# Only `output::stdout_line` may write to stdout: in `mcp serve`, stdout
+# carries JSON-RPC and nothing else.
+disallowed-methods = [
+    { path = "std::io::stdout", reason = "write through output::stdout_line, which stdout reservation for MCP guards" },
+]

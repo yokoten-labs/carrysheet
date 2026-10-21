@@ -1,0 +1,199 @@
+// Trimmed from numbers-parser (https://github.com/masaccio/numbers-parser),
+// file src/protos/TSCEArchives.proto at commit
+// a6affe5599c8373f575192ac5777d0c6426da696.
+// Copyright 2021 Jon Connell. MIT License; full text in THIRD-PARTY.md.
+// numbers-parser builds on keynote-parser (Copyright 2019-2025 Peter Sobot,
+// MIT) and iWorkFileFormat (Copyright 2013 Sean Patrick O'Brien, MIT).
+//
+// Only the messages and fields this crate reads are kept. Field numbers and
+// types are unchanged, so dropped fields are skipped as unknown fields.
+
+syntax = "proto2";
+
+import "TSP.proto";
+
+package TSCE;
+
+message RangeCoordinateArchive {
+  required uint32 top_left_column = 1;
+  required uint32 top_left_row = 2;
+  required uint32 bottom_right_column = 3;
+  required uint32 bottom_right_row = 4;
+}
+
+message InternalRangeReferenceArchive {
+  required uint32 owner_id = 1;
+  required .TSCE.RangeCoordinateArchive range = 2;
+}
+
+message RangeBackDependencyArchive {
+  required uint32 cell_coord_row = 1;
+  required uint32 cell_coord_column = 2;
+  optional .TSCE.InternalRangeReferenceArchive internal_range_reference = 4;
+}
+
+message RangeDependenciesArchive {
+  repeated .TSCE.RangeBackDependencyArchive back_dependency = 2;
+}
+
+message FormulaOwnerDependenciesArchive {
+  required .TSP.UUID formula_owner_uid = 1;
+  required uint32 internal_formula_owner_id = 2;
+  optional uint32 owner_kind = 3 [default = 0];
+  optional .TSCE.RangeDependenciesArchive range_dependencies = 5;
+  optional .TSP.UUID base_owner_uid = 12;
+}
+
+message OwnerIDMapArchive {
+  message OwnerIDMapArchiveEntry {
+    required uint32 internal_owner_id = 1;
+    required .TSP.CFUUIDArchive owner_id = 2;
+  }
+
+  repeated .TSCE.OwnerIDMapArchive.OwnerIDMapArchiveEntry map_entry = 1;
+}
+
+message DependencyTrackerArchive {
+  optional .TSCE.OwnerIDMapArchive owner_id_map = 3;
+  repeated .TSP.Reference formula_owner_dependencies = 6;
+}
+
+message CalculationEngineArchive {
+  optional bool base_date_1904 = 1;
+  required .TSCE.DependencyTrackerArchive dependency_tracker = 2;
+}
+
+message HauntedOwnerArchive {
+  required .TSP.UUID owner_uid = 1;
+}
+
+message ASTNodeArrayArchive {
+  enum ASTNodeType {
+    ADDITION_NODE = 1;
+    SUBTRACTION_NODE = 2;
+    MULTIPLICATION_NODE = 3;
+    DIVISION_NODE = 4;
+    POWER_NODE = 5;
+    CONCATENATION_NODE = 6;
+    GREATER_THAN_NODE = 7;
+    GREATER_THAN_OR_EQUAL_TO_NODE = 8;
+    LESS_THAN_NODE = 9;
+    LESS_THAN_OR_EQUAL_TO_NODE = 10;
+    EQUAL_TO_NODE = 11;
+    NOT_EQUAL_TO_NODE = 12;
+    NEGATION_NODE = 13;
+    PLUS_SIGN_NODE = 14;
+    PERCENT_NODE = 15;
+    FUNCTION_NODE = 16;
+    NUMBER_NODE = 17;
+    BOOLEAN_NODE = 18;
+    STRING_NODE = 19;
+    DATE_NODE = 20;
+    DURATION_NODE = 21;
+    EMPTY_ARGUMENT_NODE = 22;
+    TOKEN_NODE = 23;
+    ARRAY_NODE = 24;
+    LIST_NODE = 25;
+    THUNK_NODE = 26;
+    LOCAL_CELL_REFERENCE_NODE = 27;
+    CROSS_TABLE_CELL_REFERENCE_NODE = 28;
+    COLON_NODE = 29;
+    REFERENCE_ERROR_NODE = 30;
+    UNKNOWN_FUNCTION_NODE = 31;
+    APPEND_WHITESPACE_NODE = 32;
+    PREPEND_WHITESPACE_NODE = 33;
+    BEGIN_THUNK_NODE = 34;
+    END_THUNK_NODE = 35;
+    CELL_REFERENCE_NODE = 36;
+    COLON_NODE_WITH_UIDS = 45;
+    REFERENCE_ERROR_WITH_UIDS = 46;
+    UID_REFERENCE_NODE = 48;
+    LET_BIND_NODE = 52;
+    VAR_NODE = 53;
+    END_SCOPE_NODE = 54;
+    LAMBDA_NODE = 55;
+    BEGIN_LAMBDA_THUNK_NODE = 56;
+    END_LAMBDA_THUNK_NODE = 57;
+    LINKED_CELL_REF_NODE = 63;
+    LINKED_COLUMN_REF_NODE = 64;
+    LINKED_ROW_REF_NODE = 65;
+    CATEGORY_REF_NODE = 66;
+    COLON_TRACT_NODE = 67;
+    VIEW_TRACT_REF_NODE = 68;
+    INTERSECTION_NODE = 69;
+    SPILL_RANGE_NODE = 70;
+  }
+  message ASTColumnCoordinateArchive {
+    required sint32 column = 1;
+    optional bool absolute = 2 [default = false];
+  }
+
+  message ASTRowCoordinateArchive {
+    required sint32 row = 1;
+    optional bool absolute = 2 [default = false];
+  }
+
+  message ASTStickyBits {
+    required bool begin_row_is_absolute = 1;
+    required bool begin_column_is_absolute = 2;
+    required bool end_row_is_absolute = 3;
+    required bool end_column_is_absolute = 4;
+  }
+
+  message ASTColonTractArchive {
+    message ASTColonTractRelativeRangeArchive {
+      required int32 range_begin = 1;
+      optional int32 range_end = 2;
+    }
+
+    message ASTColonTractAbsoluteRangeArchive {
+      required uint32 range_begin = 1;
+      optional uint32 range_end = 2;
+    }
+
+    repeated .TSCE.ASTNodeArrayArchive.ASTColonTractArchive.ASTColonTractRelativeRangeArchive relative_column = 1;
+    repeated .TSCE.ASTNodeArrayArchive.ASTColonTractArchive.ASTColonTractRelativeRangeArchive relative_row = 2;
+    repeated .TSCE.ASTNodeArrayArchive.ASTColonTractArchive.ASTColonTractAbsoluteRangeArchive absolute_column = 3;
+    repeated .TSCE.ASTNodeArrayArchive.ASTColonTractArchive.ASTColonTractAbsoluteRangeArchive absolute_row = 4;
+    optional bool preserve_rectangular = 5 [default = true];
+  }
+
+  message ASTCrossTableReferenceExtraInfoArchive {
+    required .TSP.CFUUIDArchive table_id = 1;
+  }
+
+  message ASTNodeArchive {
+    required .TSCE.ASTNodeArrayArchive.ASTNodeType AST_node_type = 1;
+    optional uint32 AST_function_node_index = 2;
+    optional uint32 AST_function_node_numArgs = 3;
+    optional double AST_number_node_number = 4;
+    optional bool AST_boolean_node_boolean = 5;
+    optional string AST_string_node_string = 6;
+    optional double AST_date_node_dateNum = 7;
+    optional double AST_duration_node_unitNum = 8;
+    optional int32 AST_duration_node_unit = 9;
+    optional bool AST_token_node_boolean = 10;
+    optional uint32 AST_array_node_numCol = 11;
+    optional uint32 AST_array_node_numRow = 12;
+    optional uint32 AST_list_node_numArgs = 13;
+    optional .TSCE.ASTNodeArrayArchive AST_thunk_node_array = 14;
+    optional string AST_unknown_function_node_string = 17;
+    optional uint32 AST_unknown_function_node_numArgs = 18;
+    optional string AST_whitespace = 25;
+    optional .TSCE.ASTNodeArrayArchive.ASTColumnCoordinateArchive AST_column = 26;
+    optional .TSCE.ASTNodeArrayArchive.ASTRowCoordinateArchive AST_row = 27;
+    optional .TSCE.ASTNodeArrayArchive.ASTCrossTableReferenceExtraInfoArchive AST_cross_table_reference_extra_info = 28;
+    optional .TSCE.ASTNodeArrayArchive.ASTStickyBits AST_sticky_bits = 33;
+    optional .TSCE.ASTNodeArrayArchive.ASTColonTractArchive AST_colon_tract = 40;
+    optional uint64 AST_number_node_decimal_low = 42;
+    optional uint64 AST_number_node_decimal_high = 43;
+  }
+
+  repeated .TSCE.ASTNodeArrayArchive.ASTNodeArchive AST_node = 1;
+}
+
+message FormulaArchive {
+  required .TSCE.ASTNodeArrayArchive AST_node_array = 1;
+  optional uint32 host_column = 2;
+  optional uint32 host_row = 3;
+}

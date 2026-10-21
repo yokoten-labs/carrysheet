@@ -1,0 +1,40 @@
+name: A file opens wrong
+description: A spreadsheet won't open, or looks or calculates differently than in Excel.
+labels: [compatibility]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Real files are the best way for us to fix this, and every file we receive becomes a test so the problem stays fixed.
+        **Please don't attach private data.** Run `carrysheet-cli sanitize yourfile.xlsx` first: it replaces your text and numbers with made-up values and keeps formulas, formatting and structure. Check the result before you attach it.
+  - type: dropdown
+    id: format
+    attributes:
+      label: File format
+      options:
+        - xlsx / xlsm
+        - xlsb
+        - xls (Excel 97–2003)
+        - xls (Excel 95 or older)
+        - csv
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What is wrong
+      description: Which sheet and cells, what Excel shows, and what Carrysheet shows. Screenshots help.
+    validations:
+      required: true
+  - type: input
+    id: made
+    attributes:
+      label: Which program made the file, if you know
+      placeholder: Excel 2016, WPS, LibreOffice, an export from some system...
+  - type: input
+    id: version
+    attributes:
+      label: Carrysheet version
+    validations:
+      required: true

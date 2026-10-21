@@ -1,0 +1,144 @@
+# CI for every pull request and every push to main: the full check.mjs run on
+# Linux, clippy and tests on Windows and macOS, a build on the minimum
+# supported Rust, and the self-tests of check.mjs. A pull request is merged
+# only when every job here is green.
+#
+# Every action is pinned to a full commit SHA; the comment says which tag.
+# To update one, look up the new tag's commit (gh api
+# repos/<owner>/<repo>/git/ref/tags/<tag>, dereferencing an annotated tag)
+# and take only releases that are at least a week old.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels its older run. Every push to main runs
+# to the end, so each commit on main gets a full result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The Rust the developers use, so fmt and clippy give the same answers here
+  # as locally. Update it together with the development machine.
+  RUST_TOOLCHAIN: "1.99.1"
+  # The workspace's rust-version (Cargo.toml): the msrv job checks that the
+  # code still builds with it.
+  RUST_MSRV: "1.90.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: check.mjs (full, strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      # check.mjs --list: fmt and clippy need rustfmt and clippy; wasm needs
+      # wasm32-unknown-unknown; windows-x64 and windows-x86 need the mingw
+      # targets and linkers; release builds for the host target.
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal \
+            --component rustfmt,clippy \
+            --target wasm32-unknown-unknown,x86_64-pc-windows-gnu,i686-pc-windows-gnu
+          rustup default "$RUST_TOOLCHAIN"
+          rustc --version
+
+      - name: Install the mingw-w64 linkers
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends gcc-mingw-w64-x86-64 gcc-mingw-w64-i686
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # The deny step: a prebuilt cargo-deny, checksum-verified by the action.
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-deny@0.20.2
+
+      - name: node scripts/check.mjs
+        env:
+          CI: "1"
+        run: node scripts/check.mjs
+
+  test:
+    name: clippy and tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component clippy
+          rustup default "$RUST_TOOLCHAIN"
+          rustc --version
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # Lints the code behind #[cfg(windows)] and #[cfg(target_os = "macos")]:
+      # the Linux check job builds the Windows targets but lints only Linux.
+      - name: cargo clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --locked --workspace
+
+  msrv:
+    name: cargo check on rust-version (MSRV)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust ${{ env.RUST_MSRV }}
+        run: |
+          rustup toolchain install "$RUST_MSRV" --profile minimal
+          rustup default "$RUST_MSRV"
+          rustc --version
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: cargo check
+        run: cargo check --workspace --locked --all-targets
+
+  check-script:
+    name: check.mjs self-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: node --test scripts/check.test.mjs
+        run: node --test scripts/check.test.mjs

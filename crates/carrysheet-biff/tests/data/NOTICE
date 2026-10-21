@@ -1,0 +1,74 @@
+Test files in this folder
+=========================
+
+Every .xls file in this folder and in fuzz/ (calamine/ is described below)
+comes unchanged from the test data of Apache POI (test-data/spreadsheet in
+https://github.com/apache/poi), which is licensed under the Apache License,
+Version 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+
+The function table in src/formula/functions.rs comes from Apache POI too;
+see the crate's NOTICE.
+
+Apache POI's NOTICE file says:
+
+    Apache POI
+    Copyright 2003-2026 The Apache Software Foundation
+
+    This product includes software developed at
+    The Apache Software Foundation (https://www.apache.org/).
+
+The files in fuzz/ are inputs that broke Apache POI's own reader (minimized
+by OSS-Fuzz); here they check that damaged files fail cleanly.
+
+Files by BIFF version
+---------------------
+
+BIFF3 (Excel 3.0, raw stream): testEXCEL_3.xls
+BIFF4 (Excel 4.0, raw stream): testEXCEL_4.xls
+BIFF5 (Excel 5.0/95, "Book" stream): testEXCEL_5.xls, testEXCEL_95.xls,
+  59074.xls, 64130.xls (Excel for the Mac, Mac Roman, chart only)
+BIFF8 (Excel 97-2003): everything else. Notable ones:
+  1904DateWindowing.xls       1904 date system
+  chinese-provinces.xls       Chinese text in the SST
+  61287.xls                   Chinese sheet name, merged cells
+  DBCSSheetName.xls           Hindi sheet names
+  unicodeNameRecord.xls       Japanese defined name
+  shared_formulas.xls, SharedFormulaTest.xls, overlapSharedFormula.xls,
+  AbnormalSharedFormulaFlag.xls  shared formulas, including odd anchors
+  testArraysAndTables.xls     array formulas and what-if data tables
+  3dFormulas.xls, 55906-MultiSheetRefs.xls  3D references
+  externalFunctionExample.xls, XRefCalc.xls, 49612.xls  external names
+  61045_govdocs1_626534.xls   FORMAT records cut short by their writer; POI
+                              took it from the Govdocs1 corpus (Digital
+                              Corpora: documents from US government web
+                              sites)
+  BOOK_in_capitals.xls        stream named "BOOK"
+  WithChart.xls               embedded chart substream
+  password.xls, xor-encryption-abc.xls  encrypted (FILEPASS)
+
+BIFF2 (Excel 2.x) files are not in POI's test data. The tests build BIFF2
+streams (and BIFF5 streams with East Asian code pages) in code instead; see
+tests/synthetic.rs.
+
+Files from calamine
+-------------------
+
+The .xls files in calamine/ come unchanged from the test data of calamine
+0.37.0 (tests/ in https://github.com/tafia/calamine), which is licensed under
+the MIT License: Copyright (c) 2016 Johann Tuffe. The full license text is in
+calamine/LICENSE-MIT.
+
+Most are bug reports against calamine's .xls reader:
+  biff5_write.xls, misc_biff5_parsing.xls, issue_643_biff5_formula.xls
+                              BIFF5 cells, names and formulas
+  biff5-rich-text-string.xls  rich text in the SST (UTF-16 with symbols)
+  sheet_name_parsing.xls      UTF-16 strings with CODEPAGE 1252
+  date_east_asian.xls         East Asian date formats
+  sst_continue.xls            SST split over CONTINUE records
+  formula-utf16-string.xls    STRING record holding UTF-16 text
+  empty-string.xls, malformed_format.xls, issue_577_dimensions_16_bytes.xls,
+  ptgexp-truncated-operand.xls, xls_formula.xls  writer quirks
+  OOM_alloc.xls, OOM_alloc2.xls, OOM_alloc3.xls, issue_714.xls, too_small.xls
+                              damaged files that must fail cleanly or read
+                              without huge allocations

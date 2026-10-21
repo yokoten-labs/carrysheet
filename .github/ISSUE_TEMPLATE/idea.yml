@@ -1,0 +1,19 @@
+name: Idea
+description: Suggest a feature or a change.
+labels: [idea]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the job you need done, not only the feature. This helps us find the best fix.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+  - type: textarea
+    id: now
+    attributes:
+      label: How do you do it today?

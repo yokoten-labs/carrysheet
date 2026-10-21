@@ -1,0 +1,30 @@
+[package]
+name = "carrysheet-numbers"
+version = "0.1.0"
+description = "Read Apple Numbers (.numbers) spreadsheets in pure Rust, safely."
+license = "MIT OR Apache-2.0"
+keywords = ["numbers", "iwork", "spreadsheet", "apple", "iwa"]
+categories = ["parser-implementations"]
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# The code generator is a separate tool for maintainers.
+exclude = ["codegen"]
+
+[dependencies]
+# Only the derive macros and the runtime; the generated code is committed.
+prost = { version = "0.14.4", default-features = false, features = ["derive", "std"] }
+# Read-only zip with Deflate only, decoded by the pure-Rust miniz_oxide.
+# =9.0.2: the newest release past the 7-day cooldown (docs/dependencies.md)
+# on 2026-10-20; it has the 9.0.0/9.0.1 overflow fixes. Move up on or after
+# 2026-10-24.
+zip = { version = "=9.0.2", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+
+[dev-dependencies]
+# Only to unpack the fixtures' Snappy blocks for the mutation test.
+snap = "1.1.2"
+
+[lints]
+workspace = true

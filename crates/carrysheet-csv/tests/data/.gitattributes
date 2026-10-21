@@ -1,0 +1,2 @@
+# Fixtures are exact bytes: never convert line endings or encodings.
+* -text

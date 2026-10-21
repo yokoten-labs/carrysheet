@@ -1,0 +1,154 @@
+// Trimmed from numbers-parser (https://github.com/masaccio/numbers-parser),
+// file src/protos/TSTArchives.proto at commit
+// a6affe5599c8373f575192ac5777d0c6426da696.
+// Copyright 2021 Jon Connell. MIT License; full text in THIRD-PARTY.md.
+// numbers-parser builds on keynote-parser (Copyright 2019-2025 Peter Sobot,
+// MIT) and iWorkFileFormat (Copyright 2013 Sean Patrick O'Brien, MIT).
+//
+// Only the messages and fields this crate reads are kept. Field numbers and
+// types are unchanged, so dropped fields are skipped as unknown fields.
+
+syntax = "proto2";
+
+import "TSP.proto";
+import "TSD.proto";
+import "TSCE.proto";
+
+package TST;
+
+message CellID {
+  required fixed32 packedData = 1;
+}
+
+message TableSize {
+  required fixed32 packedData = 1;
+  optional uint32 num_columns = 2;
+  optional uint32 num_rows = 3;
+}
+
+message CellRange {
+  required .TST.CellID origin = 1;
+  required .TST.TableSize size = 2;
+}
+
+message TileRowInfo {
+  required uint32 tile_row_index = 1;
+  required uint32 cell_count = 2;
+  required bytes cell_storage_buffer_pre_bnc = 3;
+  required bytes cell_offsets_pre_bnc = 4;
+  optional uint32 storage_version = 5;
+  optional bytes cell_storage_buffer = 6;
+  optional bytes cell_offsets = 7;
+  optional bool has_wide_offsets = 8;
+}
+
+message Tile {
+  required uint32 maxColumn = 1;
+  required uint32 maxRow = 2;
+  required uint32 numCells = 3;
+  required uint32 numrows = 4;
+  repeated .TST.TileRowInfo rowInfos = 5;
+  optional uint32 storage_version = 6;
+  optional bool last_saved_in_BNC = 7;
+  optional bool should_use_wide_rows = 8;
+}
+
+message TileStorage {
+  message Tile {
+    required uint32 tileid = 1;
+    required .TSP.Reference tile = 2;
+  }
+
+  repeated .TST.TileStorage.Tile tiles = 1;
+  optional uint32 tile_size = 2;
+  optional bool should_use_wide_rows = 3;
+}
+
+message TableDataList {
+  enum ListType {
+    STRING = 1;
+    FORMAT = 2;
+    FORMULA = 3;
+    STYLE = 4;
+    FORMULA_ERROR = 5;
+    CUSTOM_FORMAT = 6;
+    MULTIPLE_CHOICE_LIST_FORMAT = 7;
+    RICH_TEXT_PAYLOAD = 8;
+    CONDITIONAL_STYLE = 9;
+    COMMENT_STORAGE = 10;
+    IMPORT_WARNING = 11;
+    CONTROL_CELL_SPEC = 12;
+  }
+  message ListEntry {
+    required uint32 key = 1;
+    required uint32 refcount = 2;
+    optional string string = 3;
+    optional .TSP.Reference reference = 4;
+    optional .TSCE.FormulaArchive formula = 5;
+    optional .TSP.Reference rich_text_payload = 9;
+  }
+
+  required .TST.TableDataList.ListType listType = 1;
+  required uint32 nextListID = 2;
+  repeated .TST.TableDataList.ListEntry entries = 3;
+  repeated .TSP.Reference segments = 4;
+  optional bool is_new_for_bnc = 5;
+}
+
+message TableDataListSegment {
+  required .TST.TableDataList.ListType list_type = 1;
+  repeated .TST.TableDataList.ListEntry entries = 3;
+}
+
+message DataStore {
+  required .TST.TileStorage tiles = 3;
+  required .TSP.Reference stringTable = 4;
+  required .TSP.Reference formula_table = 6;
+  optional .TSP.Reference formulaErrorTable = 12;
+  optional .TSP.Reference merge_region_map = 13;
+  optional uint32 storage_version_pre_bnc = 14;
+  optional .TSP.Reference rich_text_table = 17;
+}
+
+message TableInfoArchive {
+  required .TSD.DrawableArchive super = 1;
+  required .TSP.Reference tableModel = 2;
+  optional bool is_a_pivot_table = 16;
+}
+
+message FormulaStoreArchive {
+  message FormulaStorePair {
+    required uint32 formula_index = 1;
+    required .TSCE.FormulaArchive formula = 2;
+  }
+
+  required uint32 next_formula_index = 2;
+  repeated .TST.FormulaStoreArchive.FormulaStorePair formulas = 3;
+}
+
+message MergeOwnerArchive {
+  required .TSP.CFUUIDArchive owner_id = 1;
+  optional .TST.FormulaStoreArchive formula_store = 2;
+}
+
+message TableModelArchive {
+  required string table_id = 1;
+  required .TST.DataStore base_data_store = 4;
+  required uint32 number_of_rows = 6;
+  required uint32 number_of_columns = 7;
+  required string table_name = 8;
+  optional uint32 number_of_header_rows = 9;
+  optional uint32 number_of_header_columns = 10;
+  optional uint32 number_of_footer_rows = 11;
+  optional bool table_name_enabled = 22;
+  optional .TST.MergeOwnerArchive merge_owner = 47;
+  optional .TSCE.HauntedOwnerArchive haunted_owner = 84;
+}
+
+message MergeRegionMapArchive {
+  repeated .TST.CellRange cell_range = 1;
+}
+
+message RichTextPayloadArchive {
+  required .TSP.Reference storage = 1;
+}

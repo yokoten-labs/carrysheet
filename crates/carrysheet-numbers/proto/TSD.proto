@@ -1,0 +1,19 @@
+// Trimmed from numbers-parser (https://github.com/masaccio/numbers-parser),
+// file src/protos/TSDArchives.proto at commit
+// a6affe5599c8373f575192ac5777d0c6426da696.
+// Copyright 2021 Jon Connell. MIT License; full text in THIRD-PARTY.md.
+// numbers-parser builds on keynote-parser (Copyright 2019-2025 Peter Sobot,
+// MIT) and iWorkFileFormat (Copyright 2013 Sean Patrick O'Brien, MIT).
+//
+// Only the messages and fields this crate reads are kept. Field numbers and
+// types are unchanged, so dropped fields are skipped as unknown fields.
+
+syntax = "proto2";
+
+import "TSP.proto";
+
+package TSD;
+
+message DrawableArchive {
+  optional .TSP.Reference parent = 2;
+}

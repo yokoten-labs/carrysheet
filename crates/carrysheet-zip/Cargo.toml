@@ -1,0 +1,26 @@
+[package]
+name = "carrysheet-zip"
+version = "0.1.0"
+description = "Read zip archives that may be hostile: one end record, bounded central directory, Stored and Deflate only, budgets on bytes read and produced"
+license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[dependencies]
+# Pure-Rust inflate (miniz_oxide). flate2 1.1.10 is already in the lock.
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+
+[features]
+# Tests only: which inflater the tests must find linked (tests/tail.rs).
+# The shipped CLI links miniz_oxide; `cargo test --workspace` unifies
+# flate2 to zlib-rs (calamine, a dev-dependency elsewhere, asks for it).
+# scripts/check.mjs runs this crate's tests once with each, so both are
+# exercised whatever the workspace unifies to.
+test-miniz = []
+test-zlib-rs = ["flate2/zlib-rs"]
+
+[lints]
+workspace = true
