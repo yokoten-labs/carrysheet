@@ -4,6 +4,7 @@
 //! Exit codes: 0 done, 1 failed, 2 usage error, 3 nothing to do.
 
 mod cli;
+mod http;
 mod log;
 mod mcp;
 mod output;
