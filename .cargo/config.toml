@@ -5,3 +5,15 @@
 # See docs/web-build.md.
 [alias]
 wasm-check = ["build", "--target", "wasm32-unknown-unknown", "--locked", "--workspace", "--exclude", "carrysheet-cli"]
+
+# Flags for the SQLite that carrysheet-query compiles in (libsqlite3-sys,
+# feature "bundled"). They leave out what queries never use, to keep the
+# binary small and the attack surface narrow: full-text search, R-trees,
+# the dbstat table, STAT4, extension loading, deprecated and shared-cache
+# APIs, and double-quoted string literals. JSON and window functions stay.
+# Never add SQLITE_DEFAULT_MEMSTATUS=0 (the memory budget needs it),
+# SQLITE_OMIT_PROGRESS_CALLBACK, SQLITE_OMIT_AUTHORIZATION, SQLITE_OMIT_DECLTYPE
+# or SQLITE_THREADSAFE=0: the query guard depends on them. `force` makes
+# these flags win over a LIBSQLITE3_FLAGS set in the shell.
+[env]
+LIBSQLITE3_FLAGS = { value = "-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_FTS5 -USQLITE_ENABLE_RTREE -USQLITE_ENABLE_DBSTAT_VTAB -USQLITE_ENABLE_STAT4 -USQLITE_ENABLE_LOAD_EXTENSION -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_OMIT_DEPRECATED -DSQLITE_OMIT_SHARED_CACHE -DSQLITE_DQS=0", force = true }

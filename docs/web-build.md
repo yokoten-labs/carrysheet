@@ -7,8 +7,8 @@ WebAssembly (target `wasm32-unknown-unknown`).
 
 Every library in `crates/` builds: carrysheet-model, carrysheet-csv,
 carrysheet-commands, carrysheet-cfb, carrysheet-biff, carrysheet-vba,
-carrysheet-crypto and carrysheet-numbers. carrysheet-cli does
-not, and does not need to: it is a terminal program with an MCP server.
+carrysheet-crypto, carrysheet-numbers and carrysheet-query.
+carrysheet-cli does not, and does not need to: it is a terminal program with an MCP server.
 
     rustup target add wasm32-unknown-unknown   # once
     cargo wasm-check
@@ -36,4 +36,7 @@ and writes class IDs as plain bytes and never makes a random one.
   `.wasm` that includes it imports wasm-bindgen functions. Process it with
   wasm-bindgen (or wasm-pack) before a page loads it. carrysheet-cfb never
   asks for the time: new storages get zero times.
+- **No SQL queries.** carrysheet-query runs SQL with SQLite, which is C code
+  and is left out on this target: the crate builds with its input types,
+  header naming and date helpers, but without `QueryEngine`.
 - **One thread.** Nothing in the libraries starts a thread.
