@@ -80,15 +80,12 @@ fn git_toplevel(path: &Path) -> Option<PathBuf> {
 fn resolve(p: &Path) -> Result<PathBuf, String> {
     let full = std::env::current_dir().unwrap_or_default().join(p);
     let parts: Vec<Component> = full.components().collect();
-    // The longest prefix that exists.
-    let mut cut = parts.len();
-    while cut > 0 {
-        let prefix: PathBuf = parts[..cut].iter().collect();
-        if prefix.exists() {
-            break;
-        }
-        cut -= 1;
-    }
+    // The prefix that exists, up to the first missing folder. Scanning
+    // from the start matters on Windows, which drops `missing\..` from a
+    // path before it looks at the disk, so `missing\..` "exists" there.
+    let cut = (1..=parts.len())
+        .find(|&n| !parts[..n].iter().collect::<PathBuf>().exists())
+        .map_or(parts.len(), |n| n - 1);
     let base: PathBuf = parts[..cut].iter().collect();
     let mut out = base
         .canonicalize()
@@ -146,13 +143,16 @@ mod tests {
 
     #[test]
     fn dot_dot_cannot_climb_into_a_repository() {
-        let root = crate::seeds::default_root().canonicalize().unwrap();
+        // Without Windows' verbatim prefix (`\\?\`), in which `..` is an
+        // ordinary name rather than the parent folder.
+        let root = strip_verbatim(&crate::seeds::default_root().canonicalize().unwrap());
         let other = std::env::temp_dir();
         // `..` after a folder that does not exist: refused outright.
-        let ups = "../".repeat(root.components().count() + 2);
-        let sneaky = std::env::temp_dir()
-            .join("fuzzlite-no-such-dir")
-            .join(format!("{ups}{}", root.display()))
+        let missing = root.parent().unwrap().join("fuzzlite-no-such-dir");
+        assert!(!missing.exists());
+        let sneaky = missing
+            .join("..")
+            .join(root.file_name().unwrap())
             .join("zz");
         let err = prepare_out_dir(&sneaky, &other).unwrap_err();
         assert!(err.contains("`..`"), "{err}");
