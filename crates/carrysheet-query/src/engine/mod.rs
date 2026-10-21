@@ -2,7 +2,7 @@
 //! queries on them, a page at a time.
 
 use std::fmt::Write as _;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -73,9 +73,9 @@ pub(crate) struct Local {
     seen: Arc<Mutex<guard::Seen>>,
     /// Why the progress handler stopped the last query.
     stopped: Arc<AtomicU8>,
-    /// Set by the watchdog once the running query is past its time limit;
-    /// our functions read it too.
-    late: Arc<AtomicBool>,
+    /// Whether the running query is past its time limit; our functions read
+    /// it too.
+    late: Arc<guard::Late>,
     /// What the loaded data takes in SQLite, measured after loading.
     data_bytes: u64,
     /// This engine's share of the process's memory budget.
@@ -123,7 +123,7 @@ impl Local {
 
         let seen = Arc::new(Mutex::new(guard::Seen::default()));
         let names: Vec<String> = tables.iter().map(|t| t.name.clone()).collect();
-        let late = Arc::new(AtomicBool::new(false));
+        let late = Arc::new(guard::Late::default());
         guard::lock(&conn, &limits, &names, Arc::clone(&seen), &late).map_err(internal)?;
         Ok(Local {
             conn,
@@ -554,9 +554,7 @@ impl Local {
         } else {
             ""
         };
-        if self.stopped.load(Ordering::Relaxed) == guard::STOPPED_TIME
-            || self.late.load(Ordering::Relaxed)
-        {
+        if self.stopped.load(Ordering::Relaxed) == guard::STOPPED_TIME || self.late.flagged() {
             time_limit_error(&self.limits, offset)
         } else {
             QueryError::new(

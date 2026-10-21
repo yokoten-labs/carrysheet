@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use carrysheet_query::{Limits, Page, QueryCell, QueryEngine, QueryErrorCode, TableInput};
 
 const SLACK: Duration = Duration::from_millis(300);
-/// Past one more row: the timer's wake-up and the step that ends the query.
+/// Past one more row: the step that ends the query after the row it stopped in.
 const ROW_SLACK: Duration = Duration::from_millis(100);
 
 /// Queries of many rows, and the same query on one of their rows: the
