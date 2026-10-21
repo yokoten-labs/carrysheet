@@ -1,0 +1,16 @@
+Test files in this folder
+=========================
+
+SimpleMacro.xlsm (a VBA project) and WithTwoCharts.xlsx (two charts on two
+sheets) come unchanged from the test data of Apache POI
+(test-data/spreadsheet in https://github.com/apache/poi), which is licensed
+under the Apache License, Version 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+
+Apache POI's NOTICE file says:
+
+    Apache POI
+    Copyright 2003-2026 The Apache Software Foundation
+
+    This product includes software developed at
+    The Apache Software Foundation (https://www.apache.org/).

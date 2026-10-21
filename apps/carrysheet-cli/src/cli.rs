@@ -84,6 +84,14 @@ pub fn build() -> clap::Command {
                 .global(true)
                 .action(ArgAction::SetTrue)
                 .help("Answer yes to confirmations; without a terminal the answer is no"),
+        )
+        .arg(
+            clap::Arg::new("max-seconds")
+                .long("max-seconds")
+                .global(true)
+                .value_name("SECONDS")
+                .value_parser(clap::value_parser!(f64))
+                .help("Most seconds one command may take, opening and saving included (default 10, at most 3600)"),
         );
     let mut groups: Vec<(&str, clap::Command)> = Vec::new();
     for command in COMMANDS {

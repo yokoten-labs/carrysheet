@@ -19,12 +19,15 @@ pub enum ErrorKind {
     Blocked,
     Connect,
     Busy,
+    /// A circular reference: a formula that reads its own result, directly or
+    /// through others. Excel shows 0 and a warning; Carrysheet says what it is.
+    Circ,
     Unknown,
 }
 
 impl ErrorKind {
     /// Every kind, in a fixed order.
-    pub const ALL: [ErrorKind; 15] = [
+    pub const ALL: [ErrorKind; 16] = [
         ErrorKind::Null,
         ErrorKind::Div0,
         ErrorKind::Value,
@@ -39,6 +42,7 @@ impl ErrorKind {
         ErrorKind::Blocked,
         ErrorKind::Connect,
         ErrorKind::Busy,
+        ErrorKind::Circ,
         ErrorKind::Unknown,
     ];
 
@@ -59,6 +63,7 @@ impl ErrorKind {
             ErrorKind::Blocked => "#BLOCKED!",
             ErrorKind::Connect => "#CONNECT!",
             ErrorKind::Busy => "#BUSY!",
+            ErrorKind::Circ => "#CIRC!",
             ErrorKind::Unknown => "#UNKNOWN!",
         }
     }

@@ -9,11 +9,13 @@
 //! - [`error`]: errors with a code, what, why and fix, and exit codes.
 //! - [`engine`]: what commands need from a calculation engine, and (with
 //!   the `test-engine` feature) an in-memory engine for tests.
+//! - [`limits`]: every limit on the work and memory of one call.
 //! - [`paths`]: showing paths with `~` for the home folder.
 //! - [`root`]: keeping the paths a client gives inside a root folder.
 
 pub mod engine;
 pub mod error;
+pub mod limits;
 pub mod paths;
 pub mod root;
 pub mod schema;

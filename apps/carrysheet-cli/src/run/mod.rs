@@ -7,10 +7,12 @@ mod xml;
 
 use std::path::Path;
 
+use carrysheet_commands::engine::run::{ENGINE_COMMANDS, run_within};
 use carrysheet_commands::paths::{display_path, redact_home};
 use carrysheet_commands::schema::command_json;
 use carrysheet_commands::table::{COMMANDS, Command};
 use carrysheet_commands::{CommandError, ErrorCode, check_confirmation};
+use carrysheet_kernel::Kernel;
 use serde_json::{Map, Value, json};
 
 use crate::output::wrap;
@@ -26,8 +28,18 @@ pub struct Done {
 }
 
 /// Commands that work today. Everything else in the table answers "not
-/// implemented yet" until the engine lands.
-pub const IMPLEMENTED: &[&str] = &["commands", "feedback", "macros", "mcp_serve"];
+/// implemented yet".
+pub const IMPLEMENTED: &[&str] = &[
+    "overview",
+    "read",
+    "eval",
+    "convert",
+    "edit",
+    "feedback",
+    "macros",
+    "mcp_serve",
+    "commands",
+];
 
 pub fn is_implemented(command: &Command) -> bool {
     IMPLEMENTED.contains(&command.name)
@@ -56,9 +68,190 @@ pub fn run(
         _ => {
             check_input_exists(command, args)?;
             confirmed(command, args, ctx)?;
-            Err(CommandError::not_implemented(&command.cli_name()))
+            if !ENGINE_COMMANDS.contains(&command.name) {
+                return Err(CommandError::not_implemented(&command.cli_name()));
+            }
+            let data = on_kernel(command, args, ctx)?;
+            let text = text_for(command.name, &data);
+            Ok(Done { data, text })
         }
     }
+}
+
+/// Runs a workbook command on the kernel. `--yes` confirms a save that
+/// loses something; at a terminal a person is asked.
+fn on_kernel(
+    command: &Command,
+    args: &Map<String, Value>,
+    ctx: &Context,
+) -> Result<Map<String, Value>, CommandError> {
+    let kernel = Kernel::new();
+    let mut args = args.clone();
+    for name in ["confirm", "confirm_loss"] {
+        if ctx.yes && command.arg(name).is_some() {
+            args.insert(name.into(), Value::Bool(true));
+        }
+    }
+    // Deleting and overwriting were confirmed before; what is left to ask
+    // here is losing content on save.
+    let engine_run =
+        |args: &Map<String, Value>| run_within(&kernel, command, args, ctx.max_seconds);
+    match engine_run(&args) {
+        Err(e)
+            if e.code == ErrorCode::ConfirmationRequired
+                && command.arg("confirm_loss").is_some()
+                && confirm(&format!("{}. Save anyway?", e.what), ctx) =>
+        {
+            args.insert("confirm_loss".into(), Value::Bool(true));
+            engine_run(&args)
+        }
+        other => other,
+    }
+}
+
+/// A value from a result as text: numbers without a trailing `.0`,
+/// booleans as JSON writes them, text as it is, empty as nothing.
+fn plain(v: &Value) -> String {
+    match v {
+        Value::Null => String::new(),
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.as_f64().map_or_else(|| n.to_string(), |f| f.to_string()),
+        Value::Object(o) => match (o.get("formula"), o.get("value")) {
+            (Some(Value::String(f)), _) => f.clone(),
+            (_, Some(v)) => plain(v),
+            _ => v.to_string(),
+        },
+        other => other.to_string(),
+    }
+}
+
+fn get_str<'a>(data: &'a Map<String, Value>, key: &str) -> &'a str {
+    data.get(key).and_then(Value::as_str).unwrap_or("")
+}
+
+fn list<'a>(data: &'a Map<String, Value>, key: &str) -> &'a [Value] {
+    data.get(key)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+/// What a person sees for a workbook command.
+fn text_for(name: &str, data: &Map<String, Value>) -> String {
+    let mut t = String::new();
+    match name {
+        "overview" => {
+            t.push_str(&format!(
+                "{} ({} date system, {} defined names)\n",
+                get_str(data, "file"),
+                get_str(data, "date_system"),
+                data.get("defined_names").unwrap_or(&Value::Null)
+            ));
+            for s in list(data, "sheets") {
+                let used = s["used_range"].as_str().unwrap_or("empty");
+                t.push_str(&format!(
+                    "  {}  {used}  {} cells, {} formulas, {} errors\n",
+                    plain(&s["name"]),
+                    s["cells"],
+                    s["formulas"],
+                    s["errors"]
+                ));
+                if let Some(cells) = s["header"]["cells"].as_array() {
+                    let header: Vec<String> = cells.iter().map(plain).collect();
+                    let line = format!("    row {}: {}", s["header"]["row"], header.join(" | "));
+                    t.push_str(&wrap(&line, 80, 6));
+                    t.push('\n');
+                }
+            }
+        }
+        "read" => {
+            let range = get_str(data, "range");
+            t.push_str(&format!("{}!{}\n", get_str(data, "sheet"), range));
+            let columns: Vec<String> = list(data, "columns").iter().map(plain).collect();
+            if !columns.is_empty() {
+                t.push_str(&format!("\t{}\n", columns.join("\t")));
+            }
+            for row in list(data, "rows") {
+                let cells: Vec<String> = row["cells"]
+                    .as_array()
+                    .map(|c| c.iter().map(plain).collect())
+                    .unwrap_or_default();
+                t.push_str(&format!("{}\t{}\n", row["row"], cells.join("\t")));
+            }
+            if let Some(cursor) = data.get("next_cursor").and_then(Value::as_str) {
+                t.push_str(&format!("More cells remain: add --cursor \"{cursor}\"\n"));
+            }
+        }
+        "eval" => {
+            t.push_str(&format!(
+                "{}\n",
+                plain(data.get("value").unwrap_or(&Value::Null))
+            ));
+        }
+        _ => {
+            let output = get_str(data, "output");
+            if data.get("written") == Some(&Value::Bool(true)) {
+                t.push_str(&format!("Wrote {output} ({} bytes)\n", data["bytes"]));
+            } else {
+                t.push_str(&format!("Dry run: nothing written; would write {output}\n"));
+            }
+            for op in list(data, "ops") {
+                t.push_str(&format!(
+                    "  {} {}: {}\n",
+                    plain(&op["op"]),
+                    plain(&op["target"]),
+                    plain(&op["done"])
+                ));
+            }
+            for (key, label) in [("changes", "changed"), ("recalculated", "recalculated")] {
+                let total = data
+                    .get(&format!("{key}_total"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                if total == 0 {
+                    continue;
+                }
+                t.push_str(&format!("{total} cell(s) {label}:\n"));
+                for c in list(data, key).iter().take(20) {
+                    t.push_str(&format!(
+                        "  {}!{}: {} -> {}\n",
+                        plain(&c["sheet"]),
+                        plain(&c["cell"]),
+                        plain(&c["before"]),
+                        plain(&c["after"])
+                    ));
+                }
+                if total > 20 {
+                    t.push_str(&format!("  ... and {} more (see --json)\n", total - 20));
+                }
+            }
+            let save = data.get("save").cloned().unwrap_or(Value::Null);
+            let lost = save["lost"].as_array().cloned().unwrap_or_default();
+            if lost.is_empty() && save["dropped_parts"].as_array().is_none_or(Vec::is_empty) {
+                t.push_str("Nothing known is lost.\n");
+            } else {
+                t.push_str("Lost in this save:\n");
+                for l in &lost {
+                    t.push_str(&format!(
+                        "  {} ({} of {})\n",
+                        plain(&l["feature"]),
+                        l["before"]
+                            .as_u64()
+                            .unwrap_or(0)
+                            .saturating_sub(l["after"].as_u64().unwrap_or(0)),
+                        l["before"]
+                    ));
+                }
+                for p in save["dropped_parts"].as_array().into_iter().flatten() {
+                    t.push_str(&format!("  part {}\n", plain(p)));
+                }
+            }
+            for n in save["notes"].as_array().into_iter().flatten() {
+                t.push_str(&format!("Note: {}\n", plain(n)));
+            }
+        }
+    }
+    t
 }
 
 /// Deleting or overwriting needs `--confirm`. `--yes`, or a person
@@ -198,6 +391,7 @@ mod tests {
             json: true,
             yes: false,
             interactive: false,
+            max_seconds: None,
         }
     }
 
@@ -243,13 +437,17 @@ mod tests {
         let mut with = args.clone();
         with["confirm"] = json!(true);
         let e = run_json("edit", with).unwrap_err();
-        assert_eq!(e.code, ErrorCode::NotImplemented);
+        assert_eq!(
+            e.code,
+            ErrorCode::UnsupportedFormat,
+            "confirmed, then the file is looked at"
+        );
 
         let mut dry = args.clone();
         dry["dry_run"] = json!(true);
         assert_eq!(
             run_json("edit", dry).unwrap_err().code,
-            ErrorCode::NotImplemented
+            ErrorCode::UnsupportedFormat
         );
 
         let c = command("edit").unwrap();
@@ -257,7 +455,7 @@ mod tests {
         let yes = Context { yes: true, ..ctx() };
         assert_eq!(
             run(c, &checked, &yes).unwrap_err().code,
-            ErrorCode::NotImplemented
+            ErrorCode::UnsupportedFormat
         );
     }
 

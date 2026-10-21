@@ -240,11 +240,15 @@ impl Server {
         let mut args = validate_args(command, &args)?;
         self.confine(command, &mut args)?;
         // An agent is reading: never ask, never wait for a terminal.
+        // MCP calls keep the default time limit (limits::MAX_CALL_SECONDS).
         let ctx = Context {
             json: true,
             yes: false,
             interactive: false,
+            max_seconds: None,
         };
+        // Writes stay inside the root even if a link changes meanwhile.
+        let _confined = carrysheet_commands::engine::save::confine_writes(&self.inner.root.dir());
         run::run(command, &args, &ctx).map(|done| done.data)
     }
 
@@ -857,14 +861,14 @@ mod tests {
             r.structured_content.unwrap()["error"]["code"],
             "outside_root"
         );
-        // Inside the root, the call reaches the command (not built yet).
+        // Inside the root, the call reaches the kernel, which finds no workbook.
         let r = server.call(
             "overview",
             json!({ "path": "book.xlsx" }).as_object().cloned(),
         );
         assert_eq!(
             r.structured_content.unwrap()["error"]["code"],
-            "not_implemented"
+            "damaged_file"
         );
         // A missing file inside the root is reported as missing, with ~.
         let r = server.call("check", json!({ "path": "gone.xlsx" }).as_object().cloned());

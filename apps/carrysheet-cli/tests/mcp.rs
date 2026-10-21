@@ -48,6 +48,7 @@ impl Scratch {
             std::fs::create_dir_all(dir.join(sub)).unwrap();
         }
         std::fs::write(dir.join("root/book.xlsx"), b"x").unwrap();
+        std::fs::write(dir.join("root/prices.csv"), b"Item,Price\nTea,3\n").unwrap();
         std::fs::write(dir.join("outside/secret.xlsx"), b"x").unwrap();
         Scratch(dir)
     }
@@ -268,10 +269,37 @@ fn stdio_session_lists_and_calls_tools() {
     eprintln!("tools/list: {size} characters");
     assert!(size < 10_000, "{size}");
 
-    // A command that exists but is not built: a clean tool error.
+    // A file that is not what its name says: a clean tool error.
     let r = call(&mut server, 3, "overview", json!({ "path": "book.xlsx" }));
     let e = tool_error(&r);
-    assert_eq!(e["code"], "not_implemented");
+    assert_eq!(e["code"], "damaged_file");
+
+    // The core path over MCP: convert, edit, read back.
+    let r = call(
+        &mut server,
+        20,
+        "convert",
+        json!({ "path": "prices.csv", "output": "prices.xlsx" }),
+    );
+    assert_eq!(r["isError"], false, "{r}");
+    let r = call(
+        &mut server,
+        21,
+        "edit",
+        json!({ "path": "prices.xlsx", "ops": [{ "op": "set_formula", "target": "C2", "value": "B2*2" }] }),
+    );
+    assert_eq!(r["structuredContent"]["written"], true, "{r}");
+    let r = call(
+        &mut server,
+        22,
+        "read",
+        json!({ "path": "prices-edited.xlsx" }),
+    );
+    assert_eq!(
+        r["structuredContent"]["rows"][1]["cells"],
+        json!(["Tea", 3.0, 6.0]),
+        "{r}"
+    );
 
     // A built command: success, same data in text and structuredContent.
     let r = call(
@@ -328,7 +356,7 @@ fn stdio_session_lists_and_calls_tools() {
     assert_eq!(code, 0, "{stderr}");
     // The log went to stderr, without the home folder.
     assert!(
-        stderr.contains("tools/call overview: not_implemented"),
+        stderr.contains("tools/call overview: damaged_file"),
         "{stderr}"
     );
     assert!(stderr.contains("the client closed stdin"), "{stderr}");
@@ -441,7 +469,7 @@ fn discover_and_calls_without_initialize() {
         "tools/call",
         json!({ "_meta": meta, "name": "eval", "arguments": { "path": "book.xlsx", "formula": "1+1" } }),
     );
-    assert_eq!(tool_error(&r)["code"], "not_implemented");
+    assert_eq!(tool_error(&r)["code"], "damaged_file");
 
     let (code, stderr) = server.finish();
     assert_eq!(code, 0, "{stderr}");

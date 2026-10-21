@@ -89,6 +89,7 @@ impl Engine for MemoryEngine {
             formula: f.to_owned(),
             kind: value.kind().to_owned(),
             value: value_json(&value),
+            cut: None,
         })
     }
 

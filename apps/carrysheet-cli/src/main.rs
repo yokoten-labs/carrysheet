@@ -34,7 +34,20 @@ fn real_main(args: Vec<OsString>) -> u8 {
         Err(e) => return output::handle_clap_error(&e, json_requested),
     };
     let json = matches.get_flag("json");
-    let ctx = prompt::Context::detect(json, matches.get_flag("yes"));
+    let mut ctx = prompt::Context::detect(json, matches.get_flag("yes"));
+    if let Some(&seconds) = matches.get_one::<f64>("max-seconds") {
+        let max = carrysheet_commands::limits::MAX_CLI_SECONDS;
+        if !(seconds > 0.0 && seconds <= max) {
+            let err = carrysheet_commands::CommandError::invalid_argument(
+                "max-seconds",
+                format!("--max-seconds must be more than 0 and at most {max}"),
+                "Pass a number of seconds, like --max-seconds 60.",
+            );
+            output::print_error(&err, json);
+            return err.exit_code().code();
+        }
+        ctx.max_seconds = Some(seconds);
+    }
 
     let Some((command, sub)) = cli::chosen(&matches) else {
         // clap requires a subcommand, so this is a bug if it happens.
