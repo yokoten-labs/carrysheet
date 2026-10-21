@@ -378,34 +378,34 @@ fn a_killed_worker_comes_back() -> Result<(), String> {
     let q =
         QueryEngine::start(&[table], Limits::default(), &worker()).map_err(|e| e.to_string())?;
     let first = q.worker_id().ok_or("no worker")?;
-    // The worker capped its address space after loading.
-    let caps = std::fs::read_to_string(format!("/proc/{first}/limits")).unwrap_or_default();
-    let address_space = caps
-        .lines()
-        .find(|l| l.starts_with("Max address space"))
-        .unwrap_or("");
-    // "Max address space  <soft>  <hard>  bytes": the worker sets the soft one.
-    let soft = address_space
-        .split_whitespace()
-        .nth(3)
-        .unwrap_or("unlimited");
-    if soft == "unlimited" {
-        return Err(format!("no memory cap: {address_space}"));
-    }
-    eprintln!(
-        "  worker {}",
-        address_space
+    // The worker capped its address space after loading. Only Linux has
+    // this cap (`RLIMIT_AS`, see `limit_memory` in src/process/worker.rs):
+    // macOS does not enforce it and Windows would need a job object, so
+    // there the worker is bounded by SQLite's heap limit alone.
+    #[cfg(target_os = "linux")]
+    {
+        let caps = std::fs::read_to_string(format!("/proc/{first}/limits")).unwrap_or_default();
+        let address_space = caps
+            .lines()
+            .find(|l| l.starts_with("Max address space"))
+            .unwrap_or("");
+        // "Max address space  <soft>  <hard>  bytes": the worker sets the soft one.
+        let soft = address_space
             .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
-    let killed = std::process::Command::new("kill")
-        .args(["-9", &first.to_string()])
-        .status()
-        .map_err(|e| e.to_string())?;
-    if !killed.success() {
-        return Err("kill failed".into());
+            .nth(3)
+            .unwrap_or("unlimited");
+        if soft == "unlimited" {
+            return Err(format!("no memory cap: {address_space}"));
+        }
+        eprintln!(
+            "  worker {}",
+            address_space
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
     }
+    kill(first)?;
     std::thread::sleep(Duration::from_millis(50));
     let r = q
         .query("SELECT a * 21 FROM T", Page::default())
@@ -573,41 +573,112 @@ fn usual_queries_run_as_fast() -> Result<(), String> {
     }
 }
 
-/// Children of this process that exited and were never waited for.
-fn zombies_of_this_process() -> usize {
-    let me = std::process::id().to_string();
-    let Ok(dir) = std::fs::read_dir("/proc") else {
-        return 0;
-    };
+/// One process on the system: its parent, and whether it exited and was
+/// never waited for.
+struct Process {
+    pid: u32,
+    parent: u32,
+    zombie: bool,
+}
+
+/// Every process, from `/proc` on Linux. A list that can't be read panics,
+/// so a check on it never passes for nothing.
+#[cfg(target_os = "linux")]
+fn processes() -> Vec<Process> {
+    let dir = std::fs::read_dir("/proc").expect("/proc");
     dir.filter_map(|e| e.ok())
         .filter_map(|e| std::fs::read_to_string(e.path().join("stat")).ok())
-        .filter(|stat| {
+        .filter_map(|stat| {
             // pid (comm) state ppid ...: comm may hold spaces, so read
             // after its closing bracket.
-            let Some(rest) = stat.rsplit_once(')').map(|(_, r)| r) else {
-                return false;
-            };
+            let (pid, rest) = stat.rsplit_once(')')?;
+            let pid = pid.split_whitespace().next()?.parse().ok()?;
             let mut fields = rest.split_whitespace();
-            let state = fields.next();
-            let ppid = fields.next();
-            state == Some("Z") && ppid == Some(me.as_str())
+            let zombie = fields.next()? == "Z";
+            let parent = fields.next()?.parse().ok()?;
+            Some(Process {
+                pid,
+                parent,
+                zombie,
+            })
         })
+        .collect()
+}
+
+/// Every process, from `ps` on other Unix systems (macOS has no `/proc`).
+#[cfg(all(unix, not(target_os = "linux")))]
+fn processes() -> Vec<Process> {
+    let out = Command::new("ps")
+        .args(["-A", "-o", "pid=,ppid=,stat="])
+        .output()
+        .expect("ps");
+    assert!(out.status.success(), "ps failed: {}", out.status);
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some(Process {
+                pid: fields.next()?.parse().ok()?,
+                parent: fields.next()?.parse().ok()?,
+                zombie: fields.next()?.starts_with('Z'),
+            })
+        })
+        .collect()
+}
+
+/// Every process, from WMI on Windows. Windows has no zombies: an exited
+/// process leaves the list once its handles are closed. `conhost.exe` is
+/// left out: Windows may start one for a console program, and it is not a
+/// worker.
+#[cfg(windows)]
+fn processes() -> Vec<Process> {
+    let out = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId) $($_.Name)\" }",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("powershell");
+    assert!(
+        out.status.success(),
+        "Get-CimInstance failed: {}",
+        out.status
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid = fields.next()?.parse().ok()?;
+            let parent = fields.next()?.parse().ok()?;
+            let name = fields.collect::<Vec<_>>().join(" ");
+            (!name.eq_ignore_ascii_case("conhost.exe")).then_some(Process {
+                pid,
+                parent,
+                zombie: false,
+            })
+        })
+        .collect()
+}
+
+/// Children of this process that exited and were never waited for.
+fn zombies_of_this_process() -> usize {
+    let me = std::process::id();
+    processes()
+        .iter()
+        .filter(|p| p.zombie && p.parent == me)
         .count()
 }
 
-/// Live children of this process.
-fn children_of_this_process() -> Vec<String> {
-    let me = std::process::id().to_string();
-    let Ok(dir) = std::fs::read_dir("/proc") else {
-        return Vec::new();
-    };
-    dir.filter_map(|e| e.ok())
-        .filter_map(|e| std::fs::read_to_string(e.path().join("stat")).ok())
-        .filter(|stat| {
-            stat.rsplit_once(')')
-                .map(|(_, r)| r.split_whitespace().nth(1) == Some(me.as_str()))
-                .unwrap_or(false)
-        })
+/// Children of this process, zombies included: their pids.
+fn children_of_this_process() -> Vec<u32> {
+    let me = std::process::id();
+    processes()
+        .into_iter()
+        .filter(|p| p.parent == me)
+        .map(|p| p.pid)
         .collect()
 }
 
@@ -668,9 +739,24 @@ impl Drop for Scratch {
     }
 }
 
+/// Kills a process from outside, the way another program would: SIGKILL on
+/// Unix, `taskkill /F` (TerminateProcess) on Windows. The `kill` a Windows
+/// runner has on its PATH is Git Bash's, which does not know Windows pids.
 fn kill(pid: u32) -> Result<(), String> {
-    let status = Command::new("kill")
-        .args(["-9", &pid.to_string()])
+    #[cfg(unix)]
+    let mut command = {
+        let mut c = Command::new("kill");
+        c.args(["-9", &pid.to_string()]);
+        c
+    };
+    #[cfg(windows)]
+    let mut command = {
+        let mut c = Command::new("taskkill");
+        c.args(["/F", "/PID", &pid.to_string()]);
+        c
+    };
+    let status = command
+        .stdout(Stdio::null())
         .status()
         .map_err(|e| e.to_string())?;
     if status.success() {
@@ -898,7 +984,13 @@ fn an_outside_kill_is_not_memory() -> Result<(), String> {
         .ok_or("an endless query finished")?;
     killer.join().map_err(|_| "the killer panicked")??;
     eprintln!("  {}: {}", e.code, e.what);
-    if e.code != QueryErrorCode::Internal || !e.what.contains("SIGKILL") {
+    if e.code != QueryErrorCode::Internal || !e.what.starts_with("the query worker stopped: ") {
+        return Err(format!("got {e}"));
+    }
+    // Only Unix has signals to name; on Windows the parent sees the exit
+    // code `taskkill /F` leaves (1).
+    #[cfg(unix)]
+    if !e.what.contains("SIGKILL") {
         return Err(format!("got {e}"));
     }
     let r = q
