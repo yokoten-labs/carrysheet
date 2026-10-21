@@ -23,6 +23,13 @@ fn damaged<T: std::fmt::Debug>(r: Result<T, Error>, says: &str) {
     }
 }
 
+fn slow<T: std::fmt::Debug>(r: Result<T, Error>, says: &str) {
+    match r {
+        Err(Error::Slow(what)) => assert!(what.contains(says), "{what}"),
+        other => panic!("expected slow ({says}), got {other:?}"),
+    }
+}
+
 fn over_limit<T: std::fmt::Debug>(r: Result<T, Error>, says: &str) {
     match r {
         Err(Error::LimitExceeded { what, .. }) => assert!(what.contains(says), "{what}"),
@@ -125,12 +132,12 @@ fn empty_deflate_blocks_cost_their_input_and_no_more() {
     let mut a = open(b.finish()).unwrap();
     // Refused for its shape before a byte is inflated.
     let r = timed("whole read of 4 MB of empty blocks", || a.read(0, 1 << 20));
-    damaged(r, "far larger than its output");
+    slow(r, "far larger than its output");
     assert_eq!(a.bytes_read(), 0);
     // The first bytes: input is charged, and the stream stops once its
     // input runs ahead of its output.
     let r = timed("prefix of 4 MB of empty blocks", || a.read_prefix(0, 8));
-    damaged(r, "without producing output");
+    slow(r, "without producing output");
     assert!(a.bytes_read() <= 4 << 10, "{}", a.bytes_read());
 
     // Claiming 4 MB of output makes the shape plausible; inflating then
@@ -147,7 +154,7 @@ fn empty_deflate_blocks_cost_their_input_and_no_more() {
     b.raw(raw);
     let mut a = open(b.finish()).unwrap();
     let r = timed("whole read claiming 4 MB", || a.read(0, 8 << 20));
-    damaged(r, "without producing output");
+    slow(r, "without producing output");
     assert_eq!(a.bytes_read(), stream.len() as u64);
 }
 
@@ -416,12 +423,12 @@ fn empty_fixed_blocks_are_stopped_while_inflating() {
     let r = timed("whole read: 4 MiB of empty fixed blocks first", || {
         a.read(0, 64 << 20)
     });
-    damaged(r, "without producing output");
+    slow(r, "without producing output");
     // The first bytes: refused after about 1 KiB of input.
     let r = timed("prefix: 4 MiB of empty fixed blocks first", || {
         a.read_prefix(0, 8)
     });
-    damaged(r, "without producing output");
+    slow(r, "without producing output");
 
     // Entries of 63 KiB filler each (the reviewer's prefix probe): each
     // is refused after about 1 KiB of input, not 63 KiB.
@@ -438,7 +445,8 @@ fn empty_fixed_blocks_are_stopped_while_inflating() {
 }
 
 /// Output first, then filler: the output earns room for that much
-/// filler, so the caller's interrupt is what bounds it.
+/// filler, so with the cap on runs without output lifted, the caller's
+/// interrupt is what bounds it.
 #[test]
 fn the_interrupt_stops_a_long_inflate() {
     let mut b = Builder::new();
@@ -449,6 +457,13 @@ fn the_interrupt_stops_a_long_inflate() {
         true,
     ));
     let bytes = b.finish();
+    let open = |bytes| {
+        let limits = Limits {
+            max_read_without_output: u64::MAX,
+            ..Limits::default()
+        };
+        Archive::open(Cursor::new(bytes), limits)
+    };
     let mut a = open(bytes.clone()).unwrap();
     let mut checks = 0;
     a.set_interrupt(Box::new(move || {
@@ -461,6 +476,51 @@ fn the_interrupt_stops_a_long_inflate() {
     // output it earned (here 1 MiB).
     let mut a = open(bytes).unwrap();
     assert!(a.read(0, 64 << 20).is_ok());
+}
+
+/// Issue 80: output, then a run of empty blocks the output has earned
+/// room for, then more output. The cumulative guard lets it through; the
+/// cap on input in a row without output refuses it, long before the
+/// entry or the run ends.
+#[test]
+fn a_long_run_without_output_between_outputs_is_refused() {
+    let entry = |filler: usize| {
+        let mut b = Builder::new();
+        b.raw(empty_fixed_entry("x.bin", filler, (1 << 20) / 258, true));
+        b.finish()
+    };
+    // 256 KiB of filler after 1 MiB of output: within the room earned.
+    let mut a = open(entry(256 << 10)).unwrap();
+    let r = timed("256 KiB run of empty blocks after output", || {
+        a.read(0, 64 << 20)
+    });
+    slow(r, "long run of input without output");
+    let e = open(entry(256 << 10))
+        .unwrap()
+        .read(0, 64 << 20)
+        .unwrap_err();
+    assert!(e.is_slow_to_unpack(), "{e}");
+    // Lifting the cap shows it was the cap, not the cumulative guard.
+    let limits = Limits {
+        max_read_without_output: u64::MAX,
+        ..Limits::default()
+    };
+    let mut a = Archive::open(Cursor::new(entry(256 << 10)), limits).unwrap();
+    assert!(a.read(0, 64 << 20).is_ok());
+    // A run under the cap passes with the default limits.
+    let mut a = open(entry(8 << 10)).unwrap();
+    assert!(a.read(0, 64 << 20).is_ok());
+    // Other refusals for wasted time say so too; damage does not.
+    let mut b = Builder::new();
+    b.raw(empty_fixed_entry("y.bin", 4 << 20, 1, false));
+    let e = open(b.finish()).unwrap().read(0, 64 << 20).unwrap_err();
+    assert!(e.is_slow_to_unpack(), "{e}");
+    let mut raw = Raw::new("z", b"0123456789", Method::Deflated);
+    raw.crc ^= 1;
+    let mut b = Builder::new();
+    b.raw(raw);
+    let e = open(b.finish()).unwrap().read(0, 100).unwrap_err();
+    assert!(!e.is_slow_to_unpack(), "{e}");
 }
 
 #[test]

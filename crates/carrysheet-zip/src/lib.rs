@@ -24,7 +24,8 @@
 //! - Compressed bytes are charged to a budget before they are inflated,
 //!   and the output is capped per entry and in total.
 //! - Inflating stops when the input runs ahead of the output (empty
-//!   deflate blocks cost time without producing anything), and a caller
+//!   deflate blocks cost time without producing anything), or when one
+//!   run of input gives no output for too long, and a caller
 //!   can stop it at any point with [`Archive::set_interrupt`]. The limits
 //!   bound bytes, not time: callers reading files from others must set
 //!   that interrupt (see [`Limits`]).
@@ -81,6 +82,13 @@ pub struct Limits {
     pub max_total_read: u64,
     /// Compressed bytes one [`Archive::read_prefix`] call may consume.
     pub max_prefix_read: u64,
+    /// Compressed bytes an entry may consume in a row without producing
+    /// output. Real deflate gives output within a block header (under
+    /// 300 bytes); a long run of empty blocks between bits of output is
+    /// padding. Without this cap such runs are bounded only by the
+    /// output earned so far (a quarter more input than output, see
+    /// [`Archive::read`]). Default 16 KiB.
+    pub max_read_without_output: u64,
     /// What to do when two entries share a name.
     pub duplicate_names: DuplicateNames,
 }
@@ -94,6 +102,7 @@ impl Default for Limits {
             max_total_bytes: 1 << 30,
             max_total_read: 256 << 20,
             max_prefix_read: 64 << 10,
+            max_read_without_output: 16 << 10,
             duplicate_names: DuplicateNames::Refuse,
         }
     }

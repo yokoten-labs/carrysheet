@@ -300,11 +300,11 @@ version = "0.1.0"
 dependencies = [
  "carrysheet-commands",
  "carrysheet-model",
+ "carrysheet-zip",
  "flate2",
  "gridcraft-engine",
  "gridcraft-xlsx",
  "serde_json",
- "zip 9.0.2",
 ]
 
 [[package]]
@@ -315,10 +315,10 @@ version = "0.1.0"
 name = "carrysheet-numbers"
 version = "0.1.0"
 dependencies = [
+ "carrysheet-zip",
  "flate2",
  "prost",
  "snap",
- "zip 9.0.2",
 ]
 
 [[package]]

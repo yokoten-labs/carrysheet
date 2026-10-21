@@ -271,7 +271,23 @@ fn unpack(zip_name: &str, folder: &str) -> PathBuf {
     ));
     let _ = std::fs::remove_dir_all(&dir);
     let file = std::fs::File::open(data(zip_name)).unwrap();
-    zip::ZipArchive::new(file).unwrap().extract(&dir).unwrap();
+    let limits = carrysheet_zip::Limits::default();
+    let mut zip = carrysheet_zip::Archive::open(file, limits).unwrap();
+    for i in 0..zip.entries().len() {
+        let name = zip.entries()[i].name.clone();
+        // Our own test data, but never written outside the folder.
+        assert!(
+            !name.split('/').any(|p| p == "..") && !name.starts_with('/'),
+            "{name}"
+        );
+        let to = dir.join(&name);
+        if zip.entries()[i].is_dir() {
+            std::fs::create_dir_all(&to).unwrap();
+            continue;
+        }
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::write(&to, zip.read(i, u64::MAX).unwrap()).unwrap();
+    }
     dir.join(folder)
 }
 

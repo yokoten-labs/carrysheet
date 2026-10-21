@@ -15,14 +15,14 @@ exclude = ["codegen"]
 [dependencies]
 # Only the derive macros and the runtime; the generated code is committed.
 prost = { version = "0.14.4", default-features = false, features = ["derive", "std"] }
-# Read-only zip with Deflate only, decoded by the pure-Rust miniz_oxide.
-# =9.0.2: the newest release past the 7-day cooldown (docs/dependencies.md)
-# on 2026-10-20; it has the 9.0.0/9.0.1 overflow fixes. Move up on or after
-# 2026-10-24.
-zip = { version = "=9.0.2", default-features = false, features = ["deflate-flate2"] }
-flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+# The hardened zip reader every Carrysheet reader shares (issue 40):
+# Stored and Deflate only, inflated by the pure-Rust miniz_oxide.
+carrysheet-zip = { path = "../carrysheet-zip", version = "0.1.0" }
 
 [dev-dependencies]
+# The tests build zip files byte by byte with carrysheet-zip's test builder
+# (included by path), which deflates with flate2.
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 # Only to unpack the fixtures' Snappy blocks for the mutation test.
 snap = "1.1.2"
 
