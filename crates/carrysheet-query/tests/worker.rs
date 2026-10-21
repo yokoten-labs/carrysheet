@@ -605,16 +605,31 @@ fn processes() -> Vec<Process> {
         .collect()
 }
 
+/// Runs a program that lists processes; its output and its own pid. The
+/// lister is a child of this process while it runs and lists itself, so
+/// the caller leaves that pid out.
+#[cfg(not(target_os = "linux"))]
+fn run_lister(command: &mut Command) -> (u32, String) {
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("the process lister");
+    let pid = child.id();
+    let out = child.wait_with_output().expect("the process lister");
+    assert!(
+        out.status.success(),
+        "the process lister failed: {}",
+        out.status
+    );
+    (pid, String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 /// Every process, from `ps` on other Unix systems (macOS has no `/proc`).
 #[cfg(all(unix, not(target_os = "linux")))]
 fn processes() -> Vec<Process> {
-    let out = Command::new("ps")
-        .args(["-A", "-o", "pid=,ppid=,stat="])
-        .output()
-        .expect("ps");
-    assert!(out.status.success(), "ps failed: {}", out.status);
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
+    let (lister, out) = run_lister(Command::new("ps").args(["-A", "-o", "pid=,ppid=,stat="]));
+    out.lines()
         .filter_map(|line| {
             let mut fields = line.split_whitespace();
             Some(Process {
@@ -623,6 +638,7 @@ fn processes() -> Vec<Process> {
                 zombie: fields.next()?.starts_with('Z'),
             })
         })
+        .filter(|p| p.pid != lister)
         .collect()
 }
 
@@ -632,29 +648,20 @@ fn processes() -> Vec<Process> {
 /// worker.
 #[cfg(windows)]
 fn processes() -> Vec<Process> {
-    let out = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId) $($_.Name)\" }",
-        ])
-        .stdin(Stdio::null())
-        .output()
-        .expect("powershell");
-    assert!(
-        out.status.success(),
-        "Get-CimInstance failed: {}",
-        out.status
-    );
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
+    const LIST: &str = "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId) $($_.Name)\" }";
+    let (lister, out) = run_lister(Command::new("powershell").args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        LIST,
+    ]));
+    out.lines()
         .filter_map(|line| {
             let mut fields = line.split_whitespace();
             let pid = fields.next()?.parse().ok()?;
             let parent = fields.next()?.parse().ok()?;
             let name = fields.collect::<Vec<_>>().join(" ");
-            (!name.eq_ignore_ascii_case("conhost.exe")).then_some(Process {
+            (pid != lister && !name.eq_ignore_ascii_case("conhost.exe")).then_some(Process {
                 pid,
                 parent,
                 zombie: false,
