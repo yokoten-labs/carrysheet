@@ -1,0 +1,91 @@
+Written by hand for carrysheet-connections tests: external links of every
+kind. Every secret below is fake.
+=== _rels/.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://purl.oclc.org/ooxml/officeDocument/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+=== xl/workbook.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId9"/></sheets>
+  <externalReferences>
+    <externalReference r:id="rId1"/>
+    <externalReference r:id="rId2"/>
+    <externalReference r:id="rId3"/>
+    <externalReference r:id="rId4"/>
+    <externalReference r:id="rId5"/>
+    <externalReference r:id="rId404"/>
+  </externalReferences>
+</workbook>
+=== xl/_rels/workbook.xml.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink2.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink3.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink4.xml"/>
+  <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink5.xml"/>
+</Relationships>
+=== xl/externalLinks/externalLink1.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <externalBook r:id="rId1">
+    <sheetNames><sheetName val="Budget"/><sheetName val="Actuals"/></sheetNames>
+    <sheetDataSet><sheetData sheetId="0"><row r="1"><cell r="A1"><v>42</v></cell></row></sheetData></sheetDataSet>
+  </externalBook>
+</externalLink>
+=== xl/externalLinks/_rels/externalLink1.xml.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath" Target="file:///\\files\finance\Budget%202026.xlsx" TargetMode="External"/>
+</Relationships>
+=== xl/externalLinks/externalLink2.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:x="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <externalBook x:id="rId1"><sheetNames><sheetName val="Q1"/></sheetNames></externalBook>
+</externalLink>
+=== xl/externalLinks/_rels/externalLink2.xml.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/xlExternalLinkPath/xlPathMissing" Target="Old.xlsx" TargetMode="External"/>
+</Relationships>
+=== xl/externalLinks/externalLink3.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <externalBook r:id="rId1"/>
+</externalLink>
+=== xl/externalLinks/_rels/externalLink3.xml.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath" Target="https://anna:link-pass-3@files.example.com/Shared/Book.xlsx?sv=2024-01-01&amp;sig=link-sig-3&amp;se=2026" TargetMode="External"/>
+</Relationships>
+=== xl/externalLinks/externalLink4.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <ddeLink ddeService="Excel" ddeTopic="C:\Prices\[Live.xlsx]Feed">
+    <ddeItems><ddeItem name="R1C1" advise="1"/><ddeItem name="R2C1"/></ddeItems>
+  </ddeLink>
+</externalLink>
+=== xl/externalLinks/externalLink5.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <oleLink r:id="rId1" progId="Word.Document.12">
+    <oleItems><oleItem name="Bookmark1" advise="1"/></oleItems>
+  </oleLink>
+</externalLink>
+=== xl/externalLinks/_rels/externalLink5.xml.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" Target="file:///C:\Docs\Report.docx" TargetMode="External"/>
+</Relationships>
+=== xl/externalLinks/externalLink9.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <externalBook r:id="rId1"/>
+</externalLink>
+=== xl/externalLinks/_rels/externalLink9.xml.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/xlExternalLinkPath/xlStartup" Target="Macros.xlsm" TargetMode="External"/>
+</Relationships>
