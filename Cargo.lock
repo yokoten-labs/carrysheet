@@ -194,6 +194,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "carrysheet-connections"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "quick-xml 0.41.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "carrysheet-crypto"
 version = "0.1.0"
 dependencies = [
