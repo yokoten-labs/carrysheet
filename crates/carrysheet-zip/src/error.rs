@@ -28,6 +28,27 @@ pub enum Error {
     Interrupted,
 }
 
+/// Texts of the [`Error::Damaged`] refusals for deflate data shaped to
+/// cost time (see [`Error::is_slow_to_unpack`]).
+pub(crate) const SLOW_SHAPE: &str = "compressed data is far larger than its output";
+pub(crate) const SLOW_NO_OUTPUT: &str = "an entry's deflate data consumes input without producing output (such as runs of empty blocks)";
+pub(crate) const SLOW_IDLE_RUN: &str = "an entry's deflate data has a long run of input without output between pieces of output (such as empty blocks)";
+
+impl Error {
+    /// True when an entry was refused because its deflate data is shaped
+    /// to cost time rather than to hold data (such as runs of empty
+    /// blocks): the file unpacks far more slowly than real files do.
+    /// Callers can say so instead of calling the file damaged.
+    pub fn is_slow_to_unpack(&self) -> bool {
+        match self {
+            Error::Damaged(what) => {
+                what.contains(SLOW_SHAPE) || what == SLOW_NO_OUTPUT || what == SLOW_IDLE_RUN
+            }
+            _ => false,
+        }
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
