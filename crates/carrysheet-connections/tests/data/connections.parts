@@ -1,0 +1,128 @@
+Written by hand for carrysheet-connections tests. One workbook package as
+text: each "=== name" line starts a part. Every secret below is fake.
+=== [Content_Types].xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>
+=== _rels/.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+=== xl/workbook.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Orders" sheetId="1" r:id="rId1"/>
+    <sheet name="Stock &amp; Prices" sheetId="2" r:id="rId2"/>
+  </sheets>
+  <definedNames>
+    <definedName name="ExternalData_1" localSheetId="1" hidden="1">'Stock &amp; Prices'!$A$1:$C$40</definedName>
+  </definedNames>
+  <pivotCaches>
+    <pivotCache cacheId="7" r:id="rId4"/>
+  </pivotCaches>
+</workbook>
+=== xl/_rels/workbook.xml.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet2.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/connections" Target="connections.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/>
+  <Relationship Id="rId5" Type="http://schemas.microsoft.com/office/2011/relationships/model" Target="model/item.data"/>
+</Relationships>
+=== xl/worksheets/sheet1.xml
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>
+=== xl/worksheets/_rels/sheet1.xml.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table2.xml"/>
+</Relationships>
+=== xl/worksheets/sheet2.xml
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>
+=== xl/worksheets/_rels/sheet2.xml.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/queryTable" Target="../queryTables/queryTable2.xml"/>
+</Relationships>
+=== xl/tables/table1.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Table_Orders" displayName="Orders_Table" ref="A1:F120" tableType="queryTable" totalsRowShown="0">
+  <autoFilter ref="A1:F120"/>
+  <tableColumns count="1"><tableColumn id="1" uniqueName="1" name="OrderID" queryTableFieldId="1"/></tableColumns>
+</table>
+=== xl/tables/_rels/table1.xml.rels
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/queryTable" Target="../queryTables/queryTable1.xml"/>
+</Relationships>
+=== xl/tables/table2.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="2" name="Regions" displayName="Regions" ref="H1:I9" connectionId="10"/>
+=== xl/queryTables/queryTable1.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<queryTable xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" name="ExternalData_2" connectionId="2" autoFormatId="16" applyNumberFormats="0" refreshOnLoad="1" backgroundRefresh="0">
+  <queryTableRefresh nextId="2"><queryTableFields count="1"><queryTableField id="1" name="OrderID" tableColumnId="1"/></queryTableFields></queryTableRefresh>
+</queryTable>
+=== xl/queryTables/queryTable2.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<queryTable xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" name="ExternalData_1" connectionId="1" disableRefresh="1" removeDataOnSave="1"/>
+=== xl/pivotCache/pivotCacheDefinition1.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" refreshOnLoad="1">
+  <cacheSource type="external" connectionId="7"/>
+  <cacheFields count="0"/>
+</pivotCacheDefinition>
+=== xl/model/item.data
+not a real model, only its size matters
+=== xl/connections.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<connections xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main">
+  <connection id="1" name="Warehouse ODBC" description="Nightly stock" type="1" refreshedVersion="6" background="1" refreshOnLoad="1" interval="15" saveData="1" savePassword="1" credentials="stored">
+    <dbPr connection="DSN=Warehouse;DRIVER={ODBC Driver 18 for SQL Server};SERVER=wh01.corp.example;DATABASE=Stock;UID=reporter;PWD={odbc-pw;with}}brace};APP=Microsoft Office" command="SELECT * FROM stock WHERE note &lt;&gt; 'password = ''sql-secret-1'''" commandType="2"/>
+  </connection>
+  <connection id="2" name="Orders" type="5" refreshedVersion="8" saveData="1" credentials="none" keepAlive="1">
+    <dbPr connection="Provider=SQLOLEDB.1;Persist Security Info=True;User ID=sa;Password=&quot;ole;db&quot;&quot;secret&quot;;Initial Catalog=Sales;Data Source=sql01.corp.example;Extended Properties=&quot;AccessToken=nested-token-2&quot;" command="&quot;Sales&quot;.&quot;dbo&quot;.&quot;Orders&quot;" commandType="3"/>
+  </connection>
+  <connection id="3" name="Access archive" type="2" sourceFile="C:\Data\archive.accdb" credentials="prompt">
+    <dbPr connection="Provider=Microsoft.ACE.OLEDB.12.0;Data Source=C:\Data\archive.accdb;Jet OLEDB:Database Password=access-pw-3" command="Orders" commandType="3"/>
+  </connection>
+  <connection id="4" name="Rates web" type="4" refreshedVersion="2">
+    <webPr url="https://rates.example.com/daily?sig=web-sig-4&amp;region=eu" post="user=bob&amp;password=web-post-4" xml="1" htmlTables="1"/>
+  </connection>
+  <connection id="5" name="Prices text" type="6" refreshOnLoad="1">
+    <textPr prompt="0" codePage="65001" sourceFile="\\files\share\prices.csv" delimited="1" comma="1">
+      <textFields count="1"><textField/></textFields>
+    </textPr>
+  </connection>
+  <connection id="6" name="ADO recordset" type="7"/>
+  <connection id="7" name="Cube" type="5" refreshedVersion="6" background="1">
+    <dbPr connection="Provider=MSOLAP.8;Integrated Security=SSPI;Data Source=olap01;Initial Catalog=Finance" command="Finance Cube" commandType="1"/>
+    <olapPr sendLocale="1" rowDrillCount="1000"/>
+  </connection>
+  <connection id="8" keepAlive="1" name="ThisWorkbookDataModel" description="Data Model" type="5" refreshedVersion="8" minRefreshableVersion="5" background="1">
+    <dbPr connection="Data Source=$Embedded$;Location=ThisWorkbookDataModel;Initial Catalog=Microsoft_SQLServer_AnalysisServices_ABC" command="Model" commandType="1"/>
+    <extLst>
+      <ext uri="{DE250136-89BD-433C-8126-D09CA5730AF9}">
+        <x15:connection id="" model="1"/>
+      </ext>
+    </extLst>
+  </connection>
+  <connection id="9" keepAlive="1" name="Query - Sales" description="Connection to the 'Sales' query in the workbook." type="5" refreshedVersion="8" background="1" saveData="1">
+    <dbPr connection="Provider=Microsoft.Mashup.OleDb.1;Data Source=$Workbook$;Location=Sales;Extended Properties=&quot;&quot;" command="SELECT * FROM [Sales]"/>
+  </connection>
+  <connection id="10" name="WorksheetConnection_Regions" type="102" refreshedVersion="8" minRefreshableVersion="5">
+    <extLst>
+      <ext uri="{DE250136-89BD-433C-8126-D09CA5730AF9}">
+        <x15:connection id="Regions" excludeFromRefreshAll="1">
+          <x15:rangePr sourceName="Regions"/>
+        </x15:connection>
+      </ext>
+    </extLst>
+  </connection>
+  <connection id="11" name="Feed" type="3" deleted="1" sourceFile="D:\feeds\feed.mdb" odcFile="\\files\odc\feed.odc">
+    <dbPr connection="Provider=Microsoft.Jet.OLEDB.4.0;User Password=jet-user-11;Data Source=D:\feeds\feed.mdb" command="feed" commandType="3"/>
+    <parameters count="1"><parameter name="from" sqlType="4" parameterType="value" integer="1"/></parameters>
+  </connection>
+</connections>

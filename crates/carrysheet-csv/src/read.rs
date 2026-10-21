@@ -86,6 +86,10 @@ pub struct Detected {
     pub delimiter_detected: bool,
     /// The file starts with an Excel `sep=` line. It is not part of the rows.
     pub sep_line: bool,
+    /// The delimiter was guessed as `;` over a `,` that splits the rows as
+    /// well, because the `;` cells hold decimal-comma numbers (`1,5;2,5`).
+    /// See [`detect_delimiter`].
+    pub semicolon_for_decimal_commas: bool,
     /// The first line ending outside quotes, or `None` for a single line.
     pub line_ending: Option<LineEnding>,
     /// How many bad byte sequences became U+FFFD (only with
@@ -107,6 +111,10 @@ pub const DELIMITER_CANDIDATES: [char; 4] = [',', ';', '\t', '|'];
 
 /// How many rows delimiter detection looks at.
 const DETECT_ROWS: usize = 200;
+
+/// How many bytes of text delimiter detection looks at, so its cost does
+/// not grow with a huge first field or row.
+const DETECT_BYTES: usize = 1 << 20;
 
 /// Reads CSV from bytes.
 ///
@@ -146,13 +154,18 @@ pub fn read(bytes: &[u8], options: &ReadOptions) -> Result<ReadResult, CsvError>
     )?;
 
     let (sep, data) = split_sep_line(&text);
-    let (delimiter, delimiter_detected) = match (chosen_delimiter, sep) {
-        (Some(d), _) | (None, Some(d)) => (d, false),
-        (None, None) => {
-            let found = detect_delimiter_with(data, &limits).unwrap_or(b',');
-            (found, true)
-        }
-    };
+    let (delimiter, delimiter_detected, semicolon_for_decimal_commas) =
+        match (chosen_delimiter, sep) {
+            (Some(d), _) | (None, Some(d)) => (d, false, false),
+            (None, None) => {
+                let found = detect_delimiter_with(data, &limits);
+                (
+                    found.delimiter.unwrap_or(b','),
+                    true,
+                    found.by_decimal_commas,
+                )
+            }
+        };
 
     let first_line = if sep.is_some() { 2 } else { 1 };
     let mut parser = Parser::new(data, delimiter, limits, first_line);
@@ -171,6 +184,7 @@ pub fn read(bytes: &[u8], options: &ReadOptions) -> Result<ReadResult, CsvError>
             delimiter: char::from(delimiter),
             delimiter_detected,
             sep_line: sep.is_some(),
+            semicolon_for_decimal_commas,
             line_ending: parser.line_ending,
             replaced,
         },
@@ -197,28 +211,70 @@ pub fn read_from<R: Read>(reader: R, options: &ReadOptions) -> Result<ReadResult
 /// Guesses the delimiter of decoded CSV text among comma, semicolon, tab and
 /// pipe.
 ///
-/// It reads the first 200 rows with each candidate, quotes included, and
-/// picks the one whose most common cell count (at least 2) covers the most
-/// rows. Ties go to the larger cell count, then to the order of
-/// [`DELIMITER_CANDIDATES`]. Returns `None` when no candidate splits any row,
-/// for example in a file with one column; a comma is then a fine default.
+/// It reads the first 200 rows (and at most the first 1 MiB) with each
+/// candidate, quotes included, and picks the one whose most common cell
+/// count (at least 2) covers the most rows. When `;` and `,` split the rows
+/// equally well, `;` wins if its cells hold decimal-comma numbers (`1,5`)
+/// and the `,` cells hold semicolons, as in `1,5;2,5` or `a;1,5`, even when
+/// `,` gives more cells. Other ties go to the larger cell count, then to the
+/// order of [`DELIMITER_CANDIDATES`], so `id,name;alias` splits on `,`.
+/// Returns `None` when no candidate splits any row, for example in a file
+/// with one column; a comma is then a fine default.
 pub fn detect_delimiter(text: &str) -> Option<char> {
-    detect_delimiter_with(text, &Limits::default()).map(char::from)
+    detect_delimiter_with(text, &Limits::default())
+        .delimiter
+        .map(char::from)
 }
 
-fn detect_delimiter_with(text: &str, limits: &Limits) -> Option<u8> {
+/// At most the first `max` bytes of `text`, cut after a line feed or a
+/// lone carriage return (old Mac files) when the text is longer, so the
+/// last row of the sample is whole.
+fn detection_sample(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let head = text.get(..end).unwrap_or_default();
+    match head.rfind(['\n', '\r']) {
+        Some(at) => head.get(..=at).unwrap_or(head),
+        None => head,
+    }
+}
+
+/// The delimiter found, and whether `;` won a tie with `,` on decimal-comma
+/// evidence.
+struct Found {
+    delimiter: Option<u8>,
+    by_decimal_commas: bool,
+}
+
+fn detect_delimiter_with(text: &str, limits: &Limits) -> Found {
+    let text = detection_sample(text, DETECT_BYTES);
     // (rows with the common count, rows, common count, delimiter)
     let mut best: Option<(u64, u64, usize, u8)> = None;
+    let mut by_decimal_commas = false;
+    // Some `,` cell holds a `;`.
+    let mut comma_cells_have_semicolons = false;
     for candidate in DELIMITER_CANDIDATES {
         let delimiter = candidate as u8;
         let mut parser = Parser::new(text, delimiter, *limits, 1);
         let mut counts: Vec<usize> = Vec::new();
+        let mut cells = CellEvidence::default();
         while counts.len() < DETECT_ROWS {
             match parser.next_row() {
                 Ok(Some(row)) if row.is_empty() => {}
-                Ok(Some(row)) => counts.push(row.len()),
+                Ok(Some(row)) => {
+                    cells.add(&row);
+                    counts.push(row.len());
+                }
                 Ok(None) | Err(_) => break,
             }
+        }
+        if delimiter == b',' {
+            comma_cells_have_semicolons = cells.semicolons > 0;
         }
         let Some((common, hits)) = most_common(&counts) else {
             continue;
@@ -227,18 +283,73 @@ fn detect_delimiter_with(text: &str, limits: &Limits) -> Option<u8> {
             continue;
         }
         let rows = counts.len() as u64;
-        let better = match best {
-            None => true,
-            Some((best_hits, best_rows, best_common, _)) => {
+        let (better, tie) = match best {
+            None => (true, false),
+            Some((best_hits, best_rows, best_common, best_delimiter)) => {
                 let (a, b) = (hits * best_rows, best_hits * rows);
-                a > b || (a == b && common > best_common)
+                let decimal_commas = delimiter == b';'
+                    && best_delimiter == b','
+                    && comma_cells_have_semicolons
+                    && cells.decimal_commas > cells.other_commas;
+                let plain = a > b || (a == b && common > best_common);
+                (
+                    plain || (a == b && decimal_commas),
+                    !plain && a == b && decimal_commas,
+                )
             }
         };
         if better {
             best = Some((hits, rows, common, delimiter));
+            by_decimal_commas = tie;
         }
     }
-    best.map(|(_, _, _, delimiter)| delimiter)
+    Found {
+        delimiter: best.map(|(_, _, _, delimiter)| delimiter),
+        by_decimal_commas,
+    }
+}
+
+/// What the cells of one delimiter candidate hold, for telling `;` files
+/// with decimal commas from `,` files.
+#[derive(Default)]
+struct CellEvidence {
+    /// Cells that are decimal-comma numbers: `1,5`, `-1.234,50`.
+    decimal_commas: usize,
+    /// Other cells with a comma.
+    other_commas: usize,
+    /// Cells with a semicolon.
+    semicolons: usize,
+}
+
+impl CellEvidence {
+    fn add(&mut self, row: &[String]) {
+        for cell in row {
+            if cell.contains(';') {
+                self.semicolons += 1;
+            }
+            if cell.contains(',') {
+                if is_decimal_comma(cell.trim()) {
+                    self.decimal_commas += 1;
+                } else {
+                    self.other_commas += 1;
+                }
+            }
+        }
+    }
+}
+
+/// `[+-]digits(.digits)*,digits`, as in `1,5` or `-1.234,50`.
+fn is_decimal_comma(cell: &str) -> bool {
+    let cell = cell.strip_prefix(['+', '-']).unwrap_or(cell);
+    let Some((int, frac)) = cell.split_once(',') else {
+        return false;
+    };
+    !int.is_empty()
+        && !frac.is_empty()
+        && frac.bytes().all(|b| b.is_ascii_digit())
+        && int
+            .split('.')
+            .all(|g| !g.is_empty() && g.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// The most frequent value and how often it occurs; ties go to the larger value.

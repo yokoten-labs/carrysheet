@@ -594,3 +594,18 @@ fn max_seconds_must_be_a_sensible_number() {
     // The flag is accepted; the file is what fails.
     assert_eq!(error_json(&o)["code"], "file_not_found", "{}", stdout(&o));
 }
+
+#[cfg(feature = "query")]
+#[test]
+fn the_binary_is_its_own_query_worker() {
+    use carrysheet_query::{Limits, Page, QueryEngine, TableInput, Worker};
+    let table = TableInput::new("T", vec![vec!["a".into()], vec![2.0.into()]]);
+    let worker = Worker::new(BIN, ["__query-worker"]);
+    let q = QueryEngine::start(&[table], Limits::default(), &worker).unwrap();
+    assert!(q.worker_id().is_some());
+    let r = q.query("SELECT a * 21 FROM T", Page::default()).unwrap();
+    assert_eq!(r.rows, vec![vec![serde_json::json!(42)]]);
+    // Hidden: not in the help.
+    let help = Command::new(BIN).arg("--help").output().unwrap();
+    assert!(!String::from_utf8_lossy(&help.stdout).contains("__query-worker"));
+}

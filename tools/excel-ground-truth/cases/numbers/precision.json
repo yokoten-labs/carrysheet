@@ -1,0 +1,189 @@
+{
+  "schema": 1,
+  "title": "15 significant digits and near-zero snapping",
+  "formats": ["xlsx", "xls"],
+  "cases": [
+    {
+      "id": "prec.sum-minus-point3",
+      "note": "In IEEE doubles 0.1+0.2-0.3 is 5.55e-17; Excel may snap the last subtraction to 0.",
+      "formulas": { "A1": "=0.1+0.2-0.3" }
+    },
+    {
+      "id": "prec.one-minus-point9-minus-point1",
+      "note": "1-0.9-0.1 is -2.78e-17 in doubles; Excel may snap it to 0.",
+      "formulas": { "A1": "=1-0.9-0.1" }
+    },
+    {
+      "id": "prec.half-minus",
+      "note": "Microsoft's own example: =0.5-0.4-0.1 shows 0 because the last operation is snapped.",
+      "formulas": { "A1": "=0.5-0.4-0.1" }
+    },
+    {
+      "id": "prec.half-minus-times-one",
+      "note": "Microsoft's own example: =1*(0.5-0.4-0.1) shows -2.78E-17 because the last operation is a multiplication, so no snapping.",
+      "formulas": { "A1": "=1*(0.5-0.4-0.1)" }
+    },
+    {
+      "id": "prec.half-minus-parens",
+      "note": "Do outer parentheses alone stop the snapping?",
+      "formulas": { "A1": "=(0.5-0.4-0.1)" }
+    },
+    {
+      "id": "prec.sum-function-near-zero",
+      "note": "SUM of 0.1, 0.2, -0.3 as arguments: is SUM snapped like the + operator?",
+      "formulas": { "A1": "=SUM(0.1,0.2,-0.3)" }
+    },
+    {
+      "id": "prec.sum-range-near-zero",
+      "note": "The same sum over cells, with SUM and with +.",
+      "inputs": { "A1": 0.1, "A2": 0.2, "A3": -0.3 },
+      "formulas": { "B1": "=SUM(A1:A3)", "B2": "=A1+A2+A3", "B3": "=A1+A2-0.3" }
+    },
+    {
+      "id": "prec.equality-tolerance",
+      "note": "=0.1+0.2=0.3 is FALSE in IEEE but Excel compares at 15 digits.",
+      "formulas": { "A1": "=0.1+0.2=0.3", "A2": "=(0.1+0.2)-0.3=0", "A3": "=0.1*3=0.3" }
+    },
+    {
+      "id": "prec.point1-plus-point2",
+      "note": "The stored value of 0.1+0.2 (0.30000000000000004 or snapped 0.3?) shown with many decimals.",
+      "formulas": { "A1": { "f": "=0.1+0.2", "format": "0.000000000000000000" } }
+    },
+    {
+      "id": "prec.typed-17-digits",
+      "note": "Typing 12345678901234567 keeps only 15 significant digits: 12345678901234500.",
+      "inputs": { "A1": { "typed": "12345678901234567" } },
+      "formulas": { "B1": "=A1" },
+      "expect": { "B1": 12345678901234500 }
+    },
+    {
+      "id": "prec.literal-17-digits",
+      "note": "Does a number literal inside a formula lose digits the same way as a typed number?",
+      "formulas": { "A1": "=12345678901234567", "A2": "=12345678901234567-12345678901234500" }
+    },
+    {
+      "id": "prec.typed-many-decimals",
+      "note": "Typing 20 decimals: Excel keeps 15 significant digits.",
+      "inputs": { "A1": { "typed": "0.12345678901234567890" } },
+      "formulas": { "B1": "=A1", "B2": "=A1-0.123456789012345" }
+    },
+    {
+      "id": "prec.literal-next-after-one",
+      "note": "1.0000000000000002 is the next double after 1, but it has 17 digits; does the literal survive?",
+      "formulas": { "A1": "=1.0000000000000002", "A2": "=1.0000000000000002-1" }
+    },
+    {
+      "id": "prec.two-pow-53",
+      "note": "2^53+1 cannot be held in a double.",
+      "formulas": { "A1": "=2^53+1", "A2": "=2^53+1-2^53" }
+    },
+    {
+      "id": "prec.big-plus-one",
+      "note": "1E15+1 is exact; 1E16+1 is not.",
+      "formulas": { "A1": "=1E+15+1-1E+15", "A2": "=1E+16+1-1E+16" }
+    },
+    {
+      "id": "prec.int-of-product",
+      "note": "0.57*100 is 56.99999999999999 in doubles; does INT give 56 or 57?",
+      "formulas": { "A1": "=0.57*100", "A2": "=INT(0.57*100)", "A3": "=INT(4.35*100)" }
+    },
+    {
+      "id": "prec.mod-fraction",
+      "note": "MOD with fractions: MOD(0.3,0.1) is about 0.1 in doubles, not 0.",
+      "formulas": { "A1": "=MOD(0.3,0.1)", "A2": "=MOD(1,0.1)", "A3": "=MOD(-1,0.3)" }
+    },
+    {
+      "id": "prec.mod-large",
+      "note": "MOD with large numbers: older Excel had a size limit; what does this one return?",
+      "formulas": { "A1": "=MOD(2^50,3)", "A2": "=MOD(12345678901,2)", "A3": "=MOD(1E+15,7)" }
+    },
+    {
+      "id": "prec.third-times-three",
+      "note": "1/3*3 rounds back to exactly 1 in doubles.",
+      "formulas": { "A1": "=1/3*3", "A2": "=1/3*3-1", "A3": "=1/3*3=1" },
+      "expect": { "A1": 1, "A2": 0, "A3": true }
+    },
+    {
+      "id": "prec.money-arithmetic",
+      "note": "100*1.1-110 is 1.4e-14 in doubles.",
+      "formulas": { "A1": "=100*1.1-110", "A2": "=1.1*1.1", "A3": "=1.1*1.1-1.21" }
+    },
+    {
+      "id": "prec.underflow",
+      "note": "1E-300*1E-300 underflows to 0, not an error.",
+      "formulas": { "A1": "=1E-300*1E-300" },
+      "expect": { "A1": 0 }
+    },
+    {
+      "id": "prec.overflow",
+      "note": "A result above the largest double is #NUM!.",
+      "formulas": { "A1": "=1E+308*10" },
+      "expect": { "A1": "#NUM!" }
+    },
+    {
+      "id": "prec.typed-subnormal",
+      "note": "Excel's smallest number is about 2.2E-308; what happens to a typed 1E-310?",
+      "inputs": { "A1": { "typed": "1E-310" } },
+      "formulas": { "B1": "=A1", "B2": "=ISNUMBER(A1)" }
+    },
+    {
+      "id": "prec.computed-subnormal",
+      "note": "Halving the smallest normal double: a subnormal or 0?",
+      "formulas": { "A1": "=2.2250738585072E-308/2" }
+    },
+    {
+      "id": "prec.typed-max",
+      "note": "Typing a number near the largest double; Excel's stated maximum is 9.99999999999999E+307.",
+      "inputs": { "A1": { "typed": "1.79769313486232E+308" }, "A2": { "typed": "9.99999999999999E+307" } },
+      "formulas": { "B1": "=ISNUMBER(A1)", "B2": "=A2*1" }
+    },
+    {
+      "id": "prec.small-differences",
+      "note": "1.1-1 is 0.10000000000000009 in doubles.",
+      "formulas": { "A1": "=1.1-1", "A2": "=1.1-1-0.1" }
+    },
+    {
+      "id": "prec.compare-cells",
+      "note": "Comparing a computed 0.1+0.2 with 0.3 through cells, with = and with EXACT (text).",
+      "formulas": {
+        "B1": "=0.1+0.2",
+        "B2": "=0.3",
+        "B3": "=B1=B2",
+        "B4": "=B1-B2",
+        "B5": "=EXACT(B1,B2)"
+      }
+    },
+    {
+      "id": "prec.text-round-trip",
+      "note": "Writing 1/3 with 15 decimals and reading it back does not give the same double.",
+      "formulas": { "A1": "=VALUE(TEXT(1/3,\"0.000000000000000\"))=1/3", "A2": "=VALUE(TEXT(1/3,\"0.000000000000000\"))-1/3" }
+    },
+    {
+      "id": "prec.negative-zero",
+      "note": "Excel has no visible negative zero; -0 and 0*-1 should be 0.",
+      "formulas": { "A1": "=-0", "A2": "=0*-1", "A3": "=TEXT(-0.0000001,\"0.00\")" },
+      "expect": { "A1": 0, "A2": 0 }
+    },
+    {
+      "id": "prec.sum-order",
+      "note": "Summing 1E16, 1, -1E16 in different orders: plain doubles lose the 1 in one order but not the other.",
+      "inputs": { "A1": 1E+16, "A2": 1, "A3": -1E+16 },
+      "formulas": { "B1": "=SUM(A1:A3)", "B2": "=A1+A2+A3", "B3": "=SUM(A3,A2,A1)", "B4": "=A1+A3+A2" }
+    },
+    {
+      "id": "prec.large-integer-as-text",
+      "note": "Joining 2^60 to text shows 15 significant digits in scientific form.",
+      "formulas": { "A1": "=2^60&\"\"" }
+    },
+    {
+      "id": "prec.power-of-ten",
+      "note": "10^-5 and the literal 1E-5 should be the same double.",
+      "formulas": { "A1": "=10^-5", "A2": "=1E-5=10^-5", "A3": "=10^-5-1E-5" }
+    },
+    {
+      "id": "prec.sqrt-squared",
+      "note": "SQRT(2)^2 is 2.0000000000000004 in doubles.",
+      "formulas": { "A1": "=SQRT(2)^2-2", "A2": "=SQRT(2)^2=2" }
+    }
+  ]
+}

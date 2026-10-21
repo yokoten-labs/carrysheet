@@ -1,0 +1,218 @@
+{
+  "schema": 1,
+  "title": "Lookup functions and their approximate modes",
+  "formats": ["xlsx"],
+  "inputs": {
+    "A1": 10, "A2": 20, "A3": 30, "A4": 40, "A5": 50,
+    "B1": "a", "B2": "b", "B3": "c", "B4": "d", "B5": "e"
+  },
+  "cases": [
+    {
+      "id": "lk.vlookup-approx",
+      "note": "Approximate VLOOKUP returns the largest key not above 25.",
+      "formulas": { "D1": "=VLOOKUP(25,A1:B5,2,TRUE)" },
+      "expect": { "D1": "b" }
+    },
+    {
+      "id": "lk.vlookup-approx-below-first",
+      "note": "A value below the first key is #N/A even in approximate mode.",
+      "formulas": { "D1": "=VLOOKUP(5,A1:B5,2,TRUE)" },
+      "expect": { "D1": "#N/A" }
+    },
+    {
+      "id": "lk.vlookup-approx-above-last",
+      "note": "A value above the last key returns the last row.",
+      "formulas": { "D1": "=VLOOKUP(60,A1:B5,2,TRUE)" },
+      "expect": { "D1": "e" }
+    },
+    {
+      "id": "lk.vlookup-exact-miss",
+      "note": "Exact mode does not fall back to the nearest key.",
+      "formulas": { "D1": "=VLOOKUP(25,A1:B5,2,FALSE)" },
+      "expect": { "D1": "#N/A" }
+    },
+    {
+      "id": "lk.vlookup-default-is-approx",
+      "note": "Leaving out the fourth argument means approximate, a common surprise.",
+      "formulas": { "D1": "=VLOOKUP(25,A1:B5,2)" },
+      "expect": { "D1": "b" }
+    },
+    {
+      "id": "lk.vlookup-text-key-vs-number",
+      "note": "The text \"20\" does not match the number 20.",
+      "formulas": { "D1": "=VLOOKUP(\"20\",A1:B5,2,FALSE)" },
+      "expect": { "D1": "#N/A" }
+    },
+    {
+      "id": "lk.vlookup-numbers-stored-as-text",
+      "note": "Keys stored as text do not match a number key.",
+      "inputs": { "D1": "10", "D2": "20", "D3": "30", "E1": "x", "E2": "y", "E3": "z" },
+      "formulas": { "G1": "=VLOOKUP(20,D1:E3,2,FALSE)", "G2": "=VLOOKUP(\"20\",D1:E3,2,FALSE)" },
+      "expect": { "G1": "#N/A", "G2": "y" }
+    },
+    {
+      "id": "lk.vlookup-unsorted-approx",
+      "note": "Approximate mode on unsorted keys uses a binary search; the answer is not the 'nearest'.",
+      "inputs": { "D1": 30, "D2": 10, "D3": 50, "D4": 20, "D5": 40, "E1": "a", "E2": "b", "E3": "c", "E4": "d", "E5": "e" },
+      "formulas": { "G1": "=VLOOKUP(25,D1:E5,2,TRUE)", "G2": "=VLOOKUP(45,D1:E5,2,TRUE)" }
+    },
+    {
+      "id": "lk.vlookup-duplicate-keys",
+      "note": "With duplicate keys, exact mode returns the first and approximate mode (binary search) may return a later one.",
+      "inputs": { "D1": 10, "D2": 20, "D3": 20, "D4": 20, "D5": 30, "E1": "a", "E2": "b", "E3": "c", "E4": "d", "E5": "e" },
+      "formulas": { "G1": "=VLOOKUP(20,D1:E5,2,FALSE)", "G2": "=VLOOKUP(20,D1:E5,2,TRUE)" },
+      "expect": { "G1": "b" }
+    },
+    {
+      "id": "lk.vlookup-column-zero",
+      "note": "Column index 0 is #VALUE!.",
+      "formulas": { "D1": "=VLOOKUP(20,A1:B5,0,FALSE)" },
+      "expect": { "D1": "#VALUE!" }
+    },
+    {
+      "id": "lk.vlookup-column-too-big",
+      "note": "A column index past the table is #REF!.",
+      "formulas": { "D1": "=VLOOKUP(20,A1:B5,3,FALSE)" },
+      "expect": { "D1": "#REF!" }
+    },
+    {
+      "id": "lk.vlookup-ignores-case",
+      "note": "VLOOKUP ignores case and returns the first match.",
+      "inputs": { "D1": "Apple", "D2": "apple", "E1": 1, "E2": 2 },
+      "formulas": { "G1": "=VLOOKUP(\"APPLE\",D1:E2,2,FALSE)" },
+      "expect": { "G1": 1 }
+    },
+    {
+      "id": "lk.vlookup-wildcard",
+      "note": "Exact VLOOKUP accepts * and ? wildcards in a text key.",
+      "inputs": { "D1": "banana", "D2": "apple", "E1": 1, "E2": 2 },
+      "formulas": { "G1": "=VLOOKUP(\"ap*\",D1:E2,2,FALSE)", "G2": "=VLOOKUP(\"?anana\",D1:E2,2,FALSE)" },
+      "expect": { "G1": 2, "G2": 1 }
+    },
+    {
+      "id": "lk.vlookup-blank-key",
+      "note": "Looking up a blank cell (F1): is the key treated as 0, or does it match nothing?",
+      "inputs": { "D1": 0, "D2": "x", "E1": "zero", "E2": "x" },
+      "formulas": { "G1": "=VLOOKUP(F1,D1:E2,2,FALSE)" }
+    },
+    {
+      "id": "lk.match-approx",
+      "note": "MATCH type 1 (the default) is approximate on ascending data.",
+      "formulas": { "D1": "=MATCH(25,A1:A5,1)", "D2": "=MATCH(25,A1:A5)" },
+      "expect": { "D1": 2, "D2": 2 }
+    },
+    {
+      "id": "lk.match-exact-miss",
+      "note": "MATCH type 0 is exact.",
+      "formulas": { "D1": "=MATCH(25,A1:A5,0)" },
+      "expect": { "D1": "#N/A" }
+    },
+    {
+      "id": "lk.match-descending",
+      "note": "MATCH type -1 on descending data finds the smallest value not below the key.",
+      "inputs": { "D1": 50, "D2": 40, "D3": 30, "D4": 20, "D5": 10 },
+      "formulas": { "F1": "=MATCH(25,D1:D5,-1)" },
+      "expect": { "F1": 3 }
+    },
+    {
+      "id": "lk.match-descending-on-ascending",
+      "note": "MATCH type -1 on ascending data: the binary search gives a result that is not obvious.",
+      "formulas": { "D1": "=MATCH(25,A1:A5,-1)", "D2": "=MATCH(5,A1:A5,-1)" }
+    },
+    {
+      "id": "lk.match-wildcard-escape",
+      "note": "~* matches a literal asterisk; a bare * is a wildcard.",
+      "inputs": { "D1": "axb", "D2": "a*b" },
+      "formulas": { "F1": "=MATCH(\"a~*b\",D1:D2,0)", "F2": "=MATCH(\"a*b\",D1:D2,0)" },
+      "expect": { "F1": 2, "F2": 1 }
+    },
+    {
+      "id": "lk.match-boolean-vs-number",
+      "note": "TRUE and 1 do not match each other.",
+      "inputs": { "D1": true, "D2": 1 },
+      "formulas": { "F1": "=MATCH(1,D1:D2,0)", "F2": "=MATCH(TRUE,D1:D2,0)" },
+      "expect": { "F1": 2, "F2": 1 }
+    },
+    {
+      "id": "lk.xlookup-exact-default",
+      "note": "XLOOKUP is exact by default and has an if_not_found argument.",
+      "formulas": { "D1": "=XLOOKUP(30,A1:A5,B1:B5)", "D2": "=XLOOKUP(25,A1:A5,B1:B5,\"none\")" },
+      "expect": { "D1": "c", "D2": "none" }
+    },
+    {
+      "id": "lk.xlookup-next-smaller",
+      "note": "match_mode -1: exact or next smaller.",
+      "formulas": { "D1": "=XLOOKUP(25,A1:A5,B1:B5,,-1)" },
+      "expect": { "D1": "b" }
+    },
+    {
+      "id": "lk.xlookup-next-larger",
+      "note": "match_mode 1: exact or next larger.",
+      "formulas": { "D1": "=XLOOKUP(25,A1:A5,B1:B5,,1)" },
+      "expect": { "D1": "c" }
+    },
+    {
+      "id": "lk.xlookup-last-to-first",
+      "note": "search_mode -1 searches from the end and finds the last duplicate.",
+      "inputs": { "D1": 10, "D2": 20, "D3": 20, "D4": 20, "D5": 30, "E1": "a", "E2": "b", "E3": "c", "E4": "d", "E5": "e" },
+      "formulas": { "G1": "=XLOOKUP(20,D1:D5,E1:E5,,0,-1)" },
+      "expect": { "G1": "d" }
+    },
+    {
+      "id": "lk.xlookup-binary-unsorted",
+      "note": "search_mode 2 (binary) on unsorted data can miss a key that is present.",
+      "inputs": { "D1": 30, "D2": 10, "D3": 50, "D4": 20, "D5": 40, "E1": "a", "E2": "b", "E3": "c", "E4": "d", "E5": "e" },
+      "formulas": { "G1": "=XLOOKUP(20,D1:D5,E1:E5,\"missed\",0,2)" }
+    },
+    {
+      "id": "lk.xlookup-wildcards",
+      "note": "XLOOKUP treats * as a wildcard only with match_mode 2.",
+      "inputs": { "D1": "banana", "D2": "apple", "E1": 1, "E2": 2 },
+      "formulas": { "G1": "=XLOOKUP(\"ap*\",D1:D2,E1:E2,,2)", "G2": "=XLOOKUP(\"ap*\",D1:D2,E1:E2)" },
+      "expect": { "G1": 2, "G2": "#N/A" }
+    },
+    {
+      "id": "lk.xlookup-empty-if-not-found",
+      "note": "An empty if_not_found argument (two commas) is not the same as leaving it out.",
+      "formulas": { "D1": "=XLOOKUP(99,A1:A5,B1:B5,)" }
+    },
+    {
+      "id": "lk.lookup-vector",
+      "note": "LOOKUP is always approximate.",
+      "formulas": { "D1": "=LOOKUP(25,A1:A5,B1:B5)" },
+      "expect": { "D1": "b" }
+    },
+    {
+      "id": "lk.lookup-last-match-trick",
+      "note": "LOOKUP(2,1/(range=key),result) finds the last match because errors are skipped.",
+      "inputs": { "D1": 10, "D2": 20, "D3": 20, "D4": 20, "D5": 30, "E1": "a", "E2": "b", "E3": "c", "E4": "d", "E5": "e" },
+      "formulas": { "G1": "=LOOKUP(2,1/(D1:D5=20),E1:E5)" },
+      "expect": { "G1": "d" }
+    },
+    {
+      "id": "lk.hlookup-approx",
+      "note": "HLOOKUP works the same way across a row.",
+      "inputs": { "D1": 10, "E1": 20, "F1": 30, "G1": 40, "D2": "a", "E2": "b", "F2": "c", "G2": "d" },
+      "formulas": { "D4": "=HLOOKUP(35,D1:G2,2,TRUE)" },
+      "expect": { "D4": "c" }
+    },
+    {
+      "id": "lk.index-match",
+      "note": "INDEX with MATCH, the classic exact lookup.",
+      "formulas": { "D1": "=INDEX(B1:B5,MATCH(40,A1:A5,0))" },
+      "expect": { "D1": "d" }
+    },
+    {
+      "id": "lk.xmatch-modes",
+      "note": "XMATCH next smaller and next larger.",
+      "formulas": { "D1": "=XMATCH(25,A1:A5,-1)", "D2": "=XMATCH(25,A1:A5,1)" },
+      "expect": { "D1": 2, "D2": 3 }
+    },
+    {
+      "id": "lk.vlookup-mixed-types-approx",
+      "note": "Approximate lookup over keys of mixed types; text and booleans are skipped or not?",
+      "inputs": { "D1": 10, "D2": "x", "D3": 30, "D4": true, "D5": 50, "E1": "a", "E2": "b", "E3": "c", "E4": "d", "E5": "e" },
+      "formulas": { "G1": "=VLOOKUP(35,D1:E5,2,TRUE)", "G2": "=MATCH(35,D1:D5,1)" }
+    }
+  ]
+}

@@ -292,6 +292,39 @@ test("summarize: --from and --quick together resume with both", () => {
   assert.ok(s.report.some((l) => l.endsWith("node scripts/check.mjs --quick --from test")));
 });
 
+test("summarize: failed tests and panics before the last lines are shown", async () => {
+  // A harness = false test on stderr, a libtest panic on stdout, then more
+  // than the tail holds on each.
+  const script = [
+    "console.error('test a_killed_worker_comes_back ... FAILED');",
+    "console.error('no memory cap');",
+    "console.log(\"thread 'x::y' panicked at src/x.rs:1:1:\");",
+    "console.log('boom in /home/alice/secret.xlsx');",
+    "for (let i = 0; i < 100; i++) { console.log('ok ' + i); console.error('fine ' + i); }",
+    "process.exit(1);",
+  ].join("\n");
+  const ran = await run([node, ["-e", script]], { ctx });
+  const failed = stepResult("test", ran, 1);
+  const s = summarize([failed], parseArgs([], {}), same("abc"), same(""));
+  const at = s.report.indexOf("Failed tests and panics in test, from before the last lines:");
+  assert.ok(at >= 0, s.report.join("\n"));
+  const shown = s.report.slice(at + 1, s.report.indexOf("", at + 1));
+  for (const line of [
+    "  test a_killed_worker_comes_back ... FAILED",
+    "  no memory cap",
+    "  thread 'x::y' panicked at src/x.rs:1:1:",
+    "  boom in ~/secret.xlsx",
+  ]) {
+    assert.ok(shown.includes(line), `${line} in:\n${shown.join("\n")}`);
+  }
+  // Each stream keeps 3 lines after its failure line, and nothing past that.
+  assert.ok(shown.length <= 8, shown.join("\n"));
+  assert.ok(!shown.includes("  ok 99") && !shown.includes("  fine 99"));
+  // Nothing scrolled out: no extra section.
+  const quiet = summarize([stepResult("test", { code: 1, tail: ["test t ... FAILED"], kept: ["test t ... FAILED"] }, 1)], parseArgs([], {}), same("abc"), same(""));
+  assert.ok(!quiet.report.some((l) => l.startsWith("Failed tests and panics")));
+});
+
 test("summarize: a tree that changes during the run fails", () => {
   const steps = [ok("fmt"), ok("clippy")];
   const head = summarize(steps, parseArgs([], {}), { start: "aaa", end: "bbb" }, same(""));

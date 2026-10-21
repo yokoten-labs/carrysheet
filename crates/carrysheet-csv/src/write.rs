@@ -1,6 +1,7 @@
 //! Writing CSV: quoting, formula escaping, encodings.
 
 use std::io::Write;
+use std::marker::PhantomData;
 
 use encoding_rs::{Encoding, UTF_8};
 
@@ -59,6 +60,15 @@ impl WriteOptions {
             sep_line: detected.sep_line,
         }
     }
+
+    /// The default options with the delimiter of `convention`, for
+    /// [`write_values`](crate::write_values).
+    pub fn for_convention(convention: &crate::Convention) -> Self {
+        Self {
+            delimiter: convention.delimiter,
+            ..Self::default()
+        }
+    }
 }
 
 /// The characters that make a spreadsheet read a field as a formula
@@ -72,7 +82,9 @@ const FORMULA_STARTS: [char; 6] = ['=', '+', '-', '@', '\t', '\r'];
 ///
 /// A field is quoted when it holds the delimiter, a double quote, CR or LF,
 /// when it is the only field of its row and empty (so the row does not read
-/// back as a blank line), when it is escaped as a formula, and when it is the
+/// back as a blank line), when it is escaped as a formula or starts with an
+/// apostrophe and a formula character (as an escaped field reads back, so a
+/// second write gives the same bytes), and when it is the
 /// first field and starts with U+FEFF or `sep=` (so it does not read back as a
 /// byte order mark or a `sep=` line). Reading the output back gives the same
 /// rows, except for the apostrophes added by formula escaping.
@@ -88,7 +100,48 @@ where
     R: AsRef<[F]>,
     F: AsRef<str>,
 {
-    let delimiter = delimiter_byte(options.delimiter)?;
+    let render = TextRender {
+        escape_formulas: options.escape_formulas,
+        field: PhantomData,
+    };
+    write_rendered(rows, options.delimiter, options, &render)
+}
+
+/// Turns a row into field texts, each with whether formula escaping applies.
+pub(crate) trait Render<R> {
+    /// How many fields the row has.
+    fn count(&self, row: &R) -> usize;
+    /// Calls `field` with each field's text and whether to escape formulas.
+    fn each(&self, row: &R, field: &mut dyn FnMut(&str, bool));
+}
+
+/// Rows of text, written as they are.
+struct TextRender<F> {
+    escape_formulas: bool,
+    field: PhantomData<F>,
+}
+
+impl<R: AsRef<[F]>, F: AsRef<str>> Render<R> for TextRender<F> {
+    fn count(&self, row: &R) -> usize {
+        row.as_ref().len()
+    }
+
+    fn each(&self, row: &R, field: &mut dyn FnMut(&str, bool)) {
+        for f in row.as_ref() {
+            field(f.as_ref(), self.escape_formulas);
+        }
+    }
+}
+
+/// Writes rows rendered by `render`, with `delimiter` in place of
+/// `options.delimiter`.
+pub(crate) fn write_rendered<R, D: Render<R>>(
+    rows: &[R],
+    delimiter: char,
+    options: &WriteOptions,
+    render: &D,
+) -> Result<Vec<u8>, CsvError> {
+    let delimiter = delimiter_byte(delimiter)?;
     let eol = options.line_ending.as_str();
     let mut text = String::new();
     if options.sep_line {
@@ -99,20 +152,14 @@ where
     let mut row_starts = Vec::with_capacity(rows.len());
     for (index, row) in rows.iter().enumerate() {
         row_starts.push(text.len());
-        write_row(
-            &mut text,
-            index == 0,
-            row.as_ref(),
-            delimiter,
-            options.escape_formulas,
-        );
+        write_row(&mut text, index == 0, row, render, delimiter);
         text.push_str(eol);
     }
     match encode(&text, options.encoding, options.bom) {
         Ok(bytes) => Ok(bytes),
         Err(EncodeError::Other(e)) => Err(e),
         Err(EncodeError::Unmappable { character, offset }) => {
-            let (row, column) = locate(rows, &row_starts, offset, delimiter, options);
+            let (row, column) = locate(rows, &row_starts, offset, delimiter, render);
             Err(CsvError::Unencodable {
                 character,
                 encoding: options.encoding.name(),
@@ -140,23 +187,26 @@ where
     Ok(())
 }
 
-fn write_row<F: AsRef<str>>(
+fn write_row<R, D: Render<R>>(
     out: &mut String,
     first_row: bool,
-    fields: &[F],
+    row: &R,
+    render: &D,
     delimiter: u8,
-    escape_formulas: bool,
 ) {
-    for (index, field) in fields.iter().enumerate() {
+    let alone = render.count(row) == 1;
+    let mut index = 0usize;
+    render.each(row, &mut |field, escape| {
         if index > 0 {
             out.push(char::from(delimiter));
         }
         let place = Place {
             first_in_file: first_row && index == 0,
-            alone: fields.len() == 1,
+            alone,
         };
-        write_field(out, field.as_ref(), place, delimiter, escape_formulas);
-    }
+        write_field(out, field, place, delimiter, escape);
+        index += 1;
+    });
 }
 
 /// Where a field sits, for the quoting rules that depend on it.
@@ -170,7 +220,14 @@ struct Place {
 
 fn write_field(out: &mut String, field: &str, place: Place, delimiter: u8, escape_formulas: bool) {
     let escape = escape_formulas && needs_formula_escape(field);
+    // Text that formula escaping already wrote (`'=1`) is quoted as the
+    // escape quoted it, so writing what was read back gives the same bytes.
+    let escaped_before = escape_formulas
+        && field
+            .strip_prefix('\'')
+            .is_some_and(|rest| rest.starts_with(FORMULA_STARTS));
     let quote = escape
+        || escaped_before
         || field
             .bytes()
             .any(|b| b == delimiter || matches!(b, b'"' | b'\r' | b'\n'))
@@ -205,17 +262,13 @@ fn needs_formula_escape(field: &str) -> bool {
 
 /// Finds the 1-based row and column of the cell holding byte `offset` of the
 /// written text.
-fn locate<R, F>(
+fn locate<R, D: Render<R>>(
     rows: &[R],
     row_starts: &[usize],
     offset: usize,
     delimiter: u8,
-    options: &WriteOptions,
-) -> (usize, usize)
-where
-    R: AsRef<[F]>,
-    F: AsRef<str>,
-{
+    render: &D,
+) -> (usize, usize) {
     let index = row_starts
         .partition_point(|&start| start <= offset)
         .saturating_sub(1);
@@ -223,25 +276,25 @@ where
         return (index + 1, 1);
     };
     let mut position = row_starts.get(index).copied().unwrap_or_default();
-    let fields = row.as_ref();
+    let count = render.count(row);
+    let mut column = 0usize;
+    let mut found = None;
     let mut scratch = String::new();
-    for (column, field) in fields.iter().enumerate() {
+    render.each(row, &mut |field, escape| {
+        if found.is_some() {
+            return;
+        }
         scratch.clear();
         let place = Place {
             first_in_file: index == 0 && column == 0,
-            alone: fields.len() == 1,
+            alone: count == 1,
         };
-        write_field(
-            &mut scratch,
-            field.as_ref(),
-            place,
-            delimiter,
-            options.escape_formulas,
-        );
+        write_field(&mut scratch, field, place, delimiter, escape);
+        column += 1;
         if offset < position + scratch.len() {
-            return (index + 1, column + 1);
+            found = Some(column);
         }
         position += scratch.len() + 1;
-    }
-    (index + 1, fields.len().max(1))
+    });
+    (index + 1, found.unwrap_or(count.max(1)))
 }

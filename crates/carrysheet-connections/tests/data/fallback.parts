@@ -1,0 +1,23 @@
+Written by hand for carrysheet-connections tests: a package with no
+relationships at all, so every part must be found by its standard name.
+Part names use other letter cases on purpose. Every secret below is fake.
+=== xl/Connections.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:connections xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:connection id="4" name="Lone" type="1">
+    <x:dbPr connection="Driver={PostgreSQL Unicode};Server=pg.example;Port=5432;Database=app;Uid=app;Pwd=fallback-pw" command="select 1"/>
+  </x:connection>
+</x:connections>
+=== xl/queryTables/queryTable1.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:queryTable xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main" name="Lone_1" connectionId="4"/>
+=== xl/queryTables/queryTable2.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:queryTable xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main" name="Orphan" connectionId="99"/>
+=== xl/externalLinks/externalLink1.xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <ddeLink ddeService="WinWord" ddeTopic="Memo.docx"/>
+</externalLink>
+=== xl/model/item.data
+model
