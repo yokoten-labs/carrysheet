@@ -6,6 +6,10 @@
 //! which sets RLIMIT_AS without `unsafe` code or a new crate, and the parent
 //! also kills a child whose resident memory passes the limit. Elsewhere only
 //! the time limit applies (a Windows job object needs `unsafe` FFI).
+//!
+//! Peak memory is read from `/proc`, so it too is measured on Linux only
+//! (see [`MEMORY_MEASURED`]): elsewhere a case that uses too much memory
+//! but finishes in time is not an amplification.
 
 use std::io::{Read, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -16,6 +20,11 @@ use std::time::{Duration, Instant};
 
 use super::sink::stdout_line;
 use crate::targets::Target;
+
+/// True where fuzzlite can limit and measure a case's memory (Linux, by
+/// `ulimit -v` and `/proc`). Elsewhere `--memory-mib` and `--amp-mib` do
+/// nothing, and the commands say so.
+pub const MEMORY_MEASURED: bool = cfg!(target_os = "linux");
 
 /// The hidden subcommand the parent runs.
 pub const CHILD_COMMAND: &str = "__child";
@@ -358,7 +367,7 @@ fn signal(_: ExitStatus) -> Option<i32> {
 
 /// (resident, peak resident) in KiB for a process, from /proc.
 fn proc_memory(pid: u32) -> Option<(u64, u64)> {
-    if !cfg!(target_os = "linux") {
+    if !MEMORY_MEASURED {
         return None;
     }
     let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
