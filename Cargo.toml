@@ -4,11 +4,32 @@ members = ["crates/*", "apps/*", "tools/*"]
 # vendor/gridcraft is a workspace of its own (see its Cargo.toml).
 exclude = ["research/kernel-bench", "tools/excel-ground-truth", "vendor/gridcraft"]
 
+# One version for every crate here (issue 97): each member says
+# `version.workspace = true`, and the release tag vX.Y.Z must match it
+# (scripts/release-meta.mjs checks both). SemVer, 0.x until the README's 1.0
+# bar is met: see CONTRIBUTING.md.
 [workspace.package]
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
 repository = "https://github.com/yokoten-labs/carrysheet"
 homepage = "https://carrysheet.com"
+
+# The workspace's own crates, for members to depend on with
+# `carrysheet-x.workspace = true`. The version must equal the workspace
+# version above; release-meta.mjs fails when it does not.
+[workspace.dependencies]
+carrysheet-biff = { path = "crates/carrysheet-biff", version = "0.1.0" }
+carrysheet-cfb = { path = "crates/carrysheet-cfb", version = "0.1.0" }
+carrysheet-commands = { path = "crates/carrysheet-commands", version = "0.1.0" }
+carrysheet-crypto = { path = "crates/carrysheet-crypto", version = "0.1.0" }
+carrysheet-csv = { path = "crates/carrysheet-csv", version = "0.1.0" }
+carrysheet-kernel = { path = "crates/carrysheet-kernel", version = "0.1.0" }
+carrysheet-model = { path = "crates/carrysheet-model", version = "0.1.0" }
+carrysheet-numbers = { path = "crates/carrysheet-numbers", version = "0.1.0" }
+carrysheet-query = { path = "crates/carrysheet-query", version = "0.1.0" }
+carrysheet-vba = { path = "crates/carrysheet-vba", version = "0.1.0" }
+carrysheet-zip = { path = "crates/carrysheet-zip", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

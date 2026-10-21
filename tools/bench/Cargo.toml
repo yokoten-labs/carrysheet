@@ -1,6 +1,6 @@
 [package]
 name = "carrysheet-bench"
-version = "0.1.0"
+version.workspace = true
 description = "Times Carrysheet's readers and writers on fixed files and catches slowdowns and memory growth against a committed baseline."
 license = "MIT OR Apache-2.0"
 edition.workspace = true
@@ -18,11 +18,11 @@ path = "src/main.rs"
 # re-export, and the legacy encoder through carrysheet-csv's `encoding_rs`
 # re-export.
 [dependencies]
-carrysheet-biff = { path = "../../crates/carrysheet-biff", version = "0.1.0" }
-carrysheet-crypto = { path = "../../crates/carrysheet-crypto", version = "0.1.0" }
-carrysheet-csv = { path = "../../crates/carrysheet-csv", version = "0.1.0" }
-carrysheet-numbers = { path = "../../crates/carrysheet-numbers", version = "0.1.0" }
-carrysheet-vba = { path = "../../crates/carrysheet-vba", version = "0.1.0" }
+carrysheet-biff.workspace = true
+carrysheet-crypto.workspace = true
+carrysheet-csv.workspace = true
+carrysheet-numbers.workspace = true
+carrysheet-vba.workspace = true
 
 [lints]
 workspace = true

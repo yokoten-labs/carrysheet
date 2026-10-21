@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Run every check a merge needs, in order, and stop at the first failure:
-// format, clippy, tests, cargo-deny, the zip reader on both inflaters, the
+// versions and license files, format, clippy, tests, cargo-deny, the zip reader on both inflaters, the
 // browser build, the Windows builds and the release privacy check. Prints
 // one line per step and the commit checked. No dependencies.
 //
 // Usage: node scripts/check.mjs [--quick] [--from <step>] [--strict] [--list] [--json]
-//   --quick         fmt, clippy and tests for the crates changed against
+//   --quick         meta, fmt, clippy and tests for the crates changed against
 //                   origin/main (origin/foundation when there is no
 //                   origin/main) and the crates that depend on them,
 //                   and cargo-deny
@@ -55,6 +55,9 @@ const USAGE = "Usage: node scripts/check.mjs [--quick] [--from <step>] [--strict
 
 // The steps, in order. `quick` marks the ones --quick runs.
 export const STEPS = [
+  // No build: one version everywhere, a CHANGELOG with "## Unreleased", and
+  // the license files of every publishable crate (issues 94 and 97).
+  { name: "meta", what: "node scripts/release-meta.mjs check", quick: true },
   { name: "fmt", what: "cargo fmt --all --check", quick: true },
   { name: "clippy", what: "cargo clippy --workspace --all-targets --locked -- -D warnings", quick: true },
   { name: "test", what: "cargo test --workspace --locked", quick: true },
@@ -387,6 +390,7 @@ function plan(step, opts, m, notes) {
     return opts.scope;
   };
   switch (step.name) {
+    case "meta": return [process.execPath, [join(root, "scripts", "release-meta.mjs"), "check"]];
     case "fmt": return cargoStep(["fmt", "--all", "--check"]);
     case "clippy": {
       const s = scoped();

@@ -1,6 +1,6 @@
 [package]
 name = "carrysheet-connections"
-version = "0.1.0"
+version.workspace = true
 description = "Find and describe a workbook's data connections, query tables, external links, Power Query and data model, with secrets masked"
 license = "MIT OR Apache-2.0"
 edition.workspace = true

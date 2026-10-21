@@ -140,5 +140,8 @@ jobs:
         with:
           node-version: "24"
 
-      - name: node --test scripts/check.test.mjs
-        run: node --test scripts/check.test.mjs
+      # check.mjs, and the release scripts (release.yml runs them only on a
+      # tag or by hand, so their tests run here). The job keeps its old name,
+      # which the required status checks may list.
+      - name: node --test
+        run: node --test scripts/check.test.mjs scripts/release-meta.test.mjs scripts/notices.test.mjs

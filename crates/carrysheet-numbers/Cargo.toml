@@ -1,6 +1,6 @@
 [package]
 name = "carrysheet-numbers"
-version = "0.1.0"
+version.workspace = true
 description = "Read Apple Numbers (.numbers) spreadsheets in pure Rust, safely."
 license = "MIT OR Apache-2.0"
 keywords = ["numbers", "iwork", "spreadsheet", "apple", "iwa"]
