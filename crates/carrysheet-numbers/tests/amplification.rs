@@ -303,9 +303,13 @@ fn many_end_records_are_quick_then_refused() {
     );
     assert!(took < Duration::from_millis(500), "took {took:?}");
     eprintln!("16 MiB with 4,000 end records: {took:?}");
-    // Over the backstop of 4,096 is refused before the zip crate.
-    let e = read(&failing_end_records(0, 4_097)).unwrap_err();
-    assert!(e.to_string().contains("end-of-directory records"), "{e}");
+    // Issue 40: the hardened reader reads only the last end record, so
+    // many more cost nothing more; no backstop on their count is needed.
+    let start = Instant::now();
+    let e = read(&failing_end_records(0, 100_000)).unwrap_err();
+    assert!(matches!(e, NumbersError::Damaged { .. }), "{e}");
+    assert!(e.to_string().contains("end record"), "{e}");
+    assert!(start.elapsed() < Duration::from_millis(500));
 }
 
 #[test]
@@ -321,7 +325,13 @@ fn zip64_records_over_the_limit_are_refused_even_if_inconsistent() {
     data.extend_from_slice(&(1u64 << 40).to_le_bytes());
     data.extend_from_slice(&(1u64 << 40).to_le_bytes());
     data.extend_from_slice(&[0; 16]);
-    too_large(read(&data), "entries in the zip file");
+    // Issue 40: a zip64 record is read only where the locator before the
+    // end record points, so this one is never read, and nothing is set
+    // aside for its entries: the file is damaged (it has no end record).
+    let e = bounded(10, || read(&data)).unwrap_err();
+    assert!(matches!(e, NumbersError::Damaged { .. }), "{e}");
+    // Where a locator points at it, its count is refused before anything
+    // is allocated: zip64_entry_counts_are_checked_before_the_zip_crate.
 }
 
 #[test]
