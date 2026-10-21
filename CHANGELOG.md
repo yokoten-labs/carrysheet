@@ -3,6 +3,18 @@
 Changes people and scripts notice, newest first. Commands, arguments and
 error codes are the public interface (`carrysheet-cli commands --json`).
 
+How it works:
+
+- A pull request that changes what people or scripts notice adds a line
+  under **Unreleased**, ending with its number, e.g. `(PR 123)`.
+- To release, rename **Unreleased** to the version and date, such as
+  `## v0.1.0 - 2026-11-15`, set the same version in `Cargo.toml`
+  (`[workspace.package]` and `[workspace.dependencies]`), and start a new
+  empty `## Unreleased` above it. After that commit is on main, tag it
+  `v0.1.0`: the release workflow takes that section as the release notes.
+- `node scripts/release-meta.mjs notes 0.1.0` prints what the notes will
+  say. CI fails when the `## Unreleased` heading is missing.
+
 ## Unreleased
 
 ### Breaking changes for scripts

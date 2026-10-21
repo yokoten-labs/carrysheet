@@ -56,7 +56,7 @@ test("parseArgs: usage errors", () => {
 
 test("selectSteps: order, --quick and --from", () => {
   assert.deepEqual(selectSteps(parseArgs([])).map((s) => s.name), STEPS.map((s) => s.name));
-  assert.deepEqual(selectSteps(parseArgs(["--quick"])).map((s) => s.name), ["fmt", "clippy", "test", "deny"]);
+  assert.deepEqual(selectSteps(parseArgs(["--quick"])).map((s) => s.name), ["meta", "fmt", "clippy", "test", "deny"]);
   assert.deepEqual(selectSteps(parseArgs(["--from", "windows-x86"])).map((s) => s.name), ["windows-x86", "release"]);
   assert.deepEqual(selectSteps(parseArgs(["--quick", "--from", "test"])).map((s) => s.name), ["test", "deny"]);
 });

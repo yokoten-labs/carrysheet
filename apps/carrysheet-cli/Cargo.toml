@@ -1,6 +1,6 @@
 [package]
 name = "carrysheet-cli"
-version = "0.1.0"
+version.workspace = true
 description = "Carrysheet on the command line, with an MCP server for AI agents."
 license = "GPL-3.0-or-later"
 edition.workspace = true
@@ -13,15 +13,15 @@ name = "carrysheet-cli"
 path = "src/main.rs"
 
 [dependencies]
-carrysheet-commands = { path = "../../crates/carrysheet-commands", version = "0.1.0" }
-carrysheet-kernel = { path = "../../crates/carrysheet-kernel", version = "0.1.0" }
-carrysheet-model = { path = "../../crates/carrysheet-model", version = "0.1.0" }
+carrysheet-commands.workspace = true
+carrysheet-kernel.workspace = true
+carrysheet-model.workspace = true
 # Read-only SQL over sheets; with the `query` feature this program is also
 # its query worker (`__query-worker`, see main.rs).
-carrysheet-query = { path = "../../crates/carrysheet-query", version = "0.1.0", optional = true }
-carrysheet-vba = { path = "../../crates/carrysheet-vba", version = "0.1.0" }
+carrysheet-query = { workspace = true, optional = true }
+carrysheet-vba.workspace = true
 # `macros` opens .xlsm/.xlsb packages: our hardened zip reader.
-carrysheet-zip = { path = "../../crates/carrysheet-zip", version = "0.1.0" }
+carrysheet-zip.workspace = true
 clap = { version = "4.5", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "color", "string", "wrap_help"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

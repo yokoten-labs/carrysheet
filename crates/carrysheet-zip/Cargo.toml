@@ -1,6 +1,6 @@
 [package]
 name = "carrysheet-zip"
-version = "0.1.0"
+version.workspace = true
 description = "Read zip archives that may be hostile: one end record, bounded central directory, Stored and Deflate only, budgets on bytes read and produced"
 license = "MIT OR Apache-2.0"
 edition.workspace = true
