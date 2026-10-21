@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "tools/*"]
-exclude = ["research/kernel-bench"]
+exclude = ["research/kernel-bench", "tools/excel-ground-truth"]
 
 [workspace.package]
 edition = "2024"
