@@ -213,3 +213,36 @@ fn csv_output_lists_what_it_cannot_hold() {
     assert!(text.starts_with("1,10,,5,25"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `check` gives the same save report as a `convert` dry run, because both
+/// come from one encode; it writes nothing.
+#[test]
+fn check_reports_what_convert_would() {
+    let dir = scratch("check");
+    for (name, format, loses) in [
+        ("SimpleMacro.xlsm", "xlsm", false),
+        ("SimpleMacro.xlsm", "xlsx", true),
+        ("WithTwoCharts.xlsx", "xlsx", false),
+        ("WithTwoCharts.xlsx", "csv", true),
+    ] {
+        let src = data(name);
+        let checked = call("check", json!({ "path": p(&src), "format": format })).unwrap();
+        assert_eq!(checked["loses"], loses, "{name} as {format}: {checked:?}");
+        assert_eq!(checked["format"], format);
+        let out = dir.join(format!("copy.{format}"));
+        let dry = call(
+            "convert",
+            json!({ "path": p(&src), "output": p(&out), "dry_run": true }),
+        )
+        .unwrap();
+        assert_eq!(
+            checked["save"]["lost"], dry["save"]["lost"],
+            "{name} as {format}"
+        );
+        assert_eq!(
+            checked["save"]["dropped_parts"],
+            dry["save"]["dropped_parts"]
+        );
+    }
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+}

@@ -5,7 +5,20 @@ error codes are the public interface (`carrysheet-cli commands --json`).
 
 ## Unreleased
 
+### Added
+
+- **`check` shows what a save would keep, change or lose, before
+  anything is written.** Give a workbook and, optionally, the format to
+  save as (`xlsx`, `xlsm` or `csv`; default: the file's own). The report
+  is the same one `convert` and `edit` check before saving. It exits 4
+  when something would be lost, so a script can stop before a lossy save;
+  0 when nothing known is lost. Also an MCP tool, read-only.
+
 ### Breaking changes for scripts
+
+- **`sanitize`, `mcp install` and `mcp doctor` are hidden** from
+  `commands`, `--help` and the MCP tool list until they work. They were
+  listed before but only answered `not_implemented`.
 
 - **Saving content a file would lose needs `confirm_loss`.** `edit` and
   `convert` refuse to save when the written file would lack something the

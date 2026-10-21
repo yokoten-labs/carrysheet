@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use carrysheet_commands::lint::{lint_schema, lint_tools};
 use carrysheet_commands::schema::tool_definition;
-use carrysheet_commands::table::{ArgType, COMMANDS, mcp_tools};
+use carrysheet_commands::table::{ArgType, COMMANDS, listed, mcp_tools};
 use serde_json::Value;
 
 const BIN: &str = env!("CARGO_BIN_EXE_carrysheet-cli");
@@ -166,10 +166,10 @@ fn commands_json_is_json_only_and_every_schema_passes_the_lint() {
     let v = json_only(&o);
     assert_eq!(v["ok"], true);
     let list = v["commands"].as_array().unwrap();
-    assert_eq!(list.len(), COMMANDS.len());
+    assert_eq!(list.len(), listed().count());
 
     let mut tools = Vec::new();
-    for (c, table) in list.iter().zip(COMMANDS) {
+    for (c, table) in list.iter().zip(listed()) {
         assert_eq!(c["name"], table.name);
         let violations = lint_schema(&c["input_schema"]);
         assert!(violations.is_empty(), "{}: {violations:?}", table.name);
@@ -294,30 +294,42 @@ fn dry_run_only_on_commands_that_change_files() {
     assert_eq!(error_json(&o)["code"], "damaged_file");
 }
 
+/// Required arguments for a command, with values that reach the command
+/// itself: a real workbook, a valid op, the first enum value.
+fn sample_argv(table: &carrysheet_commands::table::Command, book: &str) -> Vec<String> {
+    let mut argv: Vec<String> = table.cli_path.iter().map(|s| s.to_string()).collect();
+    for a in table.all_args().into_iter().filter(|a| a.required) {
+        if !a.positional {
+            argv.push(a.flag());
+        }
+        argv.push(match a.ty {
+            ArgType::Path if a.name == "path" => book.to_owned(),
+            // Another path (convert's output): beside the workbook.
+            ArgType::Path => Path::new(book)
+                .with_file_name("out.xlsx")
+                .to_str()
+                .unwrap()
+                .to_owned(),
+            ArgType::Enum(values) => values[0].to_owned(),
+            ArgType::ObjectList(_) => r#"[{"op":"set_value","target":"A1","value":1}]"#.to_owned(),
+            _ => "1+1".to_owned(),
+        });
+    }
+    argv
+}
+
+/// Hidden commands keep their code: typed anyway, they say they are not built.
 #[test]
-fn every_unbuilt_command_says_not_implemented() {
+fn hidden_commands_say_not_implemented() {
     let home = temp_home();
     let book = home.join("book.xlsx");
     std::fs::write(&book, b"x").unwrap();
     let book = book.to_str().unwrap().to_owned();
 
-    let listing = json_only(&run(&["commands", "--json"]));
-    for (c, table) in listing["commands"].as_array().unwrap().iter().zip(COMMANDS) {
-        if c["implemented"] == true {
-            continue;
-        }
-        let mut argv: Vec<String> = table.cli_path.iter().map(|s| s.to_string()).collect();
-        for a in table.all_args().into_iter().filter(|a| a.required) {
-            if !a.positional {
-                argv.push(a.flag());
-            }
-            argv.push(match a.ty {
-                ArgType::Path if a.name == "path" => book.clone(),
-                ArgType::Enum(values) => values[0].to_owned(),
-                ArgType::ObjectList(_) => r#"[{"op":"clear","target":"A1"}]"#.to_owned(),
-                _ => "x".to_owned(),
-            });
-        }
+    let hidden: Vec<_> = COMMANDS.iter().filter(|c| c.hidden).collect();
+    assert!(!hidden.is_empty());
+    for table in hidden {
+        let mut argv = sample_argv(table, &book);
         argv.push("--json".to_owned());
         let args: Vec<&str> = argv.iter().map(String::as_str).collect();
         let o = run_in(&home, &args);
@@ -332,6 +344,52 @@ fn every_unbuilt_command_says_not_implemented() {
         assert_eq!(code(&o), 1);
         assert!(stdout(&o).is_empty(), "{plain:?}");
         assert!(stderr(&o).contains("not implemented yet"));
+    }
+}
+
+/// Every command `commands` lists works: none answers "not implemented".
+#[test]
+fn no_listed_command_answers_not_implemented() {
+    let home = temp_home();
+    let book = home.join("prices.csv");
+    std::fs::copy(data("prices.csv"), &book).unwrap();
+    let book = book.to_str().unwrap().to_owned();
+
+    let listing = json_only(&run(&["commands", "--json"]));
+    let names: Vec<&str> = listing["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"check"));
+    for name in names {
+        let table = COMMANDS.iter().find(|c| c.name == name).unwrap();
+        let mut argv = sample_argv(table, &book);
+        argv.push("--json".to_owned());
+        if name == "mcp_serve" {
+            argv.extend(["--root".to_owned(), home.to_str().unwrap().to_owned()]);
+        }
+        let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+        let o = run_in(&home, &args);
+        let all = format!("{}{}", stdout(&o), stderr(&o));
+        assert!(
+            !all.contains("not_implemented") && !all.contains("not implemented"),
+            "{args:?} answered not implemented: {all}"
+        );
+    }
+}
+
+#[test]
+fn help_and_commands_leave_out_hidden_commands() {
+    for args in [vec!["--help"], vec!["mcp", "--help"], vec!["commands"]] {
+        let o = run(&args);
+        assert_eq!(code(&o), 0, "{args:?}");
+        let out = stdout(&o);
+        for word in ["sanitize", "install", "doctor"] {
+            assert!(!out.contains(word), "{args:?} shows {word}: {out}");
+        }
+        assert!(out.contains("serve") || out.contains("check"), "{out}");
     }
 }
 
@@ -608,4 +666,125 @@ fn the_binary_is_its_own_query_worker() {
     // Hidden: not in the help.
     let help = Command::new(BIN).arg("--help").output().unwrap();
     assert!(!String::from_utf8_lossy(&help.stdout).contains("__query-worker"));
+}
+
+/// A file under this crate's tests/data, or the kernel's.
+fn data(name: &str) -> PathBuf {
+    let here = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/data")
+        .join(name);
+    if here.exists() {
+        return here;
+    }
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/carrysheet-kernel/tests/data")
+        .join(name)
+}
+
+/// Copies a test file into the folder and returns its path as text.
+fn copy_in(home: &Path, name: &str) -> String {
+    let to = home.join(name);
+    std::fs::copy(data(name), &to).unwrap();
+    to.to_str().unwrap().to_owned()
+}
+
+fn files_in(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn check_nothing_lost_exits_0() {
+    let home = temp_home();
+    let book = copy_in(&home, "prices.csv");
+    for extra in [&[][..], &["--format", "xlsx"][..], &["--format", "csv"][..]] {
+        let mut args = vec!["check", book.as_str(), "--json"];
+        args.extend_from_slice(extra);
+        let o = run_in(&home, &args);
+        assert_eq!(code(&o), 0, "{args:?}: {}", stderr(&o));
+        let v = json_only(&o);
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["loses"], false, "{v}");
+        assert_eq!(v["save"]["lost"], serde_json::json!([]), "{v}");
+        assert!(v["file"].as_str().unwrap().starts_with('~'), "{v}");
+    }
+    // The csv save escapes formula-like text and says so.
+    let o = run_in(&home, &["check", &book, "--json"]);
+    let v = json_only(&o);
+    assert_eq!(v["format"], "csv");
+    assert!(v["save"]["notes"].to_string().contains("' in front"), "{v}");
+    assert_eq!(files_in(&home), ["prices.csv"], "check writes nothing");
+}
+
+#[test]
+fn check_a_lossy_save_exits_4_and_names_the_loss() {
+    let home = temp_home();
+    let macros = copy_in(&home, "SimpleMacro.xlsm");
+    let charts = copy_in(&home, "WithTwoCharts.xlsx");
+    let before = files_in(&home);
+
+    // Saved in its own format, the macro file keeps its macros.
+    let o = run_in(&home, &["check", &macros, "--json"]);
+    assert_eq!(code(&o), 0, "{}", stdout(&o));
+    let v = json_only(&o);
+    assert_eq!(v["format"], "xlsm");
+    assert_eq!(v["loses"], false, "{v}");
+    assert!(v["save"]["parts"]["identical"].as_u64().unwrap() > 0, "{v}");
+
+    // As xlsx it would lose the VBA project: the same report convert gives.
+    let o = run_in(&home, &["check", &macros, "--format", "xlsx", "--json"]);
+    assert_eq!(code(&o), 4, "{}", stdout(&o));
+    let v = json_only(&o);
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["loses"], true);
+    assert!(v["save"]["lost"].to_string().contains("VBA project"), "{v}");
+    assert!(v["hint"].as_str().unwrap().contains("confirm_loss"), "{v}");
+    let out = home.join("SimpleMacro-copy.xlsx");
+    let o = run_in(
+        &home,
+        &[
+            "convert",
+            &macros,
+            out.to_str().unwrap(),
+            "--dry-run",
+            "--json",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert_eq!(json_only(&o)["save"]["lost"], v["save"]["lost"]);
+
+    // As csv, the charts and formulas go; for people, a short list.
+    let o = run_in(&home, &["check", &charts, "--format", "csv"]);
+    assert_eq!(code(&o), 4, "{}", stderr(&o));
+    let text = stdout(&o);
+    assert!(text.contains("Lost in this save:"), "{text}");
+    assert!(text.contains("charts (2 of 2)"), "{text}");
+    for line in text.lines() {
+        assert!(line.chars().count() <= 80, "{line}");
+    }
+    assert!(!text.contains(&home.display().to_string()), "{text}");
+    assert_eq!(files_in(&home), before, "check writes nothing");
+}
+
+#[test]
+fn check_needs_a_format_for_files_carrysheet_cannot_save() {
+    let home = temp_home();
+    let book = home.join("old.xls");
+    std::fs::write(&book, b"x").unwrap();
+    let o = run_in(&home, &["check", book.to_str().unwrap(), "--json"]);
+    assert_eq!(code(&o), 2, "{}", stdout(&o));
+    let e = error_json(&o);
+    assert_eq!(e["code"], "invalid_argument");
+    assert!(e["fix"].as_str().unwrap().contains("--format xlsx"), "{e}");
+
+    let o = run_in(
+        &home,
+        &["check", book.to_str().unwrap(), "--format", "xls", "--json"],
+    );
+    assert_eq!(code(&o), 2);
+    assert!(error_json(&o)["fix"].as_str().unwrap().contains("xlsm"));
 }

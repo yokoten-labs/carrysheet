@@ -910,3 +910,96 @@ fn stop(child: &mut std::process::Child) -> bool {
         false
     }
 }
+
+fn root_files(scratch: &Scratch) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(scratch.path("root"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn check_reports_a_save_without_writing() {
+    let scratch = Scratch::new();
+    let kernel_data = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/carrysheet-kernel/tests/data");
+    std::fs::copy(
+        kernel_data.join("SimpleMacro.xlsm"),
+        scratch.path("root/macro.xlsm"),
+    )
+    .unwrap();
+    let before = root_files(&scratch);
+    let mut server = Server::start(&scratch, &["--read-only"]);
+    initialize(&mut server, "2025-11-25");
+
+    let r = call(
+        &mut server,
+        2,
+        "check",
+        json!({ "path": "prices.csv", "format": "xlsx" }),
+    );
+    assert_eq!(r["isError"], false, "{r}");
+    assert_eq!(r["structuredContent"]["loses"], false, "{r}");
+    assert_eq!(r["content"][0]["text"], r["structuredContent"].to_string());
+
+    // Losing something is an answer, not a tool error.
+    let r = call(
+        &mut server,
+        3,
+        "check",
+        json!({ "path": "macro.xlsm", "format": "xlsx" }),
+    );
+    assert_eq!(r["isError"], false, "{r}");
+    let v = &r["structuredContent"];
+    assert_eq!(v["loses"], true, "{v}");
+    assert!(v["save"]["lost"].to_string().contains("VBA project"), "{v}");
+
+    let e = tool_error(&call(
+        &mut server,
+        4,
+        "check",
+        json!({ "path": "book.xlsx" }),
+    ));
+    assert_eq!(e["code"], "damaged_file");
+
+    let (code, _) = server.finish();
+    assert_eq!(code, 0);
+    assert_eq!(root_files(&scratch), before, "check writes nothing");
+}
+
+/// Every tool the server lists works: none answers "not implemented".
+#[test]
+fn no_listed_tool_answers_not_implemented() {
+    use carrysheet_commands::table::ArgType;
+    let scratch = Scratch::new();
+    let mut server = Server::start(&scratch, &[]);
+    initialize(&mut server, "2025-11-25");
+    let tools = server.result(2, "tools/list", json!({}));
+    let names = tool_names(&tools);
+    assert!(names.iter().any(|n| n == "check"));
+    for (id, name) in (10..).zip(&names) {
+        let command = mcp_tools().find(|c| c.name == name).unwrap();
+        let mut args = serde_json::Map::new();
+        for a in command.all_args().into_iter().filter(|a| a.required) {
+            let value = match a.ty {
+                ArgType::Path if a.name == "path" => json!("prices.csv"),
+                ArgType::Path => json!("out.xlsx"),
+                ArgType::Enum(values) => json!(values[0]),
+                ArgType::ObjectList(_) => {
+                    json!([{ "op": "set_value", "target": "A1", "value": 1 }])
+                }
+                _ => json!("1+1"),
+            };
+            args.insert(a.name.into(), value);
+        }
+        let r = call(&mut server, id, name, Value::Object(args));
+        assert_ne!(
+            r["structuredContent"]["error"]["code"], "not_implemented",
+            "{name}: {r}"
+        );
+    }
+    let (code, _) = server.finish();
+    assert_eq!(code, 0);
+}

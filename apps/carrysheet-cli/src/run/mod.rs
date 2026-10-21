@@ -10,8 +10,8 @@ use std::path::Path;
 use carrysheet_commands::engine::run::{ENGINE_COMMANDS, run_within};
 use carrysheet_commands::paths::{display_path, redact_home};
 use carrysheet_commands::schema::command_json;
-use carrysheet_commands::table::{COMMANDS, Command};
-use carrysheet_commands::{CommandError, ErrorCode, check_confirmation};
+use carrysheet_commands::table::{self, Command};
+use carrysheet_commands::{CommandError, ErrorCode, ExitCode, check_confirmation};
 use carrysheet_kernel::Kernel;
 use serde_json::{Map, Value, json};
 
@@ -25,14 +25,29 @@ pub struct Done {
     pub data: Map<String, Value>,
     /// What a person sees on stdout.
     pub text: String,
+    /// How the process ends: 0, or 4 when `check` finds a save would lose
+    /// something.
+    pub exit: ExitCode,
+}
+
+impl Done {
+    /// A result that ends the process with 0.
+    pub fn new(data: Map<String, Value>, text: String) -> Done {
+        Done {
+            data,
+            text,
+            exit: ExitCode::Done,
+        }
+    }
 }
 
 /// Commands that work today. Everything else in the table answers "not
-/// implemented yet".
+/// implemented yet", and is hidden in the table until it works.
 pub const IMPLEMENTED: &[&str] = &[
     "overview",
     "read",
     "eval",
+    "check",
     "convert",
     "edit",
     "feedback",
@@ -73,7 +88,15 @@ pub fn run(
             }
             let data = on_kernel(command, args, ctx)?;
             let text = text_for(command.name, &data);
-            Ok(Done { data, text })
+            let loses = command.name == "check" && data.get("loses") == Some(&Value::Bool(true));
+            Ok(Done {
+                exit: if loses {
+                    ExitCode::WouldLose
+                } else {
+                    ExitCode::Done
+                },
+                ..Done::new(data, text)
+            })
         }
     }
 }
@@ -188,6 +211,26 @@ fn text_for(name: &str, data: &Map<String, Value>) -> String {
                 plain(data.get("value").unwrap_or(&Value::Null))
             ));
         }
+        "check" => {
+            t.push_str(&format!(
+                "Saving {} as {}, nothing written:\n",
+                get_str(data, "file"),
+                get_str(data, "format")
+            ));
+            let save = data.get("save").cloned().unwrap_or(Value::Null);
+            let parts = &save["parts"];
+            if parts.is_object() {
+                let n = |k: &str| parts[k].as_u64().unwrap_or(0);
+                t.push_str(&format!(
+                    "Keeps {} part(s) byte for byte; changes {} (rewritten {}, added {}).\n",
+                    n("identical"),
+                    n("rewritten") + n("added"),
+                    n("rewritten"),
+                    n("added")
+                ));
+            }
+            save_lines(&save, &mut t);
+        }
         _ => {
             let output = get_str(data, "output");
             if data.get("written") == Some(&Value::Bool(true)) {
@@ -226,32 +269,37 @@ fn text_for(name: &str, data: &Map<String, Value>) -> String {
                 }
             }
             let save = data.get("save").cloned().unwrap_or(Value::Null);
-            let lost = save["lost"].as_array().cloned().unwrap_or_default();
-            if lost.is_empty() && save["dropped_parts"].as_array().is_none_or(Vec::is_empty) {
-                t.push_str("Nothing known is lost.\n");
-            } else {
-                t.push_str("Lost in this save:\n");
-                for l in &lost {
-                    t.push_str(&format!(
-                        "  {} ({} of {})\n",
-                        plain(&l["feature"]),
-                        l["before"]
-                            .as_u64()
-                            .unwrap_or(0)
-                            .saturating_sub(l["after"].as_u64().unwrap_or(0)),
-                        l["before"]
-                    ));
-                }
-                for p in save["dropped_parts"].as_array().into_iter().flatten() {
-                    t.push_str(&format!("  part {}\n", plain(p)));
-                }
-            }
-            for n in save["notes"].as_array().into_iter().flatten() {
-                t.push_str(&format!("Note: {}\n", plain(n)));
-            }
+            save_lines(&save, &mut t);
         }
     }
     t
+}
+
+/// A save report for people: what is lost, then notes.
+fn save_lines(save: &Value, t: &mut String) {
+    let lost = save["lost"].as_array().cloned().unwrap_or_default();
+    if lost.is_empty() && save["dropped_parts"].as_array().is_none_or(Vec::is_empty) {
+        t.push_str("Nothing known is lost.\n");
+    } else {
+        t.push_str("Lost in this save:\n");
+        for l in &lost {
+            t.push_str(&format!(
+                "  {} ({} of {})\n",
+                plain(&l["feature"]),
+                l["before"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .saturating_sub(l["after"].as_u64().unwrap_or(0)),
+                l["before"]
+            ));
+        }
+        for p in save["dropped_parts"].as_array().into_iter().flatten() {
+            t.push_str(&format!("  part {}\n", plain(p)));
+        }
+    }
+    for n in save["notes"].as_array().into_iter().flatten() {
+        t.push_str(&format!("Note: {}\n", plain(n)));
+    }
 }
 
 /// Deleting or overwriting needs `--confirm`. `--yes`, or a person
@@ -292,8 +340,7 @@ fn check_input_exists(command: &Command, args: &Map<String, Value>) -> Result<()
 }
 
 fn commands() -> Done {
-    let list: Vec<Value> = COMMANDS
-        .iter()
+    let list: Vec<Value> = table::listed()
         .map(|c| {
             let mut v = command_json(c);
             v["implemented"] = Value::Bool(is_implemented(c));
@@ -303,9 +350,12 @@ fn commands() -> Done {
 
     let mut text = String::new();
     for (heading, ready) in [("Ready:", true), ("Planned, not implemented yet:", false)] {
+        if !table::listed().any(|c| is_implemented(c) == ready) {
+            continue;
+        }
         text.push_str(heading);
         text.push('\n');
-        for c in COMMANDS.iter().filter(|c| is_implemented(c) == ready) {
+        for c in table::listed().filter(|c| is_implemented(c) == ready) {
             let line = format!("  {:<13} {}", c.cli_name(), c.summary);
             text.push_str(&wrap(&line, 80, 16));
             text.push('\n');
@@ -319,7 +369,7 @@ fn commands() -> Done {
     let mut data = Map::new();
     data.insert("version".into(), json!(env!("CARGO_PKG_VERSION")));
     data.insert("commands".into(), Value::Array(list));
-    Done { data, text }
+    Done::new(data, text)
 }
 
 const ISSUES: &str = "https://github.com/yokoten-labs/carrysheet/issues/new";
@@ -364,7 +414,7 @@ fn feedback(args: &Map<String, Value>) -> Result<Done, CommandError> {
     );
     let url = format!("{ISSUES}?template={template}");
     let attach = if kind == "file" {
-        "\nIf you attach the file, run `carrysheet-cli sanitize` on it first and check the result.\n"
+        "\nIf you attach the file, take out anything private first, or attach a small copy that shows the same problem.\n"
     } else {
         ""
     };
@@ -378,12 +428,13 @@ fn feedback(args: &Map<String, Value>) -> Result<Done, CommandError> {
     data.insert("url".into(), json!(url));
     data.insert("email".into(), json!(SUPPORT_EMAIL));
     data.insert("sent".into(), json!(false));
-    Ok(Done { data, text })
+    Ok(Done::new(data, text))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use carrysheet_commands::table::COMMANDS;
     use carrysheet_commands::{command, validate_args};
 
     fn ctx() -> Context {
@@ -405,6 +456,15 @@ mod tests {
     fn implemented_names_exist() {
         for name in IMPLEMENTED {
             assert!(command(name).is_some(), "{name}");
+        }
+    }
+
+    /// A command that is not built must be hidden, and a hidden one must not
+    /// be built: then every listed command works.
+    #[test]
+    fn exactly_the_unbuilt_commands_are_hidden() {
+        for c in COMMANDS {
+            assert_eq!(c.hidden, !is_implemented(c), "{}", c.name);
         }
     }
 
@@ -467,13 +527,21 @@ mod tests {
     }
 
     #[test]
-    fn commands_lists_everything() {
+    fn commands_lists_everything_not_hidden() {
         let done = run_json("commands", json!({})).unwrap();
-        assert_eq!(
-            done.data["commands"].as_array().unwrap().len(),
-            COMMANDS.len()
-        );
-        assert!(done.text.contains("Planned, not implemented yet:"));
+        let names: Vec<&str> = done.data["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        let listed: Vec<&str> = table::listed().map(|c| c.name).collect();
+        assert_eq!(names, listed);
+        for hidden in ["sanitize", "mcp_install", "mcp_doctor"] {
+            assert!(!names.contains(&hidden), "{hidden}");
+            assert!(!done.text.contains(&hidden.replace('_', " ")), "{hidden}");
+        }
+        assert!(!done.text.contains("Planned, not implemented yet:"));
         for line in done.text.lines() {
             assert!(line.chars().count() <= 80, "{line}");
         }
@@ -501,7 +569,8 @@ mod tests {
                 .contains(std::env::consts::OS)
         );
         assert!(done.text.contains("Nothing was sent"));
-        assert!(done.text.contains("sanitize"));
+        assert!(done.text.contains("anything private"));
+        assert!(!done.text.contains("sanitize"), "sanitize is hidden");
     }
 
     #[test]

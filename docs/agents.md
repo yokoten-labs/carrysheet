@@ -17,7 +17,7 @@ Carrysheet aims to be **AI-friendly, human-friendly and MCP-friendly**. The rule
 ## Command line
 
 - `--json` on every command. With it, stdout holds JSON only; errors are JSON too (`{"ok": false, "error": {"code", "what", "fix", "why"}}`, where `code` is a stable snake_case id such as `not_implemented`) and also go to stderr. As text: error, fix, why.
-- Fixed exit codes: 0 done, 1 failed, 2 usage error, 3 nothing to do.
+- Fixed exit codes: 0 done, 1 failed, 2 usage error, 3 nothing to do, 4 `check` found that the save would lose something. 4 is not a failure (the answer is `"ok": true`); it lets a script run `check` and stop before a lossy `convert` or `edit`.
 - Never prompt without a terminal. A missing answer means no. `--yes` confirms (see Confirmation below).
 - `--dry-run` on every command that changes a file. It prints the change list.
 - Unknown flags are refused, with a "did you mean" suggestion. `--json=VALUE` is refused too (exit 2).
@@ -46,12 +46,12 @@ Few, workflow-level tools. Names of built tools match the command table in `crat
 | `overview` | Sheets, used ranges, headers, column types, formula and error counts. The first call on any workbook | No | `core` |
 | `read` | A range as a compact table with A1 addresses, values or formulas, paged | No | `core` |
 | `eval` | Compute a formula against the workbook without saving | No | `core` |
-| `check` | Errors (#REF! etc.), external links, macro risk, what would be lost saving as .xls or csv | No | `core` |
+| `check` | What a save as xlsx, xlsm or csv would keep, change or lose, before anything is written: the same report `convert` and `edit` check before they save, with `loses` true when something would go. Error cells, external links and macro risk are planned | No | `core` |
 | `edit` | A batch of operations: set values or formulas, insert or delete rows, rename sheets. `dry_run` returns the change list; the batch is all or nothing | Yes | `core` |
 | `convert` | Save as xlsx, xls or csv, to a new file | Yes (new file) | `core` |
 | `feedback` | Draft a bug report, file problem or idea with environment details. Never sends; a person submits it | No | `core` |
 | `macros` | VBA modules, line counts, protection, and risky code flagged by line (VBA editor numbering). Source only with `include_source`, paged with `next_cursor`. Never runs code (issue 22) | No | `macros` |
-| `sanitize` | A copy safe to share: made-up values, same formulas and layout, document properties removed | Yes (new file) | `share` |
+| `sanitize` | A copy safe to share: made-up values, same formulas and layout, document properties removed. Not built: hidden until it works (v0.2.0) | Yes (new file) | `share` |
 | `find` | Search values or formulas, returns addresses. Not built | No | not decided |
 | `undo` | Restore the snapshot taken before an `edit`. Not built | Yes | not decided |
 
@@ -59,6 +59,7 @@ Rules:
 
 - Names are short `snake_case`. A tool description has at most 300 characters, starts with the key words, and says when to call the tool. An argument description says what it is and its default, and nothing the schema already says; longer guidance goes in the error's `fix` and in `--help`.
 - Tools are listed in a fixed order.
+- A command that is not built yet is marked `hidden` in the command table: it stays out of `commands`, `--help` and `tools/list`, and answers `not_implemented` if typed. A test fails if a listed command or tool answers `not_implemented`.
 - Every tool sets all four annotations explicitly: `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`.
 - Archive members are opened by path, as Windows Explorer shows a zip as a folder: `reports.zip/q3.xlsx`. A real folder of that name wins if both exist. When a zip holds several spreadsheets and the path names none, the error lists their paths (issue 49). No tool has an `entry` argument.
 
@@ -158,6 +159,8 @@ The CLI and MCP server ship for three tiers of platforms from the first release.
 - MSIX-hosted clients lose user PATH and virtualize AppData: the docs show absolute-path configs for them.
 
 ## Installing into clients
+
+Not built yet: `mcp install` and `mcp doctor` are hidden until they work (v0.2.0).
 
 - `carrysheet-cli mcp install <client>` and `uninstall <client>`, for every client in the research table.
   - Changes only our own entry and keeps everything else.

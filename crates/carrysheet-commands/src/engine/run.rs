@@ -22,7 +22,7 @@ use crate::paths::display_path;
 use crate::table::Command;
 
 /// Commands that work on a workbook through an engine.
-pub const ENGINE_COMMANDS: &[&str] = &["overview", "read", "eval", "edit", "convert"];
+pub const ENGINE_COMMANDS: &[&str] = &["overview", "read", "eval", "check", "edit", "convert"];
 
 /// Runs one of [`ENGINE_COMMANDS`].
 pub fn run<E: Engine>(
@@ -58,6 +58,7 @@ fn dispatch<E: Engine>(
         "overview" => overview(engine, args),
         "read" => read(engine, args),
         "eval" => eval(engine, args),
+        "check" => check(engine, args),
         "edit" => edit(engine, args),
         "convert" => convert(engine, args),
         _ => Err(CommandError::not_implemented(&command.cli_name())),
@@ -302,6 +303,74 @@ pub fn convert<E: Engine>(
     data.insert("file".into(), shown(&path));
     data.insert("output".into(), shown(&output));
     finish_save(args, &output, encoded, data)
+}
+
+/// What saving would keep, change and lose, without writing anything. It
+/// runs the same encoding and loss report a save runs (`convert` and
+/// `edit` refuse a lossy save on that report), so the answer cannot drift
+/// from what a save does.
+pub fn check<E: Engine>(
+    engine: &E,
+    args: &Map<String, Value>,
+) -> Result<Map<String, Value>, CommandError> {
+    let path = input(args)?;
+    let target = match text(args, "format") {
+        Some(f) => f.to_ascii_lowercase(),
+        None => own_format(&path)?,
+    };
+    let format = FileFormat::from_extension(&target).ok_or_else(|| {
+        CommandError::invalid_argument(
+            "format",
+            format!("check cannot test a save as {target}"),
+            "Use format xlsx, xlsm or csv.",
+        )
+    })?;
+    // A save beside the original, as `edit` makes: the name picks xlsx or
+    // xlsm (macros kept), and links to other files keep pointing the same way.
+    let saved_as = path.with_extension(&target);
+    let book = engine.open(&path)?;
+    let options = EncodeOptions {
+        sheet: text(args, "sheet"),
+        csv_raw: false,
+    };
+    let Encoded { report, .. } = engine.encode_with(&book, &saved_as, format, &options)?;
+    let loses = report.loses_something();
+    let mut data = Map::new();
+    data.insert("file".into(), shown(&path));
+    data.insert("format".into(), json!(target));
+    data.insert("loses".into(), json!(loses));
+    data.insert("save".into(), json!(report));
+    let hint = if loses {
+        let mut hint = format!(
+            "Saving as {target} would lose what save.lost lists. convert and edit refuse that save unless confirm_loss is true."
+        );
+        if report.lost.iter().any(|l| l.feature == "VBA project") && target != "xlsm" {
+            hint.push_str(" To keep macros, save as xlsm.");
+        }
+        hint
+    } else {
+        format!("Nothing known is lost saving as {target}.")
+    };
+    data.insert("hint".into(), json!(hint));
+    Ok(data)
+}
+
+/// The format a file saves in by default: its own, when Carrysheet writes it.
+fn own_format(path: &Path) -> Result<String, CommandError> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if crate::table::CHECK_FORMATS.contains(&ext.as_str()) {
+        return Ok(ext);
+    }
+    Err(CommandError::new(
+        ErrorCode::InvalidArgument,
+        format!("check needs a format for {}", display_path(path)),
+        "Carrysheet cannot save a file in this format yet, so there is no save in its own format to check",
+        "Name the format to save as, like: carrysheet-cli check book.xls --format xlsx (xlsm keeps macros).",
+    ))
 }
 
 /// The format to write: `format` when given, else from the extension.

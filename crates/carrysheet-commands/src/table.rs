@@ -75,6 +75,10 @@ pub struct Command {
     pub annotations: Annotations,
     /// Offered as a tool by the MCP server.
     pub mcp_tool: bool,
+    /// Not built yet, so left out of `commands`, `--help` and the MCP
+    /// `tools/list` until it works. Typed anyway, it answers
+    /// `not_implemented`.
+    pub hidden: bool,
 }
 
 /// The `dry_run` argument every command that changes files gets.
@@ -126,7 +130,7 @@ pub struct Group {
 /// Command groups, by the first word of `cli_path`.
 pub const GROUPS: &[Group] = &[Group {
     name: "mcp",
-    summary: "Run the MCP server for AI agents, and set it up in their apps",
+    summary: "Run the MCP server for AI agents",
 }];
 
 /// A group by name.
@@ -212,6 +216,10 @@ pub const CLIENTS: &[&str] = &[
     "lm-studio",
 ];
 
+/// Formats `check` can test a save in: those Carrysheet writes. `xlsm` is
+/// xlsx with its macros kept.
+pub const CHECK_FORMATS: &[&str] = &["xlsx", "xlsm", "csv"];
+
 /// Operations `edit` accepts, in the `op` field.
 pub const EDIT_OPS: &[&str] = &[
     "set_value",
@@ -274,6 +282,7 @@ pub const COMMANDS: &[Command] = &[
         changes_files: false,
         annotations: READ_ONLY,
         mcp_tool: true,
+        hidden: false,
     },
     Command {
         name: "read",
@@ -328,6 +337,7 @@ pub const COMMANDS: &[Command] = &[
         changes_files: false,
         annotations: READ_ONLY,
         mcp_tool: true,
+        hidden: false,
     },
     Command {
         name: "eval",
@@ -354,16 +364,34 @@ pub const COMMANDS: &[Command] = &[
         changes_files: false,
         annotations: READ_ONLY,
         mcp_tool: true,
+        hidden: false,
     },
     Command {
         name: "check",
         cli_path: &["check"],
-        summary: "Find formula errors, external links and what a save would lose",
-        description: "Check a workbook for problems: error cells (#REF!...), external links, macros, and what xls or csv would lose. Use before convert or after edit.",
-        args: &[WORKBOOK, RESPONSE_FORMAT],
+        summary: "Show what saving a workbook would keep, change or lose",
+        description: "Check a save before it happens: what the file would keep, change or lose (macros, charts, formulas...) as xlsx, xlsm or csv. Writes nothing. Use before convert or edit; loses is true when something would be lost.",
+        args: &[
+            WORKBOOK,
+            Arg {
+                name: "format",
+                ty: ArgType::Enum(CHECK_FORMATS),
+                required: false,
+                positional: false,
+                description: "The format to save as. Default: the file's own.",
+            },
+            Arg {
+                name: "sheet",
+                ty: ArgType::Text,
+                required: false,
+                positional: false,
+                description: "For csv, the sheet to save. Default: the first sheet.",
+            },
+        ],
         changes_files: false,
         annotations: READ_ONLY,
         mcp_tool: true,
+        hidden: false,
     },
     Command {
         name: "macros",
@@ -397,6 +425,7 @@ pub const COMMANDS: &[Command] = &[
         changes_files: false,
         annotations: READ_ONLY,
         mcp_tool: true,
+        hidden: false,
     },
     Command {
         name: "convert",
@@ -445,6 +474,7 @@ pub const COMMANDS: &[Command] = &[
             open_world: false,
         },
         mcp_tool: true,
+        hidden: false,
     },
     Command {
         name: "edit",
@@ -473,6 +503,7 @@ pub const COMMANDS: &[Command] = &[
             open_world: false,
         },
         mcp_tool: true,
+        hidden: false,
     },
     Command {
         name: "sanitize",
@@ -498,6 +529,7 @@ pub const COMMANDS: &[Command] = &[
             open_world: false,
         },
         mcp_tool: true,
+        hidden: true,
     },
     Command {
         name: "feedback",
@@ -523,6 +555,7 @@ pub const COMMANDS: &[Command] = &[
         changes_files: false,
         annotations: READ_ONLY,
         mcp_tool: true,
+        hidden: false,
     },
     Command {
         name: "mcp_serve",
@@ -581,6 +614,7 @@ pub const COMMANDS: &[Command] = &[
             open_world: false,
         },
         mcp_tool: false,
+        hidden: false,
     },
     Command {
         name: "mcp_install",
@@ -602,6 +636,7 @@ pub const COMMANDS: &[Command] = &[
             open_world: false,
         },
         mcp_tool: false,
+        hidden: true,
     },
     Command {
         name: "mcp_doctor",
@@ -618,6 +653,7 @@ pub const COMMANDS: &[Command] = &[
         changes_files: false,
         annotations: READ_ONLY,
         mcp_tool: false,
+        hidden: true,
     },
     Command {
         name: "commands",
@@ -628,6 +664,7 @@ pub const COMMANDS: &[Command] = &[
         changes_files: false,
         annotations: READ_ONLY,
         mcp_tool: false,
+        hidden: false,
     },
 ];
 
@@ -641,9 +678,15 @@ pub fn command_by_path(path: &[&str]) -> Option<&'static Command> {
     COMMANDS.iter().find(|c| c.cli_path == path)
 }
 
-/// The commands the MCP server offers, in order.
+/// The commands `commands` and `--help` list: every command not hidden, in order.
+pub fn listed() -> impl Iterator<Item = &'static Command> {
+    COMMANDS.iter().filter(|c| !c.hidden)
+}
+
+/// The commands the MCP server offers, in order. Hidden commands are not
+/// among them.
 pub fn mcp_tools() -> impl Iterator<Item = &'static Command> {
-    COMMANDS.iter().filter(|c| c.mcp_tool)
+    listed().filter(|c| c.mcp_tool)
 }
 
 #[cfg(test)]
@@ -839,8 +882,7 @@ mod tests {
         assert_eq!(
             tools,
             [
-                "overview", "read", "eval", "check", "macros", "convert", "edit", "sanitize",
-                "feedback"
+                "overview", "read", "eval", "check", "macros", "convert", "edit", "feedback"
             ]
         );
         assert!(tools.len() < 40);

@@ -145,10 +145,7 @@ pub fn macros(args: &Map<String, Value>) -> Result<Done, CommandError> {
         json!((!hints.is_empty()).then(|| hints.join(" "))),
     );
     let text = answer.text(&chosen, &page, &hints);
-    Ok(Done {
-        data,
-        text: text::plain(&text),
-    })
+    Ok(Done::new(data, text::plain(&text)))
 }
 
 fn no_macros(shown: &str, opened: &Opened) -> Done {
@@ -181,10 +178,7 @@ fn no_macros(shown: &str, opened: &Opened) -> Done {
     for w in &warnings {
         text.push_str(&format!("Warning: {w}\n"));
     }
-    Done {
-        data,
-        text: text::plain(&text),
-    }
+    Done::new(data, text::plain(&text))
 }
 
 /// `{"structure": n}` when there are structure warnings, else `{}`.

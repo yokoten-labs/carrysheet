@@ -1,0 +1,6 @@
+Test files in this folder
+=========================
+
+prices.csv was made for Carrysheet's tests. The tests also read
+SimpleMacro.xlsm and WithTwoCharts.xlsx in place from
+crates/carrysheet-kernel/tests/data (see the NOTICE there).

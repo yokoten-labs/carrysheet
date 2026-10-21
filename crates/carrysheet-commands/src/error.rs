@@ -18,6 +18,9 @@ pub enum ExitCode {
     Usage = 2,
     /// 3: there was nothing to do (for example, already installed).
     NothingToDo = 3,
+    /// 4: `check` worked and found that the save would lose something. Not
+    /// a failure, so scripts can tell it from 1: `check` and stop on 4.
+    WouldLose = 4,
 }
 
 impl ExitCode {

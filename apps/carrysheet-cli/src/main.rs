@@ -1,7 +1,8 @@
 //! `carrysheet-cli`: Carrysheet on the command line, generated from the
 //! command table in `carrysheet-commands`.
 //!
-//! Exit codes: 0 done, 1 failed, 2 usage error, 3 nothing to do.
+//! Exit codes: 0 done, 1 failed, 2 usage error, 3 nothing to do, 4 `check`
+//! found that a save would lose something.
 
 mod cli;
 mod http;
@@ -80,7 +81,7 @@ fn real_main(args: Vec<OsString>) -> u8 {
     match result {
         Ok(done) => {
             output::print_done(&done, json);
-            carrysheet_commands::ExitCode::Done.code()
+            done.exit.code()
         }
         Err(err) => {
             output::print_error(&err, json);

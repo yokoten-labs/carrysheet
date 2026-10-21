@@ -52,7 +52,8 @@ fn clap_arg(arg: &'static Arg) -> clap::Arg {
 fn clap_command(name: &'static str, command: &'static Command) -> clap::Command {
     let mut c = clap::Command::new(name)
         .about(command.summary)
-        .long_about(command.description);
+        .long_about(command.description)
+        .hide(command.hidden);
     for arg in command.all_args() {
         c = c.arg(clap_arg(arg));
     }
