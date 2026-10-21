@@ -584,6 +584,13 @@ fn source_budget(kept: &KeptStorage, limits: &Limits) -> usize {
         .min(limits.max_storage_bytes)
 }
 
+/// Bytes of source text one decompressed byte may account for: decoding
+/// turns a byte into at most three UTF-8 bytes, and the text is held
+/// twice (the cache and the module). Modules that do not share a source
+/// therefore never reach `TEXT_PER_SOURCE_BYTE` times the source budget;
+/// many modules pointing at one source, which Excel never writes, do.
+const TEXT_PER_SOURCE_BYTE: usize = 6;
+
 /// The limit name for the project-wide source budget.
 const PROJECT_SOURCE_LIMIT: &str = "decompressed source bytes in the project";
 
@@ -603,7 +610,9 @@ struct Sources {
     /// project never overlap, so this stays within the storage size;
     /// modules pointing at many offsets of one stream would not.
     compressed_read: usize,
-    /// Bytes of source text handed out to modules.
+    /// Bytes of source text decoded and handed out to modules, the
+    /// cache's copy included. At most [`TEXT_PER_SOURCE_BYTE`] times
+    /// `budget`.
     decoded: usize,
 }
 
@@ -711,11 +720,12 @@ impl Sources {
             Ok(info) => {
                 // Each module gets its own copy of the text: count it.
                 self.decoded = self.decoded.saturating_add(info.text.len());
-                if self.decoded > limits.max_storage_bytes {
-                    return Err(VbaError::limit(
-                        "source text in the project",
-                        limits.max_storage_bytes,
-                    ));
+                let text_budget = self
+                    .budget
+                    .saturating_mul(TEXT_PER_SOURCE_BYTE)
+                    .min(limits.max_storage_bytes);
+                if self.decoded > text_budget {
+                    return Err(VbaError::limit("source text in the project", text_budget));
                 }
                 if let Some(req) = scan {
                     let scan_key = (key.0.clone(), key.1, req.events);

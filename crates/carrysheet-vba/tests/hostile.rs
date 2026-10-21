@@ -394,6 +394,34 @@ fn shared_large_source_hits_the_text_budget() {
     }
 }
 
+/// fuzzlite finding (issue 53, targets `vba` and `vba-xls`, kind
+/// amplification): an 80 KB file whose modules all point at one bomb
+/// handed out 256 MiB of text copies. The text budget follows the
+/// project's source budget: here one stream's worth (16 MiB) times 6.
+#[test]
+fn shared_source_text_follows_the_source_budget() {
+    let modules: Vec<ModuleSpec> = (0..400)
+        .map(|i| {
+            let mut m = ModuleSpec::standard(&format!("M{i}"), "");
+            m.stream = "Shared".into();
+            m.pcode = 0;
+            m
+        })
+        .collect();
+    let mut s = Streams::new(1252, &modules);
+    s.set("VBA/Shared", common::bomb(256));
+    match read_vba_project_bin(&s.to_bin()) {
+        Err(VbaError::LimitExceeded { limit, max }) => {
+            assert_eq!(limit, "source text in the project");
+            assert_eq!(max, 6 * (16 << 20));
+        }
+        other => panic!(
+            "expected the text limit, got {:?}",
+            other.map(|p| p.modules.len())
+        ),
+    }
+}
+
 #[test]
 fn probe_overlapping_offsets_into_one_stream() {
     // `01 00 B0` repeated is a valid container at every multiple of 3 (each
