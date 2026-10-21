@@ -538,3 +538,29 @@ test("~/bin/heavy still says \"nothing was run\" before exit 75", { skip: !heavy
     assert.match(before, /echo "heavy: .*nothing was run/, `exit 75 on line ${i + 1} without the "nothing was run" line`);
   }
 });
+
+test("release-check: a float ending in @ before a string is not an email address", (t) => {
+  const dir = scratch(t);
+  const release = join(dir, "target", "x86_64-unknown-linux-gnu", "release");
+  mkdirSync(release, { recursive: true });
+  const binary = join(release, "carrysheet-cli");
+  const check = (bytes) => {
+    writeFileSync(binary, bytes);
+    return spawnSync(node, [join(scripts, "release-check.mjs"), "x86_64-unknown-linux-gnu", "--no-build"], {
+      encoding: "utf8", env: { ...process.env, CARGO_TARGET_DIR: join(dir, "target") },
+    });
+  };
+  // 24.0 as a little-endian f64 ends in "8@", and the next string follows at once.
+  const float = Buffer.alloc(8);
+  float.writeDoubleLE(24);
+  const near = check(Buffer.concat([Buffer.alloc(16), float, Buffer.from("parsed.formula_reference"), Buffer.alloc(16)]));
+  assert.equal(near.status, 0, near.stdout + near.stderr);
+  assert.match(near.stdout, /Privacy check: clean/);
+
+  const real = check(Buffer.concat([Buffer.alloc(16), Buffer.from("jo@example.org"), Buffer.alloc(16)]));
+  assert.equal(real.status, 1, real.stdout + real.stderr);
+  assert.match(real.stdout, /1 x email address/);
+
+  const ours = check(Buffer.concat([Buffer.alloc(16), Buffer.from("support@carrysheet.com"), Buffer.alloc(16)]));
+  assert.equal(ours.status, 0, ours.stdout + ours.stderr);
+});

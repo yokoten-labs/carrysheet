@@ -1,0 +1,25 @@
+[package]
+name = "carrysheet-kernel"
+version = "0.1.0"
+description = "Carrysheet's calculation kernel: the command layer's Engine on GridCraft (vendored)."
+license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+carrysheet-commands = { path = "../carrysheet-commands", version = "0.1.0" }
+carrysheet-model = { path = "../carrysheet-model", version = "0.1.0" }
+gridcraft-engine = { path = "../../vendor/gridcraft/crates/engine", version = "0.8.0" }
+gridcraft-xlsx = { path = "../../vendor/gridcraft/crates/xlsx", version = "0.8.0" }
+serde_json = { version = "1", features = ["preserve_order"] }
+# Lists package parts for the save report; the version GridCraft uses.
+zip = { version = "=9.0.2", default-features = false, features = ["deflate-flate2"] }
+
+[dev-dependencies]
+# Builds deflate streams for the hostile-file tests; the version GridCraft uses.
+flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
+
+[lints]
+workspace = true

@@ -291,7 +291,7 @@ fn dry_run_only_on_commands_that_change_files() {
 
     let o = run_in(&home, &["convert", book, "out.csv", "--dry-run", "--json"]);
     assert_eq!(code(&o), 1);
-    assert_eq!(error_json(&o)["code"], "not_implemented");
+    assert_eq!(error_json(&o)["code"], "damaged_file");
 }
 
 #[test]
@@ -309,7 +309,7 @@ fn every_unbuilt_command_says_not_implemented() {
         let mut argv: Vec<String> = table.cli_path.iter().map(|s| s.to_string()).collect();
         for a in table.all_args().into_iter().filter(|a| a.required) {
             if !a.positional {
-                argv.push(format!("--{}", a.name.replace('_', "-")));
+                argv.push(a.flag());
             }
             argv.push(match a.ty {
                 ArgType::Path if a.name == "path" => book.clone(),
@@ -489,7 +489,7 @@ fn deleting_or_overwriting_needs_confirm() {
         args.extend(extra);
         let o = run_in(&home, &args);
         assert_eq!(code(&o), 1, "{args:?}");
-        assert_eq!(error_json(&o)["code"], "not_implemented", "{args:?}");
+        assert_eq!(error_json(&o)["code"], "damaged_file", "{args:?}");
     }
 
     let o = run_in(
@@ -509,7 +509,7 @@ fn deleting_or_overwriting_needs_confirm() {
             "--json",
         ],
     );
-    assert_eq!(error_json(&o)["code"], "not_implemented");
+    assert_eq!(error_json(&o)["code"], "damaged_file");
 }
 
 #[test]
@@ -521,6 +521,78 @@ fn exit_code_3_is_reserved_for_nothing_to_do() {
             .code(),
         3
     );
+}
+
+#[test]
+fn the_core_path_works_from_the_command_line() {
+    let home = temp_home();
+    let csv = home.join("prices.csv");
+    std::fs::write(&csv, "Item,Price\nTea,3\nCake,4.5\n").unwrap();
+    let csv = csv.to_str().unwrap();
+    let book = home.join("prices.xlsx");
+    let book = book.to_str().unwrap();
+
+    let o = run_in(&home, &["convert", csv, book, "--json"]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert_eq!(json_only(&o)["written"], true);
+
+    let ops = r#"[{"op":"set_formula","target":"C2:C3","value":"B2*2"}]"#;
+    let o = run_in(&home, &["edit", book, "--ops", ops, "--dry-run", "--json"]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert_eq!(json_only(&o)["written"], false);
+    let o = run_in(&home, &["edit", book, "--ops", ops, "--json"]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    let edited = json_only(&o)["output"].as_str().unwrap().to_owned();
+    assert!(edited.ends_with("prices-edited.xlsx"), "{edited}");
+    let edited = home.join("prices-edited.xlsx");
+    let edited = edited.to_str().unwrap();
+
+    let o = run_in(&home, &["read", edited, "A2:C3", "--json"]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    let cells = json_only(&o)["rows"][1]["cells"].clone();
+    assert_eq!(cells, serde_json::json!(["Cake", 4.5, 9.0]));
+    // For people, whole numbers read as numbers, not as 6.0.
+    let o = run_in(&home, &["read", edited, "A2:C2"]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert!(stdout(&o).contains("2\tTea\t3\t6\n"), "{}", stdout(&o));
+
+    let o = run_in(&home, &["eval", edited, "SUM(C:C)"]);
+    assert_eq!((code(&o), stdout(&o)), (0, "15\n".to_owned()));
+
+    // A damaged file is an error with a code, not a crash.
+    std::fs::write(home.join("broken.xlsx"), b"PK\x03\x04 not really").unwrap();
+    let broken = home.join("broken.xlsx");
+    let o = run_in(&home, &["overview", broken.to_str().unwrap(), "--json"]);
+    assert_eq!(code(&o), 1);
+    assert_eq!(error_json(&o)["code"], "damaged_file");
+}
+
+#[test]
+fn max_seconds_must_be_a_sensible_number() {
+    // Round 2, N5: the CLI may raise the 10 s limit, up to an hour.
+    for bad in ["0", "-1", "3601", "NaN", "inf"] {
+        let o = run(&["--json", "--max-seconds", bad, "overview", "a.xlsx"]);
+        assert_eq!(code(&o), 2, "{bad}: {}", stdout(&o));
+        let e = error_json(&o);
+        assert!(
+            ["invalid_argument", "usage"].contains(&e["code"].as_str().unwrap()),
+            "{bad}: {e}"
+        );
+    }
+    let home = temp_home();
+    let missing = home.join("none.xlsx");
+    let o = run_in(
+        &home,
+        &[
+            "overview",
+            missing.to_str().unwrap(),
+            "--max-seconds",
+            "60",
+            "--json",
+        ],
+    );
+    // The flag is accepted; the file is what fails.
+    assert_eq!(error_json(&o)["code"], "file_not_found", "{}", stdout(&o));
 }
 
 #[cfg(feature = "query")]

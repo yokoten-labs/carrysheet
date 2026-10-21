@@ -153,8 +153,10 @@ function scan(bytes) {
 
   // Any email address except the project's own public ones (support@...).
   // Strings sit back to back in the binary, so a match can run on into the
-  // next word; compare the domain by prefix.
-  const email = /[a-z0-9._%+-]+@([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})/g;
+  // next word; compare the domain by prefix. At least two characters before the
+  // @: a float constant ending in 0x40 (`@`) can put one letter-like byte before
+  // it and the next string after it, which looked like an address three times.
+  const email = /[a-z0-9._%+-]{2,}@([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})/g;
   for (const m of lower.toString("latin1").matchAll(email)) {
     if (PUBLIC_EMAIL_DOMAINS.some((d) => m[1].startsWith(d))) continue;
     findings.push({ kind: "email address", offset: m.index });
