@@ -1069,8 +1069,8 @@ mod keyed {
             }
         }
         for w in [
-            "x1", "é", "rem", "sub", "function", "open", "for", "output", "\"", "\"\"",
-            "'", "a.b", "ws.Cells", "Dim",
+            "x1", "é", "rem", "sub", "function", "open", "for", "output", "\"", "\"\"", "'", "a.b",
+            "ws.Cells", "Dim",
         ] {
             words.push(w.to_string());
         }
@@ -1171,7 +1171,10 @@ mod keyed {
             }
         }
         assert!(procs > 1_000, "{procs} procedure lines");
-        assert!(long_lines > 0 && capped_lines > 0, "{long_lines} {capped_lines}");
+        assert!(
+            long_lines > 0 && capped_lines > 0,
+            "{long_lines} {capped_lines}"
+        );
         for (r, found) in RULES.iter().zip(&found) {
             let module_only =
                 matches!(r.pattern, Pattern::Module(c) if c != ModuleCheck::OverlongLine);
@@ -1186,9 +1189,9 @@ mod keyed {
     }
 
     /// 16 MiB of ordinary code took 1.2 s to scan in release before the
-    /// word filter (issue 53). The filter does not help a crafted line
-    /// that holds every key the filter looks for, in a string where no
-    /// rule matches it; that case shows the worst cost per MiB. Run in
+    /// word filter (issue 53). The filter does not help crafted lines that
+    /// hold the keys it looks for in strings, where no rule matches them:
+    /// one line with every key, or one key per line. Run in
     /// release to see the times:
     /// `cargo test --release -p carrysheet-vba --lib speed -- --ignored --nocapture`.
     #[test]
@@ -1204,9 +1207,14 @@ mod keyed {
                 }
             }
         }
-        let crafted = format!("x = \"{}\" & y\r\n", keys.join(" "));
-        let crafted = crafted.repeat((16 << 20) / crafted.len() + 1);
-        let sources = [("ordinary code", ordinary(16 << 20)), ("crafted lines", crafted)];
+        let fill = |line: String| line.repeat((16 << 20) / line.len() + 1);
+        let every_key = fill(format!("x = \"{}\" & y\r\n", keys.join("\" & \"")));
+        let one_key: String = keys.iter().map(|k| format!("x = \"{k}\"\r\n")).collect();
+        let sources = [
+            ("ordinary code", ordinary(16 << 20)),
+            ("lines with every key", every_key),
+            ("lines with one key", fill(one_key)),
+        ];
         for (what, src) in sources {
             for keyed in [true, false] {
                 let t = std::time::Instant::now();
