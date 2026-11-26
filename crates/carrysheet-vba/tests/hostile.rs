@@ -158,10 +158,10 @@ fn source_bomb_hits_the_limit() {
 /// That 479 KB file decompressed to 256 MiB of source, and reading it took
 /// 12.7 s and about 300 MiB in a release build (issue 53). This test
 /// builds a file of the same shape, about 420 KB.
-/// Decompressing is fast (26 ms per 16 MiB); the time goes into what
-/// follows for each 16 MiB source (about 0.8 s each). Fixed by one source
-/// budget for the whole project, tied to the storage size
-/// (`Limits::max_source_ratio`).
+/// Decompressing is fast (26 ms per 16 MiB); the time went into scanning
+/// each 16 MiB source after it. Fixed by one source budget for the whole
+/// project, tied to the storage size (`Limits::max_source_ratio`): the
+/// read now stops at the project limit after the first bomb.
 #[test]
 fn bomb_behind_every_module_reads_fast() {
     let modules: Vec<ModuleSpec> = (0..16)
@@ -176,8 +176,16 @@ fn bomb_behind_every_module_reads_fast() {
     let bin = s.to_bin();
     assert!(bin.len() < 512 << 10);
     let start = std::time::Instant::now();
-    let _ = read_vba_project_bin(&bin);
+    let result = read_vba_project_bin(&bin);
     let took = start.elapsed();
+    match result {
+        Err(e @ VbaError::LimitExceeded { limit, max }) => {
+            assert_eq!(limit, "decompressed source bytes in the project");
+            assert_eq!(max, 16 << 20);
+            assert_explained(&e);
+        }
+        other => panic!("expected LimitExceeded, got {other:?}"),
+    }
     eprintln!("16 module bombs, {} bytes: {took:?}", bin.len());
     assert!(
         took < std::time::Duration::from_secs(2),
