@@ -709,7 +709,9 @@ fn errors_say_why_sqlite_refused() {
         )
         .unwrap_err();
     assert_eq!(err.code, QueryErrorCode::TooLarge, "{err}");
-    assert!(err.why.contains("200 tables"), "{err}");
+    // SQLite 3.54 stops this chain at 500 open tables before the 200 FROM
+    // terms; both explanations name the doubling WITH chain.
+    assert!(err.why.contains("each use of a WITH table"), "{err}");
 }
 
 #[test]

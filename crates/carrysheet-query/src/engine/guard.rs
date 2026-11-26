@@ -189,7 +189,7 @@ pub const ALLOWED_READS: &[&str] = &[
 /// Locks the loaded database: SQLite limits, linear string functions,
 /// `query_only`, then the authorizer, which records what it saw in `seen`.
 pub(crate) fn lock(
-    conn: &Connection,
+    conn: &mut Connection,
     limits: &Limits,
     tables: &[String],
     seen: Arc<Mutex<Seen>>,
@@ -557,45 +557,46 @@ impl Drop for Watchdog {
     }
 }
 
-/// Installs a progress handler that stops the query after `limits.max_steps`
-/// steps or `limits.max_time`, and records which in `stopped`.
-/// `start` is when the query was asked for: waiting for another query counts
-/// toward `limits.max_time`. Keep the returned [`Watchdog`] until the query
-/// is done.
-pub(crate) fn watch(
-    conn: &Connection,
-    limits: &Limits,
-    start: Instant,
+/// The progress handler's state for the running query. rusqlite 0.41 sets a
+/// handler only through `&mut Connection`, and a query holds its statement
+/// (a shared borrow) while it runs, so [`meter`] installs one handler on load
+/// and [`watch`] and [`unwatch`] switch it on and off per query.
+#[derive(Debug, Default)]
+pub(crate) struct Meter {
+    /// Whether a query is being watched; off, the handler lets SQLite run.
+    armed: AtomicBool,
+    /// Handler calls so far in this query.
+    checks: AtomicU64,
+    /// Calls allowed: `limits.max_steps` in units of [`STEPS_PER_CHECK`].
+    max_checks: AtomicU64,
+    /// Read the clock every this many calls; between, read the flag.
+    every: AtomicU64,
+}
+
+/// Installs the progress handler, switched off. While a [`watch`] is on, it
+/// stops the query after `limits.max_steps` steps or `limits.max_time`, and
+/// records which in `stopped`.
+pub(crate) fn meter(
+    conn: &mut Connection,
     stopped: Arc<AtomicU8>,
-    late: &Arc<Late>,
-) -> Result<Watchdog> {
-    stopped.store(STOPPED_NONE, Ordering::Relaxed);
-    let max_checks = limits.max_steps.div_ceil(STEPS_PER_CHECK).max(1);
-    let late = Arc::clone(late);
-    let deadline = start.checked_add(limits.max_time);
-    late.start(deadline);
-    let watchdog = match deadline {
-        Some(deadline) => Watchdog::start(deadline, Arc::clone(&late)),
-        None => Watchdog { alarm: None },
-    };
-    // Without a timer thread, read the clock every time: slower, same limit.
-    let every = if watchdog.alarm.is_none() {
-        1
-    } else {
-        CHECKS_PER_CLOCK
-    };
-    let mut checks = 0u64;
+    late: Arc<Late>,
+) -> Result<Arc<Meter>> {
+    let meter = Arc::new(Meter::default());
+    let state = Arc::clone(&meter);
     let period = i32::try_from(STEPS_PER_CHECK).unwrap_or(i32::MAX);
     conn.progress_handler(
         period,
         Some(move || {
-            checks += 1;
-            let time_up = if checks.is_multiple_of(every) {
+            if !state.armed.load(Ordering::Relaxed) {
+                return false;
+            }
+            let checks = state.checks.fetch_add(1, Ordering::Relaxed) + 1;
+            let time_up = if checks.is_multiple_of(state.every.load(Ordering::Relaxed)) {
                 late.passed()
             } else {
                 late.flagged()
             };
-            let why = if checks > max_checks {
+            let why = if checks > state.max_checks.load(Ordering::Relaxed) {
                 STOPPED_STEPS
             } else if time_up {
                 STOPPED_TIME
@@ -606,12 +607,44 @@ pub(crate) fn watch(
             true
         }),
     )?;
-    Ok(watchdog)
+    Ok(meter)
 }
 
-/// Removes the progress handler.
-pub(crate) fn unwatch(conn: &Connection) -> Result<()> {
-    conn.progress_handler(0, None::<fn() -> bool>)
+/// Switches the progress handler on for one query.
+/// `start` is when the query was asked for: waiting for another query counts
+/// toward `limits.max_time`. Keep the returned [`Watchdog`] until the query
+/// is done.
+pub(crate) fn watch(
+    meter: &Meter,
+    limits: &Limits,
+    start: Instant,
+    stopped: &AtomicU8,
+    late: &Arc<Late>,
+) -> Watchdog {
+    stopped.store(STOPPED_NONE, Ordering::Relaxed);
+    let max_checks = limits.max_steps.div_ceil(STEPS_PER_CHECK).max(1);
+    let deadline = start.checked_add(limits.max_time);
+    late.start(deadline);
+    let watchdog = match deadline {
+        Some(deadline) => Watchdog::start(deadline, Arc::clone(late)),
+        None => Watchdog { alarm: None },
+    };
+    // Without a timer thread, read the clock every time: slower, same limit.
+    let every = if watchdog.alarm.is_none() {
+        1
+    } else {
+        CHECKS_PER_CLOCK
+    };
+    meter.checks.store(0, Ordering::Relaxed);
+    meter.max_checks.store(max_checks, Ordering::Relaxed);
+    meter.every.store(every, Ordering::Relaxed);
+    meter.armed.store(true, Ordering::Relaxed);
+    watchdog
+}
+
+/// Switches the progress handler off.
+pub(crate) fn unwatch(meter: &Meter) {
+    meter.armed.store(false, Ordering::Relaxed);
 }
 
 #[cfg(test)]
@@ -619,12 +652,12 @@ mod tests {
     use super::*;
 
     fn locked() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
         harden(&conn).unwrap();
         conn.execute_batch("CREATE TABLE t (x); INSERT INTO t VALUES (1);")
             .unwrap();
         lock(
-            &conn,
+            &mut conn,
             &Limits::default(),
             &["t".to_owned()],
             Arc::default(),
@@ -887,7 +920,7 @@ mod tests {
     #[test]
     fn the_handler_reads_the_clock() {
         use std::time::Duration;
-        let conn = locked();
+        let mut conn = locked();
         let limits = Limits {
             max_time: Duration::from_millis(50),
             max_steps: u64::MAX,
@@ -896,7 +929,8 @@ mod tests {
         let stopped = Arc::new(AtomicU8::new(STOPPED_NONE));
         let late = Arc::new(Late::default());
         let started = Instant::now();
-        let watchdog = watch(&conn, &limits, started, Arc::clone(&stopped), &late).unwrap();
+        let meter = meter(&mut conn, Arc::clone(&stopped), Arc::clone(&late)).unwrap();
+        let watchdog = watch(&meter, &limits, started, &stopped, &late);
         // No alarm: only the clock can stop the query now.
         drop(watchdog);
         let result = conn.query_row(
@@ -905,7 +939,7 @@ mod tests {
             |r| r.get::<_, i64>(0),
         );
         let took = started.elapsed();
-        unwatch(&conn).unwrap();
+        unwatch(&meter);
         assert_eq!(
             result.unwrap_err().sqlite_error_code(),
             Some(rusqlite::ErrorCode::OperationInterrupted)
