@@ -1029,51 +1029,153 @@ mod keyed {
         }
     }
 
-    /// Lines made of rule words, near misses, strings, comments and
-    /// continuations, scanned with and without the word filter.
+    /// Random sources of procedure headers, `Open ... For` lines, `Chr`
+    /// chains, comments, strings, continuations, overlong lines and rule
+    /// words with near misses, scanned with and without the word filter.
+    /// The plain scan must find every line-level rule at least once, so the
+    /// comparison covers every rule kind the filter can skip.
     #[test]
     fn the_word_filter_changes_no_finding() {
-        let mut pieces: Vec<String> = Vec::new();
+        let mut words: Vec<String> = Vec::new();
+        let mut names: Vec<String> = ["x", "Report_Build", "TextBox1", "_"]
+            .map(String::from)
+            .to_vec();
         for r in RULES {
             match r.pattern {
-                Pattern::Proc(w) | Pattern::ProcSuffix(w) | Pattern::Word(w) | Pattern::Text(w) => {
-                    pieces.push(w.to_string());
-                    pieces.push(w.to_ascii_uppercase());
-                    pieces.push(format!("{w}x"));
-                    pieces.push(format!("x{w}"));
-                    pieces.push(format!("\"{w}\""));
+                Pattern::Proc(w) => {
+                    names.push(w.to_string());
+                    names.push(w.to_ascii_uppercase());
+                    names.push(format!("{w}x"));
+                    names.push(format!("x{w}"));
+                }
+                Pattern::ProcSuffix(w) => {
+                    names.push(format!("textbox1{w}"));
+                    names.push(format!("CommandButton2{}", w.to_ascii_uppercase()));
+                    names.push(w.to_string());
+                    names.push(format!("x{w}x"));
+                }
+                Pattern::Word(w) | Pattern::Text(w) => {
+                    words.push(w.to_string());
+                    words.push(w.to_ascii_uppercase());
+                    words.push(format!("{w}x"));
+                    words.push(format!("x{w}"));
+                    words.push(format!("\"{w}\""));
+                    words.push(format!("\"x {w} x\""));
                 }
                 Pattern::Sequence(seq) | Pattern::Repeated(seq, _) => {
-                    pieces.extend(seq.iter().map(|w| w.to_string()));
+                    words.extend(seq.iter().map(|w| w.to_string()));
                 }
                 _ => {}
             }
         }
-        for p in [
-            " ", " ", "(", ")", ".", "$", "&", "\"", "'", "rem", "sub", "function", "private",
-            "static", "=", "_", " _\r\n", "\r\n", "\r\n", "\n", "\r", "é", "x1",
+        for w in [
+            "x1", "é", "rem", "sub", "function", "open", "for", "output", "\"", "\"\"",
+            "'", "a.b", "ws.Cells", "Dim",
         ] {
-            pieces.push(p.to_string());
+            words.push(w.to_string());
         }
-        pieces.push(format!("\"{}\"", "a".repeat(210)));
+        words.push(format!("\"{}\"", "a".repeat(199)));
+        words.push(format!("\"{}\"", "a".repeat(210)));
+        // Mostly real separators; "" fuses two words into one now and then.
+        let seps = [" ", " ", " ", " ", "(", ")", ".", ", ", " & ", "$", "=", ""];
+        let ends = ["\r\n", "\r\n", "\r\n", "\n", "\r", " _\r\n"];
         let mut seed = 0x9E37_79B9_7F4A_7C15u64;
-        let mut next = move || {
+        let mut next = move |n: usize| {
             seed ^= seed << 13;
             seed ^= seed >> 7;
             seed ^= seed << 17;
-            seed
+            (seed % n as u64) as usize
         };
+        let mut found = vec![false; RULES.len()];
+        let (mut procs, mut long_lines, mut capped_lines) = (0, 0, 0);
+        let mut line = Line::default();
         for round in 0..2_000 {
             let mut src = String::new();
-            for _ in 0..(next() % 60) {
-                src.push_str(&pieces[(next() % pieces.len() as u64) as usize]);
+            for _ in 0..next(24) {
+                let mut tail = next(4);
+                match next(16) {
+                    0..=3 => {
+                        src.push_str(["", "", "Private ", "public ", "friend "][next(5)]);
+                        src.push_str(["", "", "", "Static "][next(4)]);
+                        src.push_str(["Sub ", "Function ", "sub ", "FUNCTION "][next(4)]);
+                        src.push_str(&names[next(names.len())]);
+                        src.push_str(["()", "(ByVal x As Long)", " ()", ""][next(4)]);
+                    }
+                    4 => {
+                        src.push_str("Open ");
+                        tail = 0;
+                        for _ in 0..next(3) {
+                            src.push_str(&words[next(words.len())]);
+                            src.push(' ');
+                        }
+                        src.push_str(["For ", "for ", "Output ", ""][next(4)]);
+                        src.push_str(["Output", "append", "Binary", "Input", "for"][next(5)]);
+                        src.push_str(" As #1");
+                    }
+                    5 => {
+                        src.push_str("s = ");
+                        for k in 0..2 + next(5) {
+                            if k > 0 {
+                                src.push_str(" & ");
+                            }
+                            src.push_str(["Chr", "ChrW", "chrb", "Chr$", "xchr"][next(5)]);
+                            src.push_str("(65)");
+                        }
+                    }
+                    6 if next(32) == 0 => {
+                        // Over MAX_SCANNED_LINE, with rule words past the cut.
+                        let start = src.len();
+                        src.push_str("x = ");
+                        while src.len() - start < MAX_SCANNED_LINE + 32 {
+                            src.push_str("ab é ");
+                        }
+                        src.push_str(" Shell kill");
+                    }
+                    7 if next(32) == 0 => {
+                        // Past the cap of joined lines.
+                        for _ in 0..=MAX_JOINED_LINES {
+                            src.push_str("a _\r\n");
+                        }
+                        src.push_str("environ");
+                    }
+                    _ => tail = 1 + next(8),
+                }
+                for _ in 0..tail {
+                    src.push_str(seps[next(seps.len())]);
+                    src.push_str(&words[next(words.len())]);
+                }
+                src.push_str(ends[next(ends.len())]);
+            }
+            for (_, raw, capped) in logical_lines(&src) {
+                let mut cut = raw.len().min(MAX_SCANNED_LINE);
+                while !raw.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                split_line(&raw[..cut], &mut line);
+                procs += usize::from(proc_name(&line.code).is_some());
+                long_lines += usize::from(raw.len() > MAX_SCANNED_LINE);
+                capped_lines += usize::from(capped);
             }
             for events in [false, true] {
-                let fast = scan_lines(&src, 1_000, events, true);
-                let plain = scan_lines(&src, 1_000, events, false);
-                assert_eq!(fast.hits, plain.hits, "round {round}: {src:?}");
-                assert_eq!(fast.cut, plain.cut, "round {round}");
+                for room in [1_000, next(6)] {
+                    let fast = scan_lines(&src, room, events, true);
+                    let plain = scan_lines(&src, room, events, false);
+                    assert_eq!(fast.hits, plain.hits, "round {round}: {src:?}");
+                    assert_eq!(fast.cut, plain.cut, "round {round}");
+                    if room == 1_000 {
+                        for &(i, _) in &plain.hits {
+                            found[i] = true;
+                        }
+                    }
+                }
             }
+        }
+        assert!(procs > 1_000, "{procs} procedure lines");
+        assert!(long_lines > 0 && capped_lines > 0, "{long_lines} {capped_lines}");
+        for (r, found) in RULES.iter().zip(&found) {
+            let module_only =
+                matches!(r.pattern, Pattern::Module(c) if c != ModuleCheck::OverlongLine);
+            assert!(*found || module_only, "no line matched {}", r.id);
         }
     }
 
@@ -1083,21 +1185,38 @@ mod keyed {
         block.repeat(bytes / block.len() + 1)
     }
 
-    /// 16 MiB of ordinary code took 1.5 s to scan in release before the
-    /// word filter (issue 53). Run in release to see the time:
+    /// 16 MiB of ordinary code took 1.2 s to scan in release before the
+    /// word filter (issue 53). The filter does not help a crafted line
+    /// that holds every key the filter looks for, in a string where no
+    /// rule matches it; that case shows the worst cost per MiB. Run in
+    /// release to see the times:
     /// `cargo test --release -p carrysheet-vba --lib speed -- --ignored --nocapture`.
     #[test]
     #[ignore = "speed probe, prints times; run in release"]
     fn scan_speed_probe() {
-        let src = ordinary(16 << 20);
-        for keyed in [true, false] {
-            let t = std::time::Instant::now();
-            let scan = scan_lines(&src, 1_000_000, true, keyed);
-            eprintln!(
-                "16 MiB of ordinary code, word filter {keyed}: {:?}, {} findings",
-                t.elapsed(),
-                scan.hits.len()
-            );
+        let mut keys: Vec<&str> = Vec::new();
+        for r in RULES {
+            for k in rule_keys(&r.pattern) {
+                // A `Text` key is the needle's first word; alone in a
+                // string it matches only when it is the whole needle.
+                if !matches!(r.pattern, Pattern::Text(w) if w == k) {
+                    keys.push(k);
+                }
+            }
+        }
+        let crafted = format!("x = \"{}\" & y\r\n", keys.join(" "));
+        let crafted = crafted.repeat((16 << 20) / crafted.len() + 1);
+        let sources = [("ordinary code", ordinary(16 << 20)), ("crafted lines", crafted)];
+        for (what, src) in sources {
+            for keyed in [true, false] {
+                let t = std::time::Instant::now();
+                let scan = scan_lines(&src, 1_000_000, true, keyed);
+                eprintln!(
+                    "16 MiB of {what}, word filter {keyed}: {:?}, {} findings",
+                    t.elapsed(),
+                    scan.hits.len()
+                );
+            }
         }
     }
 

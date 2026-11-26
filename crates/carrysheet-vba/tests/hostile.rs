@@ -155,8 +155,9 @@ fn source_bomb_hits_the_limit() {
 
 /// fuzzlite finding (2026-10-20, target `vba`, kind amplification): a
 /// bomb just under the 16 MiB per-stream limit behind each of 16 modules.
-/// The 479 KB file decompresses to 256 MiB of source, inside the default
-/// limits, and reading took 12.7 s and about 300 MiB in a release build.
+/// That 479 KB file decompressed to 256 MiB of source, and reading it took
+/// 12.7 s and about 300 MiB in a release build (issue 53). This test
+/// builds a file of the same shape, about 420 KB.
 /// Decompressing is fast (26 ms per 16 MiB); the time goes into what
 /// follows for each 16 MiB source (about 0.8 s each). Fixed by one source
 /// budget for the whole project, tied to the storage size
