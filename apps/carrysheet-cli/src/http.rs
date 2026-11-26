@@ -599,8 +599,8 @@ impl Refusal {
                 StatusCode::PAYLOAD_TOO_LARGE => Refusal::TooLarge,
                 StatusCode::FORBIDDEN => Refusal::Forbidden,
                 StatusCode::NOT_FOUND => Refusal::NotFound,
-                // The Content-Type was checked before: a 415 from rmcp means
-                // the body did not parse.
+                // The Content-Type was checked before, by the same essence
+                // match rmcp uses: a 415 from rmcp means the body did not parse.
                 s if s.is_client_error() => Refusal::BadRequest,
                 _ => Refusal::Internal,
             });
@@ -844,7 +844,10 @@ impl Guard {
                 .unwrap_or_default()
                 .to_ascii_lowercase()
         };
-        if !text(header::CONTENT_TYPE).starts_with("application/json") {
+        let content_type = text(header::CONTENT_TYPE);
+        // The media type alone, as rmcp 3.9.0 reads it: parameters are fine,
+        // a longer name such as application/jsonx is not.
+        if content_type.split(';').next().unwrap_or_default().trim() != "application/json" {
             return Err(Refusal::UnsupportedMediaType);
         }
         let accept = text(header::ACCEPT);
@@ -1071,7 +1074,7 @@ pub async fn serve(
     // With `json_response`, rmcp answers a stateless request with JSON, but
     // falls back to an event stream if the handler sends a notification or
     // request before its result (rmcp 3.9.0, transport/streamable_http_server/
-    // tower.rs:2443). That stream would outlive the request timeout. Our
+    // tower.rs:2485). That stream would outlive the request timeout. Our
     // tools never send one; `every_tool_answers_with_plain_json` in the tests
     // fails if that changes.
     let config = StreamableHttpServerConfig::default()

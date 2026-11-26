@@ -183,8 +183,8 @@ fn values_and_formulas_match_calamine() {
             println!("{file}: we refuse it (see samples.rs)");
             continue;
         };
-        // calamine 0.38 panics on some damaged files; that is calamine's
-        // problem, not a difference to report.
+        // No file panics in calamine 0.38 today; the catch stays as a guard.
+        // A panic is calamine's problem, not a difference to report.
         let mut part = Tally::default();
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             compare(&file, &book, &bytes, &mut part)

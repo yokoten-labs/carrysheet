@@ -55,7 +55,7 @@ Files from calamine
 -------------------
 
 The .xls files in calamine/ come unchanged from the test data of calamine
-0.38.0 (tests/ in https://github.com/tafia/calamine), which is licensed under
+0.37.0 (tests/ in https://github.com/tafia/calamine), which is licensed under
 the MIT License: Copyright (c) 2016 Johann Tuffe. The full license text is in
 calamine/LICENSE-MIT.
 

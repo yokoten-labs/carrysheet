@@ -48,8 +48,9 @@ tokio = { version = "1", default-features = false, features = ["rt", "io-std", "
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 
 # `mcp serve --http` raises the soft open-file limit (macOS starts programs
-# with 256). Already in Cargo.lock through clap's terminal_size; 1.1.5 was
-# published 2026-09-16. Its getrlimit and setrlimit are safe functions.
+# with 256). Already in Cargo.lock through clap's terminal_size; 1.1.6 was
+# published 2026-10-27, floor raised for RUSTSEC-2026-0486. Its getrlimit
+# and setrlimit are safe functions.
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1.6", default-features = false, features = ["std", "process"] }
 
