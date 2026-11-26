@@ -5,6 +5,14 @@ error codes are the public interface (`carrysheet-cli commands --json`).
 
 ## Unreleased
 
+### Security
+
+- **zip 9.0.5.** Fixes RUSTSEC-2026-0548 (local header names that differ from the
+  central directory in the streaming reader). Carrysheet only reads archives
+  through the central directory and never extracts or streams, so it is not
+  affected and needs no new check. Also updated for the same cargo-deny run:
+  calamine 0.38 (dev only, drops zip 8), rmcp 3.9.0 and rustix 1.1.6.
+
 ### Breaking changes for scripts
 
 - **Saving content a file would lose needs `confirm_loss`.** `edit` and

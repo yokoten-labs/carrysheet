@@ -15,7 +15,7 @@ gridcraft-engine = { path = "../../vendor/gridcraft/crates/engine", version = "0
 gridcraft-xlsx = { path = "../../vendor/gridcraft/crates/xlsx", version = "0.8.0" }
 serde_json = { version = "1", features = ["preserve_order"] }
 # Lists package parts for the save report; the version GridCraft uses.
-zip = { version = "=9.0.2", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 # Builds deflate streams for the hostile-file tests; the version GridCraft uses.

@@ -27,16 +27,7 @@ yanked = "deny"
 # and an `expiry`, so it is looked at again.
 unmaintained = "all"
 unsound = "all"
-# zip 8.x (RUSTSEC-2026-0367/0368/0369): unsafe permissions and symlinks in
-# ZipArchive::extract. Only calamine 0.36 pulls zip in, as a dev-dependency of
-# carrysheet-biff for its differential test, which never extracts an archive.
-# The fix is zip 9, which needs calamine 0.37 (released 2026-10-18, inside the
-# 7-day wait). Move to calamine 0.37 and drop these after 2026-10-25.
-ignore = [
-    { id = "RUSTSEC-2026-0367", reason = "dev-only zip via calamine 0.36; extract() unused" },
-    { id = "RUSTSEC-2026-0368", reason = "dev-only zip via calamine 0.36; extract() unused" },
-    { id = "RUSTSEC-2026-0369", reason = "dev-only zip via calamine 0.36; extract() unused" },
-]
+ignore = []
 
 [licenses]
 # Allowed for everything, because crates/ (MIT OR Apache-2.0) may only use

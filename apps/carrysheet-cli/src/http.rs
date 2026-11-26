@@ -1070,8 +1070,8 @@ pub async fn serve(
     //
     // With `json_response`, rmcp answers a stateless request with JSON, but
     // falls back to an event stream if the handler sends a notification or
-    // request before its result (rmcp 3.5.1, transport/streamable_http_server/
-    // tower.rs:2354). That stream would outlive the request timeout. Our
+    // request before its result (rmcp 3.9.0, transport/streamable_http_server/
+    // tower.rs:2443). That stream would outlive the request timeout. Our
     // tools never send one; `every_tool_answers_with_plain_json` in the tests
     // fails if that changes.
     let config = StreamableHttpServerConfig::default()
