@@ -177,6 +177,7 @@ fn bomb_behind_every_module_reads_fast() {
     let start = std::time::Instant::now();
     let _ = read_vba_project_bin(&bin);
     let took = start.elapsed();
+    eprintln!("16 module bombs, {} bytes: {took:?}", bin.len());
     assert!(
         took < std::time::Duration::from_secs(2),
         "a {}-byte file took {took:?}",
