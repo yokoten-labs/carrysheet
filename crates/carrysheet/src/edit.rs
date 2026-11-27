@@ -146,10 +146,10 @@ pub fn parse_ops(ops: &Value) -> Result<Vec<EditOp>, CommandError> {
 
 fn parse_op(i: usize, item: Operation) -> Result<EditOp, CommandError> {
     let kind = item.op;
-    // GridCraft checks the rest of Excel's rules when the operation runs.
+    // Excel counts UTF-16 units, GridCraft counts characters; GridCraft checks the rest.
     let check_new_name = |name: &str| {
-        if name.chars().any(char::is_control) {
-            let why = "the new sheet name contains a control character";
+        if name.chars().any(char::is_control) || name.encode_utf16().count() > 31 {
+            let why = "the new sheet name has a control character or is too long for Excel";
             let fix = "Use 1 to 31 characters without : \\ / ? * [ ].";
             return Err(op_error(i, why, fix));
         }

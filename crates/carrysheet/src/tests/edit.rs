@@ -41,6 +41,10 @@ fn bad_ops_name_their_index() {
             ErrorCode::InvalidArgument,
         ),
         (
+            json!([{ "op": "add_sheet", "target": "\u{1F600}".repeat(16) }]),
+            ErrorCode::InvalidArgument,
+        ),
+        (
             json!([{ "op": "set_value", "target": "A:Z", "value": 1 }]),
             ErrorCode::LimitExceeded,
         ),
