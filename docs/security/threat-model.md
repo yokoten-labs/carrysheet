@@ -90,8 +90,6 @@ characters; XML with a DOCTYPE and entities.
 - Overflow checks in release builds ([issue 59][i59]).
 - GridCraft's xls, xlsb and ods readers, which we have not reviewed
   ([issue 71][i71]). They are the only readers of those formats now.
-- Spreadsheets inside `.zip`, `.gz` and `.tar`: read in memory, never
-  extracted, names treated as data ([issue 49][i49], planned).
 
 **Not defended:** a file that is valid but wrong (bad numbers, misleading
 formulas). We read it faithfully; judging it is the user's job.
@@ -291,7 +289,6 @@ Please do not open a public issue. Follow [SECURITY.md](../../SECURITY.md).
 [i26]: https://github.com/yokoten-labs/carrysheet/issues/26
 [i27]: https://github.com/yokoten-labs/carrysheet/issues/27
 [i43]: https://github.com/yokoten-labs/carrysheet/issues/43
-[i49]: https://github.com/yokoten-labs/carrysheet/issues/49
 [i50]: https://github.com/yokoten-labs/carrysheet/issues/50
 [i51]: https://github.com/yokoten-labs/carrysheet/issues/51
 [i52]: https://github.com/yokoten-labs/carrysheet/issues/52
