@@ -62,5 +62,5 @@ Official MCP Registry (preview) takes `server.json` with `registryType: "cargo"`
 
 - [modelcontextprotocol/conformance](https://github.com/modelcontextprotocol/conformance): server tests need an HTTP URL; run against both spec versions with an expected-failures baseline.
 - MCP Inspector CLI: `npx @modelcontextprotocol/inspector --cli carrysheet-cli mcp serve --method tools/list`.
-- Lint every schema for the Claude, Gemini and OpenAI-strict rules on every change (locally through `scripts/check.mjs`; in CI once the repository is public).
+- Lint every schema for the Claude, Gemini and OpenAI-strict rules on every change (in CI once the repository is public).
 - Run real clients headless (`claude -p`, `codex exec`, `gemini -p`) against golden workbooks; record 0005 asks for one client each from Anthropic, OpenAI and Google, plus one local open model, before each release.

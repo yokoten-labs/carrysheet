@@ -95,7 +95,7 @@ Carrysheet is a small, fast, native spreadsheet written in Rust. The first relea
 | `crates/` | Libraries: the join to the vendored GridCraft kernel, the workbook model, the command layer, and the hardened zip reader | MIT OR Apache-2.0 |
 | `apps/` | Programs: `carrysheet-cli` (with MCP), later the desktop app | GPL-3.0-or-later |
 | `research/` | Experiments such as the kernel comparison; its own Cargo workspace | MIT OR Apache-2.0 |
-| `scripts/` | Node scripts: the full check, the release check, the line cap | MIT OR Apache-2.0 |
+| `scripts/` | Node scripts: the line cap and the vendor check | MIT OR Apache-2.0 |
 | `vendor/gridcraft/` | Upstream GridCraft, the kernel that reads and writes the file formats | MIT OR Apache-2.0 (upstream's) |
 
 Every crate sets `license` in its `Cargo.toml` to match its folder. A library must never depend on anything in `apps/`.
@@ -135,7 +135,7 @@ The CLI and MCP server follow `docs/agents.md`. In short: `--json` everywhere wi
 ### Working on this machine
 
 - The development machine is shared: build with `CARGO_BUILD_JOBS=1` and `nice -n 10`, and never run two builds at once.
-- Builds share one compile cache through sccache, set in the user's global cargo config (`~/.cargo/config.toml`: `rustc-wrapper`, incremental builds off). Each worktree keeps its own `target/`. Never turn on incremental builds, override the wrapper (`RUSTC_WRAPPER`), or vary `RUSTFLAGS` or `CARGO_TARGET_DIR` from run to run in a committed file or script: each makes the cache miss. If you really need incremental builds for a while, set `CARGO_INCREMENTAL=1` in your shell only; don't edit `.cargo/config.toml`, which is committed (a change makes the tree dirty, and the merge run refuses it).
+- Builds share one compile cache through sccache, set in the user's global cargo config (`~/.cargo/config.toml`: `rustc-wrapper`, incremental builds off). Each worktree keeps its own `target/`. Never turn on incremental builds, override the wrapper (`RUSTC_WRAPPER`), or vary `RUSTFLAGS` or `CARGO_TARGET_DIR` from run to run in a committed file or script: each makes the cache miss. If you really need incremental builds for a while, set `CARGO_INCREMENTAL=1` in your shell only; don't edit `.cargo/config.toml`, which is committed (a change makes the tree dirty).
 - Rust is in `~/.cargo/bin` (add it to `PATH`). Windows targets build with mingw: `x86_64-pc-windows-gnu`, `i686-pc-windows-gnu`.
 - CI runs the jobs of `.github/workflows/ci.yml` on every PR; merge only when CI is green. On the shared development machine, run only the checks for the crates you changed.
 - Never write the owner's email, Windows user name, or absolute home paths into files, commits, PRs or output. Use `~` or `<user>`.
