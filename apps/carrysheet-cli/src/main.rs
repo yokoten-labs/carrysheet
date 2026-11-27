@@ -1,5 +1,5 @@
 //! `carrysheet-cli`: Carrysheet on the command line, generated from the
-//! command table in `carrysheet::commands`.
+//! argument structs in `carrysheet::args`.
 //!
 //! Exit codes: 0 done, 1 failed, 2 usage error, 3 nothing to do.
 

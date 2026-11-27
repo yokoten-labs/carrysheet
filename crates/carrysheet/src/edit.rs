@@ -9,7 +9,8 @@ use std::sync::Arc;
 use gridcraft_engine::core::{CellRef, RangeRef, col_to_letters};
 use gridcraft_engine::model::{Sheet, Workbook};
 use gridcraft_engine::{EngineError, Session};
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::args::{input, shown, text};
@@ -26,7 +27,7 @@ use crate::{Answer, Kernel, internal};
 pub const MAX_LISTED_CHANGES: usize = 200;
 
 /// What an operation does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum EditKind {
     SetValue,

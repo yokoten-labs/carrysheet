@@ -1,18 +1,27 @@
 [package]
 name = "carrysheet"
 version = "0.1.0"
-description = "Carrysheet as a library: the commands, their table and schemas, on the GridCraft kernel (vendored). Bytes in, JSON out."
+description = "Carrysheet as a library: the commands, their arguments and schemas, on the GridCraft kernel (vendored). Bytes in, JSON out."
 license = "MIT OR Apache-2.0"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
+[features]
+# The command-line flags of the argument structs in `src/args.rs` (clap's
+# derive). Only the program turns this on; the browser build has no clap.
+cli = ["dep:clap"]
+
 [dependencies]
 gridcraft-engine = { path = "../../vendor/gridcraft/crates/engine", version = "0.8.0" }
 gridcraft-xlsx = { path = "../../vendor/gridcraft/crates/xlsx", version = "0.8.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+# Writes each command's JSON schema from its argument struct (record 0010,
+# decision 6); the version rmcp already brings.
+schemars = "1.2"
+clap = { version = "4.5", default-features = false, features = ["std", "derive"], optional = true }
 # Lists and unpacks package parts for the save-loss report: the version
 # GridCraft pins, so both list a package's parts the same way.
 zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2"] }

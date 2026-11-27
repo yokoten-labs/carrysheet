@@ -1,7 +1,6 @@
 use crate::files::{Root, home_dir};
 use crate::mcp::*;
-use carrysheet::commands::schema::tool_definition;
-use carrysheet::commands::table::mcp_tools;
+use carrysheet::args::{mcp_tools, tool_definition};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 #[path = "../../../../crates/carrysheet/tests/lint/mod.rs"]

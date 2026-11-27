@@ -6,8 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use carrysheet::commands::schema::tool_definition;
-use carrysheet::commands::table::{COMMANDS, mcp_tools};
+use carrysheet::args::{COMMANDS, mcp_tools, tool_definition};
 use serde_json::Value;
 
 /// The schema lint is test code of the library (record 0010, step 3).

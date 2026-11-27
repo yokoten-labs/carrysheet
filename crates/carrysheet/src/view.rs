@@ -8,7 +8,8 @@ use std::fmt;
 
 use gridcraft_engine::core::{CellRef, DateSystem, RangeRef, Value as CellValue, col_to_letters};
 use gridcraft_engine::model::{Sheet, Workbook};
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::args::{detailed, input, number, shown, text};
@@ -47,7 +48,9 @@ pub struct Overview {
 }
 
 /// What to show for each cell in `read`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
+#[serde(rename_all = "snake_case")]
 pub enum ReadMode {
     #[default]
     Values,

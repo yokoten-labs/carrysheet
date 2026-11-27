@@ -92,7 +92,7 @@ Carrysheet is a small, fast, native spreadsheet written in Rust. The first relea
 
 | Folder | What | License |
 |---|---|---|
-| `crates/` | Libraries: `carrysheet`, the product as one library on the vendored GridCraft (`open`, `view`, `edit`, `save` with the save-loss report in `save/loss.rs`, `range`, `error`, `text` for text from files, and `commands` for the command table and its schemas). It takes bytes and gives back bytes: it has no file access. Unit tests sit in each crate's `src/tests/`, integration tests in `tests/` | MIT OR Apache-2.0 |
+| `crates/` | Libraries: `carrysheet`, the product as one library on the vendored GridCraft (`open`, `view`, `edit`, `save` with the save-loss report in `save/loss.rs`, `range`, `error`, `text` for text from files, `args` with one struct per command, and `commands` for the call limits and what callers import). It takes bytes and gives back bytes: it has no file access. Unit tests sit in each crate's `src/tests/`, integration tests in `tests/` | MIT OR Apache-2.0 |
 | `apps/` | Programs: `carrysheet-cli` (with MCP; all file access, the `--root` walk and home redaction are in `src/files.rs`), later the desktop app | GPL-3.0-or-later |
 | `research/` | Experiments such as the kernel comparison; its own Cargo workspace | MIT OR Apache-2.0 |
 | `scripts/` | Node scripts: the line cap and the vendor check | MIT OR Apache-2.0 |
@@ -116,6 +116,7 @@ You must never copy, translate or closely paraphrase code from GPL, LGPL, AGPL o
 - Text for people comes from one generic form in `apps/carrysheet-cli/src/output.rs`: a list of rows is a table, every other field is `key: value`. Do not write text by hand for one command. Every string from a file goes through `redact_home` and `carrysheet::text::escape` before it is printed.
 - The library never reads or writes files, and does not replace the home folder with `~`. The program does both in `apps/carrysheet-cli/src/files.rs`. Every error it shows goes through `redact_error` first (record 0010, decision 2).
 - Errors for people and agents have three parts: what happened, why, and how to fix it.
+- A command's arguments are one struct in `crates/carrysheet/src/args.rs`. Its flags, MCP schema and help are derived from it; never write a schema, a flag or a validator by hand (record 0010, decision 2). An argument that names a file or folder goes into `PATHS`, so `--root` confines it.
 - Tests use small files committed under the crate's `tests/data/` (made by us or from Apache POI's test data with its license noted). Never commit large corpora.
 
 ### The 5,000-line cap

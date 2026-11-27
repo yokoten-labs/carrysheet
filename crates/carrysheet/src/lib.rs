@@ -10,10 +10,12 @@
 //! - [`range`]: A1 ranges with a sheet name.
 //! - [`text`]: text from a file, made safe to show.
 //! - [`error`]: errors with a code, what, why and fix, and exit codes.
-//! - [`commands`]: the command table, its schemas, the limit values.
+//! - [`args`]: one struct per command: its flags, schema and checks.
+//! - [`commands`]: the names a caller needs, and the limit values.
 //!
 //! The program reads and writes the files (record 0010, decision 2).
 
+pub mod args;
 pub mod commands;
 pub mod edit;
 pub mod error;
@@ -34,8 +36,8 @@ use std::path::Path;
 use gridcraft_engine::core::limits::{self as gc, Exceeded};
 use serde_json::{Map, Value};
 
+use crate::args::Command;
 use crate::commands::limits as values;
-use crate::commands::table::Command;
 use crate::edit::{EditOp, EditResult};
 use crate::error::{CommandError, ErrorCode};
 use crate::open::{Book, MAX_FILE_BYTES};
@@ -95,49 +97,6 @@ pub fn run_within(
     // A limit that ran out wins over what the calls returned.
     kernel.end_call()?;
     result
-}
-
-/// Reading the checked arguments of a command.
-pub(crate) mod args {
-    use std::path::{Path, PathBuf};
-
-    use serde_json::{Map, Value, json};
-
-    use crate::error::CommandError;
-
-    pub(crate) fn text<'a>(args: &'a Map<String, Value>, name: &str) -> Option<&'a str> {
-        args.get(name).and_then(Value::as_str)
-    }
-
-    pub(crate) fn flag(args: &Map<String, Value>, name: &str) -> bool {
-        args.get(name).and_then(Value::as_bool) == Some(true)
-    }
-
-    pub(crate) fn number(args: &Map<String, Value>, name: &str) -> Option<u32> {
-        args.get(name)
-            .and_then(Value::as_u64)
-            .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
-    }
-
-    pub(crate) fn detailed(args: &Map<String, Value>) -> bool {
-        text(args, "response_format") == Some("detailed")
-    }
-
-    /// The workbook path; validation makes sure it is there.
-    pub(crate) fn input(args: &Map<String, Value>) -> Result<PathBuf, CommandError> {
-        text(args, "path").map(PathBuf::from).ok_or_else(|| {
-            CommandError::invalid_argument(
-                "path",
-                "no workbook was given",
-                "Name the workbook file, like book.xlsx.",
-            )
-        })
-    }
-
-    /// The program shows it with `~` for the home folder.
-    pub(crate) fn shown(path: &Path) -> Value {
-        json!(path.display().to_string())
-    }
 }
 
 /// GridCraft, with every call inside the limits and the panic guard.

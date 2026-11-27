@@ -13,7 +13,7 @@ The libraries in `crates/` work and are tested. Each one treats every file as ho
 
 - **Workbooks** (`carrysheet`, on the vendored GridCraft kernel): open `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xlsb`, `.ods`, `.xls` (BIFF8) and `.csv`, calculate formulas, and save as `.xlsx` or `.csv`. csv opens in its own encoding (UTF-8, UTF-16, GBK, Big5, Shift_JIS and others), and a field becomes a number only when nothing changes, so `007` and `SEPT1` stay as written. A save that would lose content needs `confirm_loss`.
 - **Macros**: `overview` says when an .xlsx, .xlsm or .xlsb file has macros (a VBA project or Excel 4 macro sheets), and says it did not check for .xls and .ods files. Carrysheet never runs them, and a save keeps them where the format can hold them; a save that would drop them needs `confirm_loss`.
-- **The command table** (`carrysheet::commands`): one list of commands that drives both the command line and the MCP tools, with JSON schemas that Claude, Gemini and OpenAI accept.
+- **The commands** (`carrysheet::args`): one struct per command that drives both the command line and the MCP tools, with JSON schemas that Claude, Gemini and OpenAI accept.
 
 `carrysheet-cli` runs `overview`, `read`, `eval`, `edit`, `convert`, `commands` and `mcp serve` (MCP over stdio). It never asks a question: pass `--yes` to confirm deleting, overwriting or a lossy save.
 

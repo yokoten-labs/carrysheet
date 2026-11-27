@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 use gridcraft_engine::io::FileKind;
 use gridcraft_engine::model::Workbook;
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::args::{flag, input, shown, text};
@@ -18,7 +19,8 @@ use crate::text::escape;
 use crate::{Answer, Kernel, internal};
 
 /// File formats Carrysheet writes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 pub enum FileFormat {
     Xlsx,
@@ -211,7 +213,7 @@ pub fn prepare_output(
     args: &mut Map<String, Value>,
     exists: &dyn Fn(&Path) -> bool,
 ) -> Result<Option<PathBuf>, CommandError> {
-    if command.arg("output").is_none() {
+    if !command.has_arg("output") {
         return Ok(None);
     }
     let path = input(args)?;
