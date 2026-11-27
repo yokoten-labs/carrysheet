@@ -309,13 +309,10 @@ pub(crate) fn source_features(bytes: &[u8]) -> Result<BTreeMap<&'static str, u64
 /// The loss when a package cannot be compared: the save must not pass as
 /// losing nothing (record 0003). It says what, why, and what to do.
 pub(crate) fn unchecked_loss(why: &str) -> Loss {
-    Loss {
-        feature: format!(
-            "anything the file holds besides cell values (not checked: its parts could not be listed because {why}; open and save the file in Excel to repair it, or pass confirm_loss to save without the check)"
-        ),
-        before: 1,
-        after: 0,
-    }
+    let feature = format!(
+        "anything the file holds besides cell values (not checked: its parts could not be listed because {why}; open and save the file in Excel to repair it, or pass confirm_loss to save without the check)"
+    );
+    Loss::all(feature, 1)
 }
 
 /// Compares the opened package with the one about to be written.
@@ -396,11 +393,7 @@ pub(crate) fn compare_within(
             why.join("; ")
         };
         let feature = format!("content inside rewritten parts (not checked: {why})");
-        not_checked = Some(Loss {
-            feature,
-            before: 1,
-            after: 0,
-        });
+        not_checked = Some(Loss::all(feature, 1));
     }
     for (feature, (had, kept)) in lost.into_iter().filter(|(_, (b, a))| a < b) {
         let feature = feature.to_owned();

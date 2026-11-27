@@ -163,14 +163,14 @@ fn calculation_has_a_work_and_a_time_limit() {
     let out = dir.join("out.xlsx");
     let args = json!({ "path": p(&path), "ops": ops, "output": p(&out) });
 
-    let kernel = lowered(|l| l.calc_work = 1_000_000);
+    let kernel = lowered(|l| l.work = 1_000_000);
     let e = call_with(&kernel, "edit", args.clone()).unwrap_err();
     assert_eq!(e.code, ErrorCode::LimitExceeded, "{e:?}");
     assert!(e.what.contains("more calculation"), "{}", e.what);
     assert!(e.fix.contains("nothing was written"), "{}", e.fix);
     assert!(!out.exists());
 
-    let kernel = lowered(|l| l.calc_seconds = 0.0);
+    let kernel = lowered(|l| l.seconds = Some(0.0));
     let e = call_with(&kernel, "edit", args.clone()).unwrap_err();
     assert_eq!(e.code, ErrorCode::LimitExceeded, "{e:?}");
     assert!(e.what.contains("took longer"), "{}", e.what);
@@ -386,7 +386,7 @@ fn lambda_loops_and_built_arrays_count_work() {
     assert!(!out.exists());
 
     // The work count alone stops it too, long before the clock.
-    let kernel = lowered(|l| l.calc_work = 1_000_000);
+    let kernel = lowered(|l| l.work = 1_000_000);
     let e = call_with(&kernel, "edit", args).unwrap_err();
     assert_eq!(e.code, ErrorCode::LimitExceeded, "{e:?}");
     assert!(e.what.contains("more calculation"), "{}", e.what);
@@ -404,7 +404,7 @@ fn lambda_loops_and_built_arrays_count_work() {
         // One output file per formula: a file left by the one before would
         // make the next edit fail with FileExists instead.
         let out = dir.join(format!("out-{i}.xlsx"));
-        let kernel = lowered(|l| l.calc_work = 100_000);
+        let kernel = lowered(|l| l.work = 100_000);
         let args = json!({
             "path": p(&path),
             "ops": [{ "op": "set_formula", "target": "B1", "value": formula }],
@@ -498,7 +498,7 @@ fn slow_unpacking_counts_against_the_time_limit() {
     let o = call("overview", json!({ "path": p(&path) })).unwrap();
     assert_eq!(o["sheets"][0]["cells"], 4_000);
     // Opening counts against the time limit (N5), unpacking included.
-    let kernel = lowered(|l| l.calc_seconds = 0.0);
+    let kernel = lowered(|l| l.seconds = Some(0.0));
     let e = call_with(&kernel, "overview", json!({ "path": p(&path) })).unwrap_err();
     assert_eq!(e.code, ErrorCode::LimitExceeded, "{e:?}");
     assert!(e.what.contains("took longer"), "{}", e.what);

@@ -324,7 +324,7 @@ pub fn run_within(
 }
 
 pub fn lowered(f: impl FnOnce(&mut Limits)) -> Kernel {
-    let mut limits = Limits::default();
+    let mut limits = carrysheet::LIMITS;
     f(&mut limits);
     Kernel::new().with_limits(limits)
 }

@@ -156,3 +156,53 @@ fn dangerous_formulas_are_refused() {
             .starts_with("WEBSERVICE")
     );
 }
+
+#[test]
+fn every_refused_function_is_refused_in_every_spelling() {
+    let table = REFUSED_FUNCTIONS.lines().filter_map(|l| l.split_once(": "));
+    let mut slipped = Vec::new();
+    let mut names = 0;
+    for (name, _) in table {
+        names += 1;
+        let lower = name.to_ascii_lowercase();
+        for formula in [
+            format!("{name}(A1)"),
+            format!("{lower}(A1)"),
+            format!("{name} (A1)"),
+            format!("{lower}\t  (A1)"),
+            format!("SUM(1,{name}(A1))"),
+            format!("IF(TRUE,SUM(1,{lower} (A1)),0)"),
+            format!("_xlfn.{name}(A1)"),
+            format!("_xludf.{lower}(A1)"),
+            format!("MAP(A1:A3,{name})"),
+            // Names defined inside the formula (LET binds them).
+            format!("LET(f,{name},f(A1))"),
+            format!("LET(x,{lower}(A1),x+1)"),
+            format!("Sheet1!{name}"),
+        ] {
+            if refused_formula(&formula).is_none() {
+                slipped.push(formula);
+            }
+        }
+    }
+    assert_eq!(names, 29, "the list of refused functions changed");
+    assert!(slipped.is_empty(), "not refused: {slipped:?}");
+}
+
+#[test]
+fn a_formula_typo_is_not_a_policy_refusal() {
+    for typo in ["SUM(A1;A2)", "A1+", "SUM(A1:)", "\"open"] {
+        let e = parse_ops(&json!([{ "op": "set_formula", "target": "B2", "value": typo }]))
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidArgument);
+        assert!(e.what.contains("cannot read"), "{typo}: {}", e.what);
+        assert!(
+            e.fix.starts_with("Correct the formula"),
+            "{typo}: {}",
+            e.fix
+        );
+    }
+    let e = parse_ops(&json!([{ "op": "set_formula", "target": "B2", "value": "WEBSERVICE(A1)" }]))
+        .unwrap_err();
+    assert!(e.what.contains("does not let agents write"), "{}", e.what);
+}

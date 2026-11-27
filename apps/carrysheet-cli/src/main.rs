@@ -13,12 +13,12 @@ mod tests;
 
 use std::ffi::OsString;
 
-use carrysheet::commands::validate_args;
+use carrysheet::commands::{CommandError, ErrorCode, ExitCode, validate_args};
+use clap::{ArgMatches, FromArgMatches};
 use serde_json::Value;
 
-/// True when `--json` appears before any `--`, so even a command line clap
-/// cannot parse gets its error as JSON. `--json=true` (or any `--json=`
-/// form) counts too: clap refuses it, and the refusal comes as JSON.
+/// True when `--json`, or any `--json=` form (which clap refuses), comes before
+/// any `--`: then even a command line clap cannot parse gets its error as JSON.
 fn wants_json(args: &[OsString]) -> bool {
     args.iter()
         .skip(1)
@@ -27,83 +27,51 @@ fn wants_json(args: &[OsString]) -> bool {
         .any(|a| a == "--json" || a.starts_with("--json="))
 }
 
-fn real_main(args: Vec<OsString>) -> u8 {
-    let json_requested = wants_json(&args);
+fn main() -> std::process::ExitCode {
+    let args: Vec<OsString> = std::env::args_os().collect();
     let matches = match cli::build().try_get_matches_from(&args) {
         Ok(m) => m,
-        Err(e) => return output::handle_clap_error(&e, json_requested),
+        Err(e) => return output::handle_clap_error(&e, wants_json(&args)).into(),
     };
     let json = matches.get_flag("json");
-    let mut ctx = run::Context {
-        yes: matches.get_flag("yes"),
-        max_seconds: None,
-        root: None,
-    };
-    if let Some(&seconds) = matches.get_one::<f64>("max-seconds") {
-        let max = carrysheet::commands::limits::MAX_CLI_SECONDS;
-        if !(seconds > 0.0 && seconds <= max) {
-            let err = carrysheet::commands::CommandError::invalid_argument(
-                "max-seconds",
-                format!("--max-seconds must be more than 0 and at most {max}"),
-                "Pass a number of seconds, like --max-seconds 60.",
-            );
-            output::print_error(&err, json);
-            return err.exit_code().code();
-        }
-        ctx.max_seconds = Some(seconds);
-    }
-
-    let Some((command, sub)) = cli::chosen(&matches) else {
-        // clap requires a subcommand, so this is a bug if it happens.
-        let err = carrysheet::commands::CommandError::new(
-            carrysheet::commands::ErrorCode::Internal,
-            "no command was chosen",
-            "the command line parsed but named no command",
-            "Report this at https://github.com/yokoten-labs/carrysheet/issues.",
-        );
-        output::print_error(&err, json);
-        return err.exit_code().code();
-    };
-
-    let args =
-        cli::args_json(command, sub).and_then(|args| validate_args(command, &Value::Object(args)));
-    if command.name == "mcp_serve" {
-        // Runs until the client closes stdin; it never prints a result.
-        return match args
-            .and_then(|args| mcp::Options::from_args(&args))
-            .and_then(|o| mcp::serve(&o))
-        {
-            Ok(()) => carrysheet::commands::ExitCode::Done.code(),
-            Err(err) => {
-                output::print_error(&err, json);
-                err.exit_code().code()
-            }
-        };
-    }
-    let result = args.and_then(|args| run::run(command, &args, &ctx));
-    match result.map_err(with_yes) {
-        Ok(done) => {
+    let code = match run_command(&matches) {
+        Ok(Some(done)) => {
             output::print_done(&done, json);
-            carrysheet::commands::ExitCode::Done.code()
+            ExitCode::Done.code()
         }
+        // `mcp serve` ran until the client closed stdin; it prints no result.
+        Ok(None) => ExitCode::Done.code(),
         Err(err) => {
             output::print_error(&err, json);
             err.exit_code().code()
         }
+    };
+    code.into()
+}
+
+/// Runs the chosen command with its checked arguments.
+fn run_command(matches: &ArgMatches) -> Result<Option<run::Done>, CommandError> {
+    let global = cli::Global::from_arg_matches(matches).expect("clap parsed the global flags");
+    let ctx = run::Context {
+        yes: global.yes,
+        max_seconds: cli::max_seconds(&global)?,
+        root: None,
+    };
+    // clap requires a subcommand, and each one comes from the command table.
+    let (command, sub) = cli::chosen(matches).expect("clap chose a command");
+    let args = validate_args(command, &Value::Object(cli::args_json(command, sub)?))?;
+    if command.name == "mcp_serve" {
+        return mcp::serve(&args).map(|()| None);
     }
+    run::run(command, &args, &ctx).map(Some).map_err(with_yes)
 }
 
 /// Nobody is asked to confirm: a refusal for want of a confirmation also
 /// names `--yes`, which gives every confirmation at once.
-fn with_yes(mut err: carrysheet::commands::CommandError) -> carrysheet::commands::CommandError {
-    if err.code == carrysheet::commands::ErrorCode::ConfirmationRequired {
+fn with_yes(mut err: CommandError) -> CommandError {
+    if err.code == ErrorCode::ConfirmationRequired {
         err.fix
             .push_str(" Or add --yes, which confirms everything.");
     }
     err
-}
-
-fn main() -> std::process::ExitCode {
-    let args: Vec<OsString> = std::env::args_os().collect();
-    std::process::ExitCode::from(real_main(args))
 }

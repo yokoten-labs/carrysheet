@@ -4,8 +4,10 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+use gridcraft_engine::EngineError;
+use gridcraft_engine::core::Value as CellValue;
 use gridcraft_engine::io::FileKind;
-use gridcraft_engine::model::Workbook;
+use gridcraft_engine::model::{Sheet, Workbook};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -40,15 +42,6 @@ impl FileFormat {
         }
     }
 
-    /// The format as written in arguments and results: `xlsx`, `xls`, `csv`.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            FileFormat::Xlsx => "xlsx",
-            FileFormat::Xls => "xls",
-            FileFormat::Csv => "csv",
-        }
-    }
-
     /// The format of a path, from its extension.
     pub fn from_path(path: &Path) -> Option<FileFormat> {
         path.extension()
@@ -79,6 +72,18 @@ pub struct Loss {
     pub before: u64,
     /// How many the saved file will have.
     pub after: u64,
+}
+
+impl Loss {
+    /// A feature the saved file will not have at all.
+    pub fn all(feature: impl Into<String>, before: u64) -> Loss {
+        let feature = feature.into();
+        Loss {
+            feature,
+            before,
+            after: 0,
+        }
+    }
 }
 
 /// How the package parts of the opened file fare in the saved one.
@@ -251,11 +256,6 @@ pub(crate) fn encode(
     options: &EncodeOptions<'_>,
     csv_bytes: usize,
 ) -> Result<Encoded, CommandError> {
-    // GridCraft picks xlsx or xlsm (with the VBA project) by the name.
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "book.xlsx".to_owned());
     match format {
         FileFormat::Xls => Err(CommandError::new(
             ErrorCode::NotImplemented,
@@ -263,25 +263,16 @@ pub(crate) fn encode(
             "Carrysheet reads .xls but writes only .xlsx, .xlsm and .csv so far",
             "Write .xlsx (or .xlsm to keep macros) instead.",
         )),
-        FileFormat::Xlsx => encode_xlsx(book, path, &name),
+        FileFormat::Xlsx => encode_xlsx(book, path),
         FileFormat::Csv => encode_csv(book, options, csv_bytes),
     }
 }
 
-fn save_failed(e: &gridcraft_engine::EngineError) -> CommandError {
-    if let gridcraft_engine::EngineError::Internal(_, detail) = e {
-        return internal("saving", detail);
-    }
-    CommandError::new(
-        ErrorCode::Io,
-        "the workbook could not be encoded",
-        escape(&e.to_string(), 200),
-        "Try another output format; if it keeps failing, report it at https://github.com/yokoten-labs/carrysheet/issues.",
-    )
-}
-
-fn encode_xlsx(book: &Book, path: &Path, name: &str) -> Result<Encoded, CommandError> {
+fn encode_xlsx(book: &Book, path: &Path) -> Result<Encoded, CommandError> {
     let wb = book.wb()?;
+    // GridCraft picks xlsx or xlsm (with the VBA project) by the name.
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+    let name = name.unwrap_or_else(|| "book.xlsx".to_owned());
     // Relative links to other workbooks still name the same files from
     // the output's folder.
     let target_dir = std::path::absolute(path)
@@ -304,8 +295,16 @@ fn encode_xlsx(book: &Book, path: &Path, name: &str) -> Result<Encoded, CommandE
     // rebase_links keeps a path it cannot rewrite safely (another drive, or
     // one that would name folders outside the source's).
     let links_kept_paths = moved && has_links && matches!(wb, Cow::Borrowed(_));
-    let bytes = gridcraft_engine::io::save_bytes_as(&wb, name, FileKind::Xlsx)
-        .map_err(|e| save_failed(&e))?;
+    let bytes = gridcraft_engine::io::save_bytes_as(&wb, &name, FileKind::Xlsx)
+        .map_err(|e| match e {
+            EngineError::Internal(_, detail) => internal("saving", &detail),
+            e => CommandError::new(
+                ErrorCode::Io,
+                "the workbook could not be encoded",
+                escape(&e.to_string(), 200),
+                "Try another output format; if it keeps failing, report it at https://github.com/yokoten-labs/carrysheet/issues.",
+            ),
+        })?;
     // The saved file must open again; never write one that does not.
     if let Err(e) = gridcraft_xlsx::read_xlsx(&bytes) {
         return Err(internal(
@@ -317,24 +316,13 @@ fn encode_xlsx(book: &Book, path: &Path, name: &str) -> Result<Encoded, CommandE
     match book.kind {
         SourceKind::Package => loss::compare(&book.source, &bytes, &mut report),
         SourceKind::Csv => {}
-        SourceKind::Imported(format) => report.lost.push(Loss {
-            feature: format!("anything the .{format} import skips (Carrysheet cannot list it yet)"),
-            before: 1,
-            after: 0,
-        }),
+        SourceKind::Imported(format) => report.lost.push(Loss::all(
+            format!("anything the .{format} import skips (Carrysheet cannot list it yet)"),
+            1,
+        )),
     }
-    open_warnings(book, &mut report);
-    if links_kept_paths {
-        report.notes.push(
-            "links to other workbooks keep their paths as written; they may not find their files from the new folder".into(),
-        );
-    }
-    Ok(Encoded { bytes, report })
-}
-
-/// What opening the file could not read or keep: a loss when content was
-/// dropped or unreadable, a note otherwise.
-fn open_warnings(book: &Book, report: &mut SaveReport) {
+    // What opening the file could not read or keep: a loss when content was
+    // dropped or unreadable, a note otherwise.
     const LOST: [&str; 6] = [
         "dropped",
         "skipped",
@@ -346,15 +334,18 @@ fn open_warnings(book: &Book, report: &mut SaveReport) {
     for w in &book.warnings {
         let text = escape(w, 200);
         if LOST.iter().any(|l| w.contains(l)) {
-            report.lost.push(Loss {
-                feature: format!("content the opened file could not give: {text}"),
-                before: 1,
-                after: 0,
-            });
+            let feature = format!("content the opened file could not give: {text}");
+            report.lost.push(Loss::all(feature, 1));
         } else {
             report.notes.push(text);
         }
     }
+    if links_kept_paths {
+        report.notes.push(
+            "links to other workbooks keep their paths as written; they may not find their files from the new folder".into(),
+        );
+    }
+    Ok(Encoded { bytes, report })
 }
 
 /// Text a spreadsheet program may run as a formula when it opens a csv
@@ -364,53 +355,6 @@ const CSV_FORMULA_STARTS: [char; 6] = ['=', '+', '-', '@', '\t', '\r'];
 /// One sheet's values as csv. Text that a spreadsheet could take for a
 /// formula gets a `'` in front unless `options.csv_raw` is set; numbers are
 /// never changed.
-fn csv_bytes_of(
-    wb: &Workbook,
-    si: usize,
-    options: &EncodeOptions<'_>,
-    limit: usize,
-) -> Result<(Vec<u8>, u64), CommandError> {
-    let Some(sh) = wb.sheets.get(si) else {
-        return Err(internal("saving", "sheet index out of range"));
-    };
-    let mut escaped = 0u64;
-    let bytes =
-        gridcraft_xlsx::write_csv_limited(sh, wb.csv_delimiter.unwrap_or(b','), limit, |c| {
-            let value = sh.value(c);
-            // General's grid-width formatting rounds long numbers; a csv
-            // file has no column width, so the whole number is written.
-            let text = if wb
-                .styles
-                .get(sh.style_id(c))
-                .num_fmt
-                .as_str()
-                .eq_ignore_ascii_case("General")
-                && let gridcraft_engine::core::Value::Number(n) = value
-                && n.is_finite()
-            {
-                n.to_string()
-            } else {
-                gridcraft_engine::display::value_text(wb, sh, c)
-            };
-            let is_number = matches!(value, gridcraft_engine::core::Value::Number(_));
-            if !options.csv_raw && !is_number && text.starts_with(CSV_FORMULA_STARTS) {
-                escaped += 1;
-                format!("'{text}")
-            } else {
-                text
-            }
-        })
-        .map_err(|e| {
-            CommandError::new(
-                ErrorCode::LimitExceeded,
-                "the csv file would be too large",
-                escape(&e.to_string(), 200),
-                "Save as .xlsx, or copy the part you need to a new sheet and save that.",
-            )
-        })?;
-    Ok((bytes, escaped))
-}
-
 fn encode_csv(
     book: &Book,
     options: &EncodeOptions<'_>,
@@ -418,7 +362,40 @@ fn encode_csv(
 ) -> Result<Encoded, CommandError> {
     let si = book.sheet_index(options.sheet)?;
     let wb = book.wb()?;
-    let (bytes, escaped) = csv_bytes_of(wb, si, options, limit)?;
+    let Some(sh) = wb.sheets.get(si) else {
+        return Err(internal("saving", "sheet index out of range"));
+    };
+    let mut escaped = 0u64;
+    let delimiter = wb.csv_delimiter.unwrap_or(b',');
+    let bytes = gridcraft_xlsx::write_csv_limited(sh, delimiter, limit, |c| {
+        let value = sh.value(c);
+        let number_format = wb.styles.get(sh.style_id(c)).num_fmt.as_str();
+        // General's grid-width formatting rounds long numbers; a csv file
+        // has no column width, so the whole number is written.
+        let text = match value {
+            CellValue::Number(n)
+                if n.is_finite() && number_format.eq_ignore_ascii_case("General") =>
+            {
+                n.to_string()
+            }
+            _ => gridcraft_engine::display::value_text(wb, sh, c),
+        };
+        let is_number = matches!(value, CellValue::Number(_));
+        if !options.csv_raw && !is_number && text.starts_with(CSV_FORMULA_STARTS) {
+            escaped += 1;
+            format!("'{text}")
+        } else {
+            text
+        }
+    });
+    let bytes = bytes.map_err(|e| {
+        CommandError::new(
+            ErrorCode::LimitExceeded,
+            "the csv file would be too large",
+            escape(&e.to_string(), 200),
+            "Save as .xlsx, or copy the part you need to a new sheet and save that.",
+        )
+    })?;
     let mut report = SaveReport::new(FileFormat::Csv);
     report
         .notes
@@ -428,7 +405,7 @@ fn encode_csv(
             "{escaped} cells start with = + - @ or a tab and were written with a ' in front, so a spreadsheet does not run them as formulas; use --csv-raw to write them as they are"
         ));
     }
-    let has_content = |sh: &gridcraft_engine::model::Sheet| {
+    let has_content = |sh: &Sheet| {
         sh.cells
             .iter()
             .any(|(_, c)| c.formula.is_some() || !c.value.is_empty())
@@ -440,41 +417,30 @@ fn encode_csv(
         .filter(|(i, sh)| *i != si && has_content(sh))
         .count() as u64;
     if others > 0 {
-        report.lost.push(Loss {
-            feature: "other sheets".into(),
-            before: others,
-            after: 0,
-        });
+        report.lost.push(Loss::all("other sheets", others));
     }
     let formulas = wb.sheets.get(si).map_or(0, |sh| {
         sh.cells.iter().filter(|(_, c)| c.formula.is_some()).count()
     }) as u64;
     if formulas > 0 {
-        report.lost.push(Loss {
-            feature: "formulas (their values are kept)".into(),
-            before: formulas,
-            after: 0,
-        });
+        report
+            .lost
+            .push(Loss::all("formulas (their values are kept)", formulas));
     }
     match book.kind {
         SourceKind::Package => match loss::source_features(&book.source) {
             Ok(features) => {
                 for (feature, n) in features {
-                    report.lost.push(Loss {
-                        feature: feature.to_owned(),
-                        before: n,
-                        after: 0,
-                    });
+                    report.lost.push(Loss::all(feature, n));
                 }
             }
             Err(why) => report.lost.push(loss::unchecked_loss(&why)),
         },
         SourceKind::Csv => {}
-        SourceKind::Imported(format) => report.lost.push(Loss {
-            feature: format!("anything else the .{format} file holds"),
-            before: 1,
-            after: 0,
-        }),
+        SourceKind::Imported(format) => report.lost.push(Loss::all(
+            format!("anything else the .{format} file holds"),
+            1,
+        )),
     }
     Ok(Encoded { bytes, report })
 }

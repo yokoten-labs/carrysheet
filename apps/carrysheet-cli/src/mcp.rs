@@ -1,27 +1,23 @@
 //! `mcp serve`: the MCP server over stdio, built on rmcp.
 //!
 //! - Tools come from `carrysheet::args`, in its fixed order, with all four
-//!   annotations set. `--read-only` leaves out every tool that changes files.
-//! - A tool call goes through the same `validate_args` and [`run::run`] as
-//!   the command line. Its result carries the same JSON as compact text and
-//!   as `structuredContent`; a failure is `isError: true` with `fix` first.
-//! - Every path argument must stay inside `--root` (default: the current
-//!   folder) and is handed on resolved.
+//!   annotations. `--read-only` leaves out every tool that changes files.
+//! - A call goes through the same `validate_args` and [`run::run`] as the
+//!   command line. The result carries the same JSON as compact text and as
+//!   `structuredContent`; a failure is `isError: true` with `fix` first.
+//! - Every path argument must stay inside `--root` and is handed on resolved.
 //! - stdout carries only JSON-RPC. The log goes to stderr, cleaned like
 //!   text from a file.
-//! - Both lifecycles, as rmcp implements them: `initialize` for 2025-11-25
-//!   and older, and `server/discover` with metadata on each request for
-//!   2026-07-28. rmcp's default version list (2024-11-05 to 2026-07-28) is
-//!   kept, so clients still on older revisions can connect.
+//! - Both lifecycles, as rmcp implements them: `initialize` (2025-11-25 and
+//!   older) and `server/discover` (2026-07-28), with rmcp's version list.
 
-use std::fmt::Write as _;
 use std::io::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use carrysheet::args::{Command, PATHS, mcp_tools, tool_definition, validate_args};
-use carrysheet::commands::{CommandError, ErrorCode};
+use carrysheet::args::{Command, McpServe, PATHS, mcp_tools, tool_definition};
+use carrysheet::commands::{CommandError, ErrorCode, validate_args};
 use carrysheet::text::escape;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, ListToolsResult,
@@ -39,25 +35,6 @@ use crate::run::{self, Context};
 const INSTRUCTIONS: &str = "Carrysheet reads, converts and edits spreadsheet files \
 (xlsx, xlsm, xlsb, xls, csv). Call overview first on any workbook. Paths are relative to the \
 server's root folder; files outside it are refused. Name the workbook by its path in every call.";
-
-/// What `mcp serve` was started with.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Options {
-    /// `--root`; without it, the current folder.
-    pub root: Option<PathBuf>,
-    /// Offer only tools that never change files.
-    pub read_only: bool,
-}
-
-impl Options {
-    /// Reads the validated `mcp serve` arguments.
-    pub fn from_args(args: &Map<String, Value>) -> Result<Options, CommandError> {
-        Ok(Options {
-            root: args.get("root").and_then(Value::as_str).map(PathBuf::from),
-            read_only: args.get("read_only").and_then(Value::as_bool) == Some(true),
-        })
-    }
-}
 
 /// Longest log line kept, in characters.
 pub(crate) const MAX_LOG_LINE: usize = 2_000;
@@ -162,8 +139,7 @@ impl Server {
         let args = Value::Object(arguments.unwrap_or_default());
         let mut args = validate_args(command, &args)?;
         self.confine(&mut args)?;
-        // An agent is reading: never ask, never wait for a terminal.
-        // MCP calls keep the default time limit (limits::MAX_CALL_SECONDS).
+        // Never asks; keeps the agents' time limit (limits::MAX_CALL_SECONDS).
         // Writes stay inside the root even if a link changes meanwhile.
         let root = Some(self.inner.root.dir());
         let ctx = Context {
@@ -197,27 +173,22 @@ impl Server {
     }
 
     fn unknown_tool(&self, name: &str) -> CommandError {
-        let hidden =
-            self.inner.read_only && mcp_tools().any(|c| c.name == name && !is_read_only(c));
         let names: Vec<_> = self.inner.commands.iter().map(|c| c.name).collect();
-        if hidden {
-            CommandError::new(
+        let fix = format!("Use one of: {}.", names.join(", "));
+        if self.inner.read_only && mcp_tools().any(|c| c.name == name && !is_read_only(c)) {
+            return CommandError::new(
                 ErrorCode::InvalidArgument,
                 format!("the tool `{name}` is not offered in read-only mode"),
                 "the server was started with --read-only, which hides tools that change files",
-                format!(
-                    "Use one of: {}. To change files, restart the server without --read-only.",
-                    names.join(", ")
-                ),
-            )
-        } else {
-            CommandError::new(
-                ErrorCode::InvalidArgument,
-                format!("there is no tool named `{name}`"),
-                "the name is not in this server's tool list",
-                format!("Use one of: {}.", names.join(", ")),
-            )
+                format!("{fix} To change files, restart the server without --read-only."),
+            );
         }
+        CommandError::new(
+            ErrorCode::InvalidArgument,
+            format!("there is no tool named `{name}`"),
+            "the name is not in this server's tool list",
+            fix,
+        )
     }
 }
 
@@ -339,8 +310,14 @@ fn open_root(given: Option<&Path>) -> Result<(Root, Option<String>), CommandErro
 }
 
 /// Runs the server on stdin and stdout until the client closes stdin.
-pub fn serve(options: &Options) -> Result<(), CommandError> {
-    let (root, warning) = open_root(options.root.as_deref())?;
+/// `args` are the checked arguments of `mcp serve`.
+pub fn serve(args: &Map<String, Value>) -> Result<(), CommandError> {
+    let options: McpServe = serde_json::from_value(Value::Object(args.clone())).map_err(|e| {
+        let fix = "Run `carrysheet-cli mcp serve --help` for the arguments.";
+        CommandError::invalid_argument("arguments", e.to_string(), fix)
+    })?;
+    let read_only = options.read_only == Some(true);
+    let (root, warning) = open_root(options.root.as_deref().map(Path::new))?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -356,45 +333,22 @@ pub fn serve(options: &Options) -> Result<(), CommandError> {
     // caught and fails cleanly) is logged like everything else, with
     // control characters escaped, instead of raw on stderr.
     std::panic::set_hook(Box::new(|info| log(&format!("panic (caught): {info}"))));
-    let server = Server::new(root.clone(), options.read_only);
-    let outcome = serve_stdio(&runtime, server, &root, warning);
-    // Do not wait for the thread still blocked reading stdin.
-    runtime.shutdown_background();
-    outcome
-}
-
-/// The first log line: version, root, tools and protocol versions.
-fn log_start(server: &Server, root: &Root, warning: Option<String>) {
+    let server = Server::new(root.clone(), read_only);
+    // From here on, stdout is the transport's alone.
+    crate::output::reserve_stdout_for_mcp();
     let versions = server.supported_protocol_versions();
     log(&format!(
         "mcp serve {} over stdio: root {}, {} tools{}, MCP {} to {}",
         env!("CARGO_PKG_VERSION"),
         display_path(&root.dir()),
         server.inner.tools.len(),
-        if server.inner.read_only {
-            " (read-only)"
-        } else {
-            ""
-        },
+        if read_only { " (read-only)" } else { "" },
         versions.first().map_or("?", |v| v.as_str()),
         versions.last().map_or("?", |v| v.as_str()),
     ));
     if let Some(warning) = warning {
         log(&warning);
     }
-}
-
-fn serve_stdio(
-    runtime: &tokio::runtime::Runtime,
-    server: Server,
-    root: &Root,
-    warning: Option<String>,
-) -> Result<(), CommandError> {
-    // From here on, stdout is the transport's alone.
-    crate::output::reserve_stdout_for_mcp();
-    let _ = tracing::subscriber::set_global_default(TracingToLog);
-    log_start(&server, root, warning);
-
     let result = runtime.block_on(async {
         match server.serve(rmcp::transport::stdio()).await {
             Ok(running) => running.waiting().await.map_err(|e| e.to_string()),
@@ -403,80 +357,20 @@ fn serve_stdio(
             Err(e) => Err(e.to_string()),
         }
     });
+    // Do not wait for the thread still blocked reading stdin.
+    runtime.shutdown_background();
     match result {
-        Ok(reason) => {
-            log(&format!("mcp serve stopped: {}", quit_reason(&reason)));
-            Ok(())
-        }
+        Ok(QuitReason::Closed) => log("mcp serve stopped: the client closed stdin"),
+        Ok(reason) => log(&format!("mcp serve stopped: {reason:?}")),
         Err(why) => {
             log(&format!("mcp serve failed: {why}"));
-            Err(CommandError::new(
+            return Err(CommandError::new(
                 ErrorCode::Io,
                 "the MCP session ended with an error",
                 why,
                 "Check that the client speaks MCP over stdio and starts with initialize or server/discover.",
-            ))
+            ));
         }
     }
-}
-
-fn quit_reason(reason: &QuitReason) -> String {
-    match reason {
-        QuitReason::Closed => "the client closed stdin".to_owned(),
-        QuitReason::Cancelled => "cancelled".to_owned(),
-        QuitReason::JoinError(e) => format!("internal error: {e}"),
-        other => format!("{other:?}"),
-    }
-}
-
-/// Sends warnings and errors that rmcp reports through `tracing` to the log,
-/// so problems in the transport are not silent. Spans are ignored.
-struct TracingToLog;
-
-impl tracing::Subscriber for TracingToLog {
-    fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
-        metadata.is_event() && *metadata.level() <= tracing::Level::WARN
-    }
-
-    fn max_level_hint(&self) -> Option<tracing::level_filters::LevelFilter> {
-        Some(tracing::level_filters::LevelFilter::WARN)
-    }
-
-    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-        tracing::span::Id::from_u64(1)
-    }
-
-    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
-
-    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-
-    fn event(&self, event: &tracing::Event<'_>) {
-        let mut fields = Fields(String::new());
-        event.record(&mut fields);
-        let meta = event.metadata();
-        log(&format!("{} {}:{}", meta.level(), meta.target(), fields.0));
-    }
-
-    fn enter(&self, _: &tracing::span::Id) {}
-
-    fn exit(&self, _: &tracing::span::Id) {}
-}
-
-/// Collects an event's fields as ` message key=value ...`.
-struct Fields(String);
-
-impl tracing::field::Visit for Fields {
-    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        let _ = match field.name() {
-            "message" => write!(self.0, " {value:?}"),
-            name => write!(self.0, " {name}={value:?}"),
-        };
-    }
-
-    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        let _ = match field.name() {
-            "message" => write!(self.0, " {value}"),
-            name => write!(self.0, " {name}={value:?}"),
-        };
-    }
+    Ok(())
 }

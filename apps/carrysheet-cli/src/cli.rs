@@ -3,11 +3,12 @@
 
 use std::path::Path;
 
-use carrysheet::args::{COMMANDS, Command, OPERATION_EXAMPLE, PATHS, command, input_schema};
+use carrysheet::args::{COMMANDS, Command, OPERATION_EXAMPLE, command, input_schema};
+use carrysheet::commands::limits::MAX_CLI_SECONDS;
 use carrysheet::commands::{CommandError, ErrorCode};
 use carrysheet::open::ReadFailure;
-use clap::{ArgAction, ArgMatches};
-use serde_json::{Map, Value, json};
+use clap::{ArgMatches, Args};
+use serde_json::{Map, Value};
 
 /// The program name, as typed.
 pub const BIN: &str = "carrysheet-cli";
@@ -15,8 +16,22 @@ pub const BIN: &str = "carrysheet-cli";
 /// The largest `@file` an argument may be read from.
 const MAX_ARG_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
+/// The flags every command takes.
+#[derive(Args)]
+pub struct Global {
+    /// Print only JSON on stdout, errors included
+    #[arg(long, global = true)]
+    pub json: bool,
+    /// Confirm deleting, overwriting and saves that lose content (--confirm and --confirm-loss)
+    #[arg(long, short, global = true)]
+    pub yes: bool,
+    /// Most seconds one command may take, opening and saving included (default 10, at most 3600)
+    #[arg(long, global = true, value_name = "SECONDS")]
+    pub max_seconds: Option<f64>,
+}
+
 /// One command as clap sees it: `name` is its last word, such as `serve`.
-fn clap_command(name: &'static str, command: &Command) -> clap::Command {
+pub(crate) fn clap_command(name: &'static str, command: &Command) -> clap::Command {
     let (summary, description) = command.doc();
     (command.flags)(clap::Command::new(name))
         .about(summary)
@@ -25,7 +40,7 @@ fn clap_command(name: &'static str, command: &Command) -> clap::Command {
 
 /// Builds the whole command line from [`COMMANDS`].
 pub fn build() -> clap::Command {
-    let mut root = clap::Command::new(BIN)
+    let mut root = Global::augment_args(clap::Command::new(BIN))
         .version(env!("CARGO_PKG_VERSION"))
         .about("Carrysheet: read, convert and edit spreadsheets, for people and AI agents")
         .after_help(
@@ -33,30 +48,7 @@ pub fn build() -> clap::Command {
         )
         .max_term_width(80)
         .subcommand_required(true)
-        .arg_required_else_help(true)
-        .arg(
-            clap::Arg::new("json")
-                .long("json")
-                .global(true)
-                .action(ArgAction::SetTrue)
-                .help("Print only JSON on stdout, errors included"),
-        )
-        .arg(
-            clap::Arg::new("yes")
-                .long("yes")
-                .short('y')
-                .global(true)
-                .action(ArgAction::SetTrue)
-                .help("Confirm deleting, overwriting and saves that lose content (--confirm and --confirm-loss)"),
-        )
-        .arg(
-            clap::Arg::new("max-seconds")
-                .long("max-seconds")
-                .global(true)
-                .value_name("SECONDS")
-                .value_parser(clap::value_parser!(f64))
-                .help("Most seconds one command may take, opening and saving included (default 10, at most 3600)"),
-        );
+        .arg_required_else_help(true);
     // A name of two words, such as `mcp_serve`, is typed `mcp serve`.
     let mut mcp = clap::Command::new("mcp")
         .about("Run the MCP server for AI agents")
@@ -80,92 +72,61 @@ pub fn chosen(matches: &ArgMatches) -> Option<(&'static Command, &ArgMatches)> {
     }
 }
 
+/// `--max-seconds`, checked: more than 0 and at most an hour.
+pub fn max_seconds(global: &Global) -> Result<Option<f64>, CommandError> {
+    let max = MAX_CLI_SECONDS;
+    match global.max_seconds {
+        Some(seconds) if !(seconds > 0.0 && seconds <= max) => Err(CommandError::invalid_argument(
+            "max-seconds",
+            format!("--max-seconds must be more than 0 and at most {max}"),
+            "Pass a number of seconds, like --max-seconds 60.",
+        )),
+        seconds => Ok(seconds),
+    }
+}
+
 /// The single-type schema of an argument, without its null branch.
-fn kind(property: &Value) -> &Value {
+pub(crate) fn kind(property: &Value) -> &Value {
     property.pointer("/anyOf/0").unwrap_or(property)
 }
 
-/// Everything about a command, for `commands --json`.
-pub fn command_json(command: &Command) -> Value {
-    let schema = input_schema(command);
-    let (summary, description) = command.doc();
-    let args: Vec<Value> = clap_command("", command)
-        .get_arguments()
-        .map(|arg| {
-            let name = arg.get_id().as_str();
-            let property = &schema["properties"][name];
-            let type_name = match kind(property)["type"].as_str() {
-                Some("string") if kind(property).get("enum").is_some() => "enum",
-                Some("string") if PATHS.contains(&name) => "path",
-                Some("string") if name == "range" => "range",
-                Some("string") => "text",
-                Some("array") => "object_list",
-                Some(other) => other,
-                None => "value",
-            };
-            json!({
-                "name": name,
-                "flag": arg.get_long().map(|long| format!("--{long}")),
-                "positional": arg.is_positional(),
-                "required": arg.is_required_set(),
-                "type": type_name,
-                "description": property["description"],
-            })
-        })
-        .collect();
-    json!({
-        "name": command.name,
-        "cli": command.cli_name(),
-        "summary": summary,
-        "description": description,
-        "changes_files": command.changes_files(),
-        "mcp_tool": command.mcp_tool,
-        "annotations": command.annotations(),
-        "args": args,
-        "input_schema": schema,
-    })
-}
-
-/// Reads an `@file` argument value, or returns the text as it is.
-fn read_at_file(name: &str, text: &str) -> Result<String, CommandError> {
-    let Some(file) = text.strip_prefix('@') else {
-        return Ok(text.to_owned());
-    };
-    let path = Path::new(file);
-    let shown = crate::files::display_path(path);
+/// An argument's JSON text, or the text of the `@file` it names, parsed.
+fn parse_json_arg(name: &str, text: &str) -> Result<Value, CommandError> {
     let flag = format!("--{}", name.replace('_', "-"));
-    let what = format!("cannot read {flag} from {shown}");
-    let bytes = crate::files::read_bounded(path, MAX_ARG_FILE_BYTES).map_err(|e| match e {
-        ReadFailure::Io(e) if e.kind() == std::io::ErrorKind::NotFound => CommandError::new(
-            ErrorCode::FileNotFound,
-            &what,
-            e.to_string(),
-            format!("Check the file path after @, or pass the JSON itself to {flag}."),
-        ),
-        ReadFailure::Io(e) => CommandError::new(
-            ErrorCode::Io,
-            &what,
-            e.to_string(),
-            "Check that the file exists and you can read it.",
-        ),
-        ReadFailure::NotAFile => CommandError::invalid_argument(
-            name,
-            format!("{shown} is not a regular file (a folder, device or pipe)"),
-            format!("Save the JSON to a file and pass {flag} @file.json, or pass the JSON itself."),
-        ),
-        ReadFailure::TooLarge => CommandError::invalid_argument(
-            name,
-            format!("{shown} is larger than 16 MB"),
-            "Split the operations into several files.",
-        ),
-    })?;
-    String::from_utf8(bytes).map_err(|_| {
-        CommandError::new(
-            ErrorCode::InvalidArgument,
-            what,
-            "the file is not UTF-8 text",
-            "Save the file as UTF-8 and try again.",
-        )
+    let text = match text.strip_prefix('@') {
+        None => text.to_owned(),
+        Some(file) => {
+            let path = Path::new(file);
+            let shown = crate::files::display_path(path);
+            let what = format!("cannot read {flag} from {shown}");
+            let bytes = crate::files::read_bounded(path, MAX_ARG_FILE_BYTES).map_err(|e| match e {
+                ReadFailure::Io(e) => {
+                    let is_missing = e.kind() == std::io::ErrorKind::NotFound;
+                    let code = if is_missing { ErrorCode::FileNotFound } else { ErrorCode::Io };
+                    let fix = format!("Check the file path after @ and that you can read it, or pass the JSON itself to {flag}.");
+                    CommandError::new(code, &what, e.to_string(), fix)
+                }
+                ReadFailure::NotAFile => {
+                    let why = format!("{shown} is not a regular file (a folder, device or pipe)");
+                    let fix = format!("Save the JSON to a file and pass {flag} @file.json, or pass the JSON itself.");
+                    CommandError::invalid_argument(name, why, fix)
+                }
+                ReadFailure::TooLarge => {
+                    let why = format!("{shown} is larger than 16 MB");
+                    CommandError::invalid_argument(name, why, "Split the operations into several files.")
+                }
+            })?;
+            String::from_utf8(bytes).map_err(|_| {
+                let why = "the file is not UTF-8 text";
+                let fix = "Save the file as UTF-8 and try again.";
+                CommandError::new(ErrorCode::InvalidArgument, &what, why, fix)
+            })?
+        }
+    };
+    serde_json::from_str(&text).map_err(|e| {
+        let fix =
+            format!("Pass a JSON list, or @file.json. Example: {flag} '[{OPERATION_EXAMPLE}]'");
+        CommandError::invalid_argument(name, format!("{flag} is not valid JSON: {e}"), fix)
     })
 }
 
@@ -184,17 +145,7 @@ pub fn args_json(command: &Command, m: &ArgMatches) -> Result<Map<String, Value>
             (_, None) => Value::Null,
             (Some("string"), Some(text)) => Value::String(text.to_owned()),
             // A whole number, a flag, or JSON text for a list (or @file).
-            (_, Some(text)) => {
-                let text = read_at_file(name, text)?;
-                serde_json::from_str(&text).map_err(|e| {
-                    let flag = name.replace('_', "-");
-                    CommandError::invalid_argument(
-                        name,
-                        format!("--{flag} is not valid JSON: {e}"),
-                        format!("Pass a JSON list, or @file.json. Example: --{flag} '[{OPERATION_EXAMPLE}]'"),
-                    )
-                })?
-            }
+            (_, Some(text)) => parse_json_arg(name, text)?,
         };
         out.insert(name.clone(), value);
     }
