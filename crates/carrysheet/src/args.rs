@@ -185,7 +185,7 @@ pub struct Operation {
 pub const OPERATION_EXAMPLE: &str = r#"{"op":"set_value","target":"A1","value":3}"#;
 
 // A cell value. The JSON type says whether "3" is text or a number.
-#[derive(Clone, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
 #[serde(untagged, expecting = "value must be text, a number, or true or false")]
 pub enum Scalar {
     Text(String),
