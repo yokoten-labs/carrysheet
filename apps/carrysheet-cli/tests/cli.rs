@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use carrysheet_commands::lint::{lint_schema, lint_tools};
 use carrysheet_commands::schema::tool_definition;
-use carrysheet_commands::table::{ArgType, COMMANDS, mcp_tools};
+use carrysheet_commands::table::{COMMANDS, mcp_tools};
 use serde_json::Value;
 
 const BIN: &str = env!("CARGO_BIN_EXE_carrysheet-cli");
@@ -295,43 +295,10 @@ fn dry_run_only_on_commands_that_change_files() {
 }
 
 #[test]
-fn every_unbuilt_command_says_not_implemented() {
-    let home = temp_home();
-    let book = home.join("book.xlsx");
-    std::fs::write(&book, b"x").unwrap();
-    let book = book.to_str().unwrap().to_owned();
-
+fn every_command_is_implemented() {
     let listing = json_only(&run(&["commands", "--json"]));
-    for (c, table) in listing["commands"].as_array().unwrap().iter().zip(COMMANDS) {
-        if c["implemented"] == true {
-            continue;
-        }
-        let mut argv: Vec<String> = table.cli_path.iter().map(|s| s.to_string()).collect();
-        for a in table.all_args().into_iter().filter(|a| a.required) {
-            if !a.positional {
-                argv.push(a.flag());
-            }
-            argv.push(match a.ty {
-                ArgType::Path if a.name == "path" => book.clone(),
-                ArgType::Enum(values) => values[0].to_owned(),
-                ArgType::ObjectList(_) => r#"[{"op":"clear","target":"A1"}]"#.to_owned(),
-                _ => "x".to_owned(),
-            });
-        }
-        argv.push("--json".to_owned());
-        let args: Vec<&str> = argv.iter().map(String::as_str).collect();
-        let o = run_in(&home, &args);
-        assert_eq!(code(&o), 1, "{args:?}: {}", stderr(&o));
-        let e = error_json(&o);
-        assert_eq!(e["code"], "not_implemented", "{args:?}");
-        assert!(e["what"].as_str().unwrap().contains(&table.cli_name()));
-
-        // Without --json, nothing goes to stdout.
-        let plain: Vec<&str> = args[..args.len() - 1].to_vec();
-        let o = run_in(&home, &plain);
-        assert_eq!(code(&o), 1);
-        assert!(stdout(&o).is_empty(), "{plain:?}");
-        assert!(stderr(&o).contains("not implemented yet"));
+    for c in listing["commands"].as_array().unwrap() {
+        assert_eq!(c["implemented"], true, "{}", c["name"]);
     }
 }
 
@@ -403,7 +370,9 @@ fn bad_values_are_usage_errors() {
             "--json",
         ],
         vec!["eval", "--json"],
-        vec!["mcp", "install", "notepad", "--json"],
+        vec!["convert", book, "b.x", "--format", "ods", "--json"],
+        vec!["macros", book, "--json"],
+        vec!["mcp", "serve", "--http", "127.0.0.1:0", "--json"],
     ] {
         let o = run_in(&home, &args);
         assert_eq!(code(&o), 2, "{args:?}: {}", stderr(&o));
@@ -418,47 +387,16 @@ fn bad_values_are_usage_errors() {
 }
 
 #[test]
-fn feedback_drafts_without_sending() {
-    let o = run(&[
-        "feedback",
-        "bug",
-        "Saving as csv drops the second sheet",
-        "--json",
-    ]);
-    assert_eq!(code(&o), 0, "{}", stderr(&o));
-    let v = json_only(&o);
-    assert_eq!(v["ok"], true);
-    assert_eq!(v["sent"], false);
-    assert_eq!(v["title"], "Saving as csv drops the second sheet");
-    assert!(v["url"].as_str().unwrap().contains("template=bug.yml"));
-
-    let o = run(&["feedback", "idea", "Sort by colour"]);
-    assert_eq!(code(&o), 0);
-    let out = stdout(&o);
-    assert!(out.contains("Nothing was sent"));
-    no_escape_codes(&o);
-}
-
-#[test]
-fn feedback_hides_the_home_folder() {
-    let home = temp_home();
-    let msg = format!("Crash opening {}", home.join("a.xlsx").display());
-    let o = run_in(&home, &["feedback", "bug", &msg, "--json"]);
-    assert_eq!(code(&o), 0);
-    let home_text = home.display().to_string();
-    assert!(!stdout(&o).contains(&home_text), "{}", stdout(&o));
-    assert!(json_only(&o)["body"].as_str().unwrap().contains('~'));
-}
-
-#[test]
 fn yes_is_accepted_everywhere_and_nothing_waits_for_input() {
-    // stdin is closed and there is no terminal, so nothing may prompt; the
-    // command must finish on its own.
-    let o = run(&["mcp", "install", "codex", "--json"]);
-    assert_eq!(code(&o), 1);
-    assert_eq!(error_json(&o)["code"], "not_implemented");
-    let o = run(&["-y", "mcp", "install", "codex", "--json"]);
-    assert_eq!(code(&o), 1);
+    // stdin is closed and there is no terminal; nothing is ever asked.
+    for args in [
+        vec!["-y", "overview", "none.xlsx", "--json"],
+        vec!["overview", "none.xlsx", "--yes", "--json"],
+    ] {
+        let o = run(&args);
+        assert_eq!(code(&o), 1, "{args:?}");
+        assert_eq!(error_json(&o)["code"], "file_not_found");
+    }
 }
 
 #[test]
@@ -475,14 +413,17 @@ fn deleting_or_overwriting_needs_confirm() {
     assert_eq!(e["code"], "confirmation_required");
     let fix = e["fix"].as_str().unwrap();
     assert!(fix.contains(r#""confirm":true"#), "{fix}");
-    assert!(fix.contains("--confirm"), "{fix}");
+    assert!(fix.contains("--confirm") && fix.contains("--yes"), "{fix}");
     assert!(!fix.contains(&home.display().to_string()), "{fix}");
 
-    // Without --json nothing is asked (no terminal) and nothing goes to stdout.
+    // Without --json nobody is asked either, and nothing goes to stdout: the
+    // three-part error names the flags.
     let o = run_in(&home, &["edit", book, "--ops", ops]);
     assert_eq!(code(&o), 1);
     assert!(stdout(&o).is_empty());
-    assert!(stderr(&o).contains("confirm"), "{}", stderr(&o));
+    let err = stderr(&o);
+    assert!(err.contains("why: ") && err.contains("fix: "), "{err}");
+    assert!(err.contains("--yes") && !err.contains("[y/N]"), "{err}");
 
     for extra in [["--confirm"], ["--dry-run"], ["--yes"]] {
         let mut args = vec!["edit", book, "--ops", ops, "--json"];

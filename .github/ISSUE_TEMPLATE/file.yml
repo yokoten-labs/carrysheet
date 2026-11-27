@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Real files are the best way for us to fix this, and every file we receive becomes a test so the problem stays fixed.
-        **Please don't attach private data.** Run `carrysheet-cli sanitize yourfile.xlsx` first: it replaces your text and numbers with made-up values and keeps formulas, formatting and structure. Check the result before you attach it.
+        **Please don't attach private data.** Replace private text and numbers with made-up values first, keeping the formulas, formatting and structure, and check that the problem still shows before you attach the file.
   - type: dropdown
     id: format
     attributes:

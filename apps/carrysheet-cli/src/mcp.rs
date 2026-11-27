@@ -1,28 +1,27 @@
-//! `mcp serve`: the MCP server over stdio, or over HTTP on loopback with
-//! `--http` (see [`crate::http`]), built on rmcp.
+//! `mcp serve`: the MCP server over stdio, built on rmcp.
 //!
 //! - Tools come from the command table, in its fixed order, with all four
-//!   annotations set. `--read-only` leaves out every tool that changes files;
-//!   over HTTP that is the default, and `--allow-writes` turns it off.
+//!   annotations set. `--read-only` leaves out every tool that changes files.
 //! - A tool call goes through the same `validate_args` and [`run::run`] as
 //!   the command line. Its result carries the same JSON as compact text and
 //!   as `structuredContent`; a failure is `isError: true` with `fix` first.
 //! - Every path argument must stay inside `--root` (default: the current
 //!   folder) and is handed on resolved.
-//! - stdout carries only JSON-RPC (over HTTP, nothing). The log goes to
-//!   stderr or `--log-file`.
+//! - stdout carries only JSON-RPC. The log goes to stderr, cleaned like
+//!   text from a file.
 //! - Both lifecycles, as rmcp implements them: `initialize` for 2025-11-25
 //!   and older, and `server/discover` with metadata on each request for
 //!   2026-07-28. rmcp's default version list (2024-11-05 to 2026-07-28) is
 //!   kept, so clients still on older revisions can connect.
 
+use std::fmt::Write as _;
 use std::io::Write as _;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 use std::time::Instant;
 
-use carrysheet_commands::paths::{display_path, home_dir};
+use carrysheet_commands::engine::save::clean_from_file;
+use carrysheet_commands::paths::{display_path, home_dir, redact_home};
 use carrysheet_commands::root::Root;
 use carrysheet_commands::schema::tool_definition;
 use carrysheet_commands::table::{ArgType, Command, mcp_tools};
@@ -35,14 +34,11 @@ use rmcp::service::{QuitReason, RequestContext, ServerInitializeError};
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{Map, Value};
 
-use crate::http;
-use crate::log::{Log, TracingToLog};
 use crate::output::ok_envelope;
-use crate::prompt::Context;
-use crate::run;
+use crate::run::{self, Context};
 
 /// Told to the client at the start; some clients show it to the model.
-const INSTRUCTIONS: &str = "Carrysheet reads, checks, converts and edits spreadsheet files \
+const INSTRUCTIONS: &str = "Carrysheet reads, converts and edits spreadsheet files \
 (xlsx, xlsm, xlsb, xls, csv). Call overview first on any workbook. Paths are relative to the \
 server's root folder; files outside it are refused. Name the workbook by its path in every call.";
 
@@ -51,60 +47,35 @@ server's root folder; files outside it are refused. Name the workbook by its pat
 pub struct Options {
     /// `--root`; without it, the current folder.
     pub root: Option<PathBuf>,
-    /// Offer only tools that never change files. Over HTTP, on unless
-    /// `--allow-writes`.
+    /// Offer only tools that never change files.
     pub read_only: bool,
-    pub log_file: Option<PathBuf>,
-    /// `--http`: a loopback address to serve on instead of stdio.
-    pub http: Option<SocketAddr>,
-    /// `--token-file`: where to write the HTTP token instead of stderr.
-    pub token_file: Option<PathBuf>,
 }
 
 impl Options {
     /// Reads the validated `mcp serve` arguments.
     pub fn from_args(args: &Map<String, Value>) -> Result<Options, CommandError> {
-        let text = |name: &str| args.get(name).and_then(Value::as_str);
-        let flag = |name: &str| args.get(name).and_then(Value::as_bool) == Some(true);
-        let http = text("http").map(http::parse_address).transpose()?;
-        let token_file = text("token_file").map(PathBuf::from);
-        let allow_writes = flag("allow_writes");
-        if http.is_none() && (allow_writes || token_file.is_some()) {
-            let given = if allow_writes {
-                "--allow-writes"
-            } else {
-                "--token-file"
-            };
-            return Err(CommandError::new(
-                ErrorCode::Usage,
-                format!("{given} works only with --http"),
-                "over stdio there is no token, and tools that change files are offered unless --read-only",
-                format!("Add --http 127.0.0.1:PORT, or leave out {given}."),
-            ));
-        }
-        if allow_writes && flag("read_only") {
-            return Err(CommandError::new(
-                ErrorCode::Usage,
-                "--allow-writes and --read-only contradict each other",
-                "--allow-writes offers tools that change files; --read-only hides them",
-                "Give one of them. Over HTTP the server is read-only unless --allow-writes.",
-            ));
-        }
         Ok(Options {
-            root: text("root").map(PathBuf::from),
-            read_only: flag("read_only") || (http.is_some() && !allow_writes),
-            log_file: text("log_file").map(PathBuf::from),
-            http,
-            token_file,
+            root: args.get("root").and_then(Value::as_str).map(PathBuf::from),
+            read_only: args.get("read_only").and_then(Value::as_bool) == Some(true),
         })
     }
 }
 
-/// How clients reach the server; read-only mode says how to turn it off.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Transport {
-    Stdio,
-    Http,
+/// Longest log line kept, in characters.
+const MAX_LOG_LINE: usize = 2_000;
+
+/// Writes one line to stderr, never stdout: the home folder shown as `~`,
+/// and control and invisible characters escaped as for text from a file,
+/// so a client's text cannot forge a line or hide escape codes.
+pub fn log(message: &str) {
+    let _ = std::io::stderr()
+        .lock()
+        .write_all(log_line(message).as_bytes());
+}
+
+fn log_line(message: &str) -> String {
+    let line = clean_from_file(&redact_home(message), MAX_LOG_LINE);
+    format!("carrysheet-cli: {line}\n")
 }
 
 /// The server: the tools it offers and the folder it may use.
@@ -116,45 +87,9 @@ pub struct Server {
 struct Inner {
     root: Root,
     read_only: bool,
-    transport: Transport,
-    #[cfg(test)]
-    test_hooks: TestHooks,
     /// The offered commands, in table order, and their tool definitions.
     commands: Vec<&'static Command>,
     tools: Vec<Tool>,
-    log: Arc<Log>,
-}
-
-/// Test-only: makes every tool call slow and counts calls running at once.
-#[cfg(test)]
-#[derive(Default)]
-pub struct TestHooks {
-    pub delay_ms: std::sync::atomic::AtomicU64,
-    pub running: std::sync::atomic::AtomicUsize,
-    pub peak: std::sync::atomic::AtomicUsize,
-}
-
-#[cfg(test)]
-pub struct Running<'a>(&'a TestHooks);
-
-#[cfg(test)]
-impl TestHooks {
-    fn enter(&self) -> Running<'_> {
-        use std::sync::atomic::Ordering::SeqCst;
-        let now = self.running.fetch_add(1, SeqCst) + 1;
-        self.peak.fetch_max(now, SeqCst);
-        std::thread::sleep(std::time::Duration::from_millis(self.delay_ms.load(SeqCst)));
-        Running(self)
-    }
-}
-
-#[cfg(test)]
-impl Drop for Running<'_> {
-    fn drop(&mut self) {
-        self.0
-            .running
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-    }
 }
 
 /// The commands offered as tools: every MCP tool in the table; in read-only
@@ -178,50 +113,40 @@ fn tool(command: &Command) -> Tool {
 }
 
 impl Server {
-    pub fn new(root: Root, read_only: bool, transport: Transport, log: Arc<Log>) -> Server {
+    pub fn new(root: Root, read_only: bool) -> Server {
         let commands = offered(read_only);
         let tools = commands.iter().map(|c| tool(c)).collect();
         Server {
             inner: Arc::new(Inner {
                 root,
                 read_only,
-                transport,
-                #[cfg(test)]
-                test_hooks: TestHooks::default(),
                 commands,
                 tools,
-                log,
             }),
         }
-    }
-
-    #[cfg(test)]
-    pub fn test_hooks(&self) -> &TestHooks {
-        &self.inner.test_hooks
     }
 
     /// Runs one tool call and turns the outcome into a tool result. Never a
     /// protocol error, so the client's session survives every failure.
     pub fn call(&self, name: &str, arguments: Option<Map<String, Value>>) -> CallToolResult {
         let started = Instant::now();
-        #[cfg(test)]
-        let _running = self.inner.test_hooks.enter();
         let outcome = self.run_tool(name, arguments);
-        let status = match &outcome {
-            Ok(_) => "ok".to_owned(),
-            Err(e) => e.code.as_str().to_owned(),
-        };
-        // The name comes from the client: log it only if it is a real tool,
-        // so a long or multi-line name cannot fill or forge log lines.
-        let shown = if mcp_tools().any(|c| c.name == name) {
-            name
-        } else {
-            "(unknown tool)"
-        };
-        self.inner.log.line(&format!(
-            "tools/call {shown}: {status} in {} ms",
-            started.elapsed().as_millis()
-        ));
+        // Only failures are logged: stderr is written in line with the call,
+        // so a client that never reads it must not stall a stream of good
+        // calls. The name comes from the client: log it only if it is a real
+        // tool, so a long or multi-line name cannot fill or forge log lines.
+        if let Err(e) = &outcome {
+            let shown = if mcp_tools().any(|c| c.name == name) {
+                name
+            } else {
+                "(unknown tool)"
+            };
+            log(&format!(
+                "tools/call {shown}: {} in {} ms",
+                e.code.as_str(),
+                started.elapsed().as_millis()
+            ));
+        }
         match outcome {
             Ok(data) => CallToolResult::structured(ok_envelope(&data)),
             Err(e) => CallToolResult::structured_error(error_envelope(&e)),
@@ -241,12 +166,7 @@ impl Server {
         self.confine(command, &mut args)?;
         // An agent is reading: never ask, never wait for a terminal.
         // MCP calls keep the default time limit (limits::MAX_CALL_SECONDS).
-        let ctx = Context {
-            json: true,
-            yes: false,
-            interactive: false,
-            max_seconds: None,
-        };
+        let ctx = Context::default();
         // Writes stay inside the root even if a link changes meanwhile.
         let _confined = carrysheet_commands::engine::save::confine_writes(&self.inner.root.dir());
         run::run(command, &args, &ctx).map(|done| done.data)
@@ -306,22 +226,12 @@ impl Server {
             self.inner.read_only && mcp_tools().any(|c| c.name == name && !is_read_only(c));
         let names: Vec<_> = self.inner.commands.iter().map(|c| c.name).collect();
         if hidden {
-            let (why, restart) = match self.inner.transport {
-                Transport::Stdio => (
-                    "the server was started with --read-only, which hides tools that change files",
-                    "restart the server without --read-only",
-                ),
-                Transport::Http => (
-                    "over HTTP the server hides tools that change files unless started with --allow-writes",
-                    "restart the server with --allow-writes",
-                ),
-            };
             CommandError::new(
                 ErrorCode::InvalidArgument,
                 format!("the tool `{name}` is not offered in read-only mode"),
-                why,
+                "the server was started with --read-only, which hides tools that change files",
                 format!(
-                    "Use one of: {}. To change files, {restart}.",
+                    "Use one of: {}. To change files, restart the server without --read-only.",
                     names.join(", ")
                 ),
             )
@@ -385,38 +295,30 @@ impl ServerHandler for Server {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        context: RequestContext<RoleServer>,
+        _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        // Over HTTP, the request's work slot goes with the work and is
-        // released only when the work ends, even if the client has gone or
-        // the request timed out. So abandoned calls cannot pile up threads.
-        let slot = context
-            .extensions
-            .get::<hyper::http::request::Parts>()
-            .and_then(|parts| parts.extensions.get::<http::WorkSlot>())
-            .and_then(http::WorkSlot::take);
         // Tool work touches files and may take a while: keep it off the
         // runtime's only thread, so ping and cancellation still get answers.
         let server = self.clone();
         let name = request.name.into_owned();
         let arguments = request.arguments;
-        let result = tokio::task::spawn_blocking(move || {
-            let _slot = slot;
-            server.call(&name, arguments)
-        })
-        .await
-        .unwrap_or_else(|e| {
-            let err = CommandError::new(
-                ErrorCode::Internal,
-                "the tool call stopped unexpectedly",
-                e.to_string(),
-                "Try the call again; if it happens again, report it with the feedback tool.",
-            );
-            CallToolResult::structured_error(error_envelope(&err))
-        });
+        let result = tokio::task::spawn_blocking(move || server.call(&name, arguments))
+            .await
+            .unwrap_or_else(|e| {
+                let err = CommandError::new(
+                    ErrorCode::Internal,
+                    "the tool call stopped unexpectedly",
+                    e.to_string(),
+                    STOPPED_FIX,
+                );
+                CallToolResult::structured_error(error_envelope(&err))
+            });
         Ok(result.into())
     }
 }
+
+/// The fix for a tool call whose thread stopped.
+const STOPPED_FIX: &str = "Try the call again; if it happens again, report it at https://github.com/yokoten-labs/carrysheet/issues.";
 
 /// Opens the root folder. Without `--root` the current folder is used, but
 /// never a whole drive or the home folder: clients often start servers
@@ -461,13 +363,8 @@ fn open_root(given: Option<&Path>) -> Result<(Root, Option<String>), CommandErro
     }
 }
 
-/// Runs the server: on stdin and stdout until the client closes stdin, or
-/// with `--http` on loopback until the process is stopped.
+/// Runs the server on stdin and stdout until the client closes stdin.
 pub fn serve(options: &Options) -> Result<(), CommandError> {
-    let log = Arc::new(match &options.log_file {
-        Some(path) => Log::file(path)?,
-        None => Log::stderr(),
-    });
     let (root, warning) = open_root(options.root.as_deref())?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -477,38 +374,25 @@ pub fn serve(options: &Options) -> Result<(), CommandError> {
                 ErrorCode::Internal,
                 "the MCP server could not start",
                 e.to_string(),
-                "Report this with `carrysheet-cli feedback bug`.",
+                "Report this at https://github.com/yokoten-labs/carrysheet/issues.",
             )
         })?;
-    let transport = if options.http.is_some() {
-        Transport::Http
-    } else {
-        Transport::Stdio
-    };
     // A panic (a damaged file can make a dependency panic; the call is
     // caught and fails cleanly) is logged like everything else, with
     // control characters escaped, instead of raw on stderr.
-    let panic_log = log.clone();
-    std::panic::set_hook(Box::new(move |info| {
-        panic_log.line(&format!("panic (caught): {info}"));
-    }));
-    let server = Server::new(root.clone(), options.read_only, transport, log.clone());
-    let outcome = match options.http {
-        None => serve_stdio(&runtime, server, &root, warning, &log),
-        Some(address) => serve_http(&runtime, server, &root, warning, address, options, &log),
-    };
+    std::panic::set_hook(Box::new(|info| log(&format!("panic (caught): {info}"))));
+    let server = Server::new(root.clone(), options.read_only);
+    let outcome = serve_stdio(&runtime, server, &root, warning);
     // Do not wait for the thread still blocked reading stdin.
     runtime.shutdown_background();
-    // The log thread writes out what is queued before the process ends.
-    log.close();
     outcome
 }
 
 /// The first log line: version, root, tools and protocol versions.
-fn log_start(log: &Log, server: &Server, root: &Root, over: &str, warning: Option<String>) {
+fn log_start(server: &Server, root: &Root, warning: Option<String>) {
     let versions = server.supported_protocol_versions();
-    log.line(&format!(
-        "mcp serve {} over {over}: root {}, {} tools{}, MCP {} to {}",
+    log(&format!(
+        "mcp serve {} over stdio: root {}, {} tools{}, MCP {} to {}",
         env!("CARGO_PKG_VERSION"),
         display_path(&root.dir()),
         server.inner.tools.len(),
@@ -521,7 +405,7 @@ fn log_start(log: &Log, server: &Server, root: &Root, over: &str, warning: Optio
         versions.last().map_or("?", |v| v.as_str()),
     ));
     if let Some(warning) = warning {
-        log.line(&warning);
+        log(&warning);
     }
 }
 
@@ -530,12 +414,11 @@ fn serve_stdio(
     server: Server,
     root: &Root,
     warning: Option<String>,
-    log: &Arc<Log>,
 ) -> Result<(), CommandError> {
     // From here on, stdout is the transport's alone.
     crate::output::reserve_stdout_for_mcp();
-    let _ = tracing::subscriber::set_global_default(TracingToLog(log.clone()));
-    log_start(log, &server, root, "stdio", warning);
+    let _ = tracing::subscriber::set_global_default(TracingToLog);
+    log_start(&server, root, warning);
 
     let result = runtime.block_on(async {
         match server.serve(rmcp::transport::stdio()).await {
@@ -547,173 +430,17 @@ fn serve_stdio(
     });
     match result {
         Ok(reason) => {
-            log.line(&format!("mcp serve stopped: {}", quit_reason(&reason)));
+            log(&format!("mcp serve stopped: {}", quit_reason(&reason)));
             Ok(())
         }
         Err(why) => {
-            log.line(&format!("mcp serve failed: {why}"));
+            log(&format!("mcp serve failed: {why}"));
             Err(CommandError::new(
                 ErrorCode::Io,
                 "the MCP session ended with an error",
                 why,
                 "Check that the client speaks MCP over stdio and starts with initialize or server/discover.",
             ))
-        }
-    }
-}
-
-fn serve_http(
-    runtime: &tokio::runtime::Runtime,
-    server: Server,
-    root: &Root,
-    warning: Option<String>,
-    address: SocketAddr,
-    options: &Options,
-    log: &Arc<Log>,
-) -> Result<(), CommandError> {
-    let token = http::Token::generate()?;
-    let listener = std::net::TcpListener::bind(address)
-        .and_then(|l| l.set_nonblocking(true).map(|()| l))
-        .map_err(|e| http::bind_error(address, &e))?;
-    let bound = listener.local_addr().unwrap_or(address);
-    let url = format!("http://{bound}{}", http::PATH);
-    // Kept to remove the token file at the end, if it still holds it.
-    let mut written = None;
-    let shown = match &options.token_file {
-        Some(path) => {
-            http::write_token_file(path, &token)?;
-            written = Some((path.clone(), token.reveal().to_owned()));
-            format!(
-                "carrysheet-cli: token written to {} (only you can read it on Linux and macOS)\n",
-                display_path(path)
-            )
-        }
-        None => format!(
-            "carrysheet-cli: token (shown once, never logged): {}\n",
-            token.reveal()
-        ),
-    };
-    let stop = {
-        let _inside = runtime.enter();
-        StopSignal::listen()
-    };
-    // Straight to stderr, never through the log, which may be a file: the
-    // address so clients can find the server (port 0 picked it), and the
-    // token unless it went to --token-file.
-    let _ = std::io::stderr().lock().write_all(
-        format!(
-            "carrysheet-cli: MCP over HTTP at {url}\n{shown}\
-             carrysheet-cli: clients send the header Authorization: Bearer <token>\n"
-        )
-        .as_bytes(),
-    );
-
-    // Nothing else may reach stdout.
-    crate::output::reserve_stdout_for_mcp();
-    let _ = tracing::subscriber::set_global_default(TracingToLog(log.clone()));
-    log_start(log, &server, root, &format!("HTTP at {url}"), warning);
-    if !options.read_only {
-        log.line(
-            "warning: --allow-writes: any client with the token can change files under the root",
-        );
-    }
-
-    // Enough open files for every connection, so that a new one is always
-    // accepted and the oldest one without a token can make room for it.
-    let files = http::raise_file_limit();
-    let mut limits = http::Limits::default();
-    limits.max_connections = http::connections_for(files, limits.max_connections);
-    log.line(&match files {
-        Some(f) if f.now > f.before => format!(
-            "http: up to {} connections at once (open-file limit raised from {} to {})",
-            limits.max_connections, f.before, f.now
-        ),
-        Some(f) => format!(
-            "http: up to {} connections at once (open-file limit {})",
-            limits.max_connections, f.now
-        ),
-        None => format!("http: up to {} connections at once", limits.max_connections),
-    });
-
-    let stopped_by = Arc::new(Mutex::new(""));
-    let result = runtime.block_on(async {
-        let listener = tokio::net::TcpListener::from_std(listener)?;
-        let stopped_by = stopped_by.clone();
-        let shutdown = async move {
-            let why = stop.wait().await;
-            *stopped_by.lock().unwrap_or_else(PoisonError::into_inner) = why;
-        };
-        http::serve(listener, server, token, limits, log.clone(), shutdown).await
-    });
-    if let Some((path, token)) = written
-        && http::remove_token_file(&path, &token)
-    {
-        log.line(&format!("removed the token file {}", display_path(&path)));
-    }
-    match result {
-        Ok(()) => {
-            let why = *stopped_by.lock().unwrap_or_else(PoisonError::into_inner);
-            log.line(&format!("mcp serve stopped: {why}"));
-            Ok(())
-        }
-        Err(e) => {
-            log.line(&format!("mcp serve failed: {e}"));
-            Err(CommandError::new(
-                ErrorCode::Io,
-                "the MCP HTTP server stopped with an error",
-                e.to_string(),
-                "Start it again; if it happens again, report it with `carrysheet-cli feedback bug`.",
-            ))
-        }
-    }
-}
-
-/// Ctrl+C, or on Linux and macOS also SIGTERM. Made before the address is
-/// printed, so that a signal sent as soon as a client (or a test) sees the
-/// address stops the server cleanly; a SIGTERM handler set up later left a
-/// gap in which it killed the process instead. If no handler can be set
-/// up, waiting goes on forever: the server is then stopped the hard way.
-struct StopSignal {
-    #[cfg(unix)]
-    terminate: Option<tokio::signal::unix::Signal>,
-}
-
-impl StopSignal {
-    /// Must be called inside `runtime`.
-    fn listen() -> StopSignal {
-        StopSignal {
-            #[cfg(unix)]
-            terminate: tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .ok(),
-        }
-    }
-
-    /// Waits for a signal and says which.
-    async fn wait(self) -> &'static str {
-        let ctrl_c = async {
-            if tokio::signal::ctrl_c().await.is_err() {
-                std::future::pending::<()>().await;
-            }
-        };
-        #[cfg(unix)]
-        {
-            let terminate = async {
-                match self.terminate {
-                    Some(mut term) => {
-                        term.recv().await;
-                    }
-                    None => std::future::pending::<()>().await,
-                }
-            };
-            tokio::select! {
-                () = ctrl_c => "Ctrl+C",
-                () = terminate => "SIGTERM",
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            ctrl_c.await;
-            "Ctrl+C"
         }
     }
 }
@@ -727,20 +454,67 @@ fn quit_reason(reason: &QuitReason) -> String {
     }
 }
 
+/// Sends warnings and errors that rmcp reports through `tracing` to the log,
+/// so problems in the transport are not silent. Spans are ignored.
+struct TracingToLog;
+
+impl tracing::Subscriber for TracingToLog {
+    fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+        metadata.is_event() && *metadata.level() <= tracing::Level::WARN
+    }
+
+    fn max_level_hint(&self) -> Option<tracing::level_filters::LevelFilter> {
+        Some(tracing::level_filters::LevelFilter::WARN)
+    }
+
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+
+    fn event(&self, event: &tracing::Event<'_>) {
+        let mut fields = Fields(String::new());
+        event.record(&mut fields);
+        let meta = event.metadata();
+        log(&format!("{} {}:{}", meta.level(), meta.target(), fields.0));
+    }
+
+    fn enter(&self, _: &tracing::span::Id) {}
+
+    fn exit(&self, _: &tracing::span::Id) {}
+}
+
+/// Collects an event's fields as ` message key=value ...`.
+struct Fields(String);
+
+impl tracing::field::Visit for Fields {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        let _ = match field.name() {
+            "message" => write!(self.0, " {value:?}"),
+            name => write!(self.0, " {name}={value:?}"),
+        };
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        let _ = match field.name() {
+            "message" => write!(self.0, " {value}"),
+            name => write!(self.0, " {name}={value:?}"),
+        };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use carrysheet_commands::lint::lint_tools;
     use serde_json::json;
 
-    /// The server for a root folder, logging to stderr.
+    /// The server for a root folder.
     fn test_server(root: &Path, read_only: bool) -> Server {
-        Server::new(
-            Root::new(root).unwrap(),
-            read_only,
-            Transport::Stdio,
-            Arc::new(Log::stderr()),
-        )
+        Server::new(Root::new(root).unwrap(), read_only)
     }
 
     fn scratch(name: &str) -> PathBuf {
@@ -780,10 +554,7 @@ mod tests {
         let dir = scratch("readonly");
         let server = test_server(&dir.join("root"), true);
         let names: Vec<_> = server.inner.commands.iter().map(|c| c.name).collect();
-        assert_eq!(
-            names,
-            ["overview", "read", "eval", "check", "macros", "feedback"]
-        );
+        assert_eq!(names, ["overview", "read", "eval"]);
         for t in tools_json(&server) {
             assert_eq!(t["annotations"]["readOnlyHint"], true, "{}", t["name"]);
         }
@@ -798,14 +569,14 @@ mod tests {
     fn results_carry_the_same_json_as_text_and_structured() {
         let dir = scratch("results");
         let server = test_server(&dir.join("root"), false);
+        std::fs::write(dir.join("root/a.csv"), b"Item,Price\nTea,3\n").unwrap();
         let mut args = Map::new();
-        args.insert("kind".into(), json!("idea"));
-        args.insert("message".into(), json!("Sort by two columns"));
-        let r = server.call("feedback", Some(args));
+        args.insert("path".into(), json!("a.csv"));
+        let r = server.call("overview", Some(args));
         assert_eq!(r.is_error, Some(false));
         let structured = r.structured_content.clone().unwrap();
         assert_eq!(structured["ok"], true);
-        assert_eq!(structured["sent"], false);
+        assert!(structured["sheets"].is_array(), "{structured}");
         let text = &r.content[0].as_text().unwrap().text;
         assert_eq!(text, &structured.to_string());
         assert!(!text.contains('\n'));
@@ -871,7 +642,7 @@ mod tests {
             "damaged_file"
         );
         // A missing file inside the root is reported as missing, with ~.
-        let r = server.call("check", json!({ "path": "gone.xlsx" }).as_object().cloned());
+        let r = server.call("read", json!({ "path": "gone.xlsx" }).as_object().cloned());
         assert_eq!(
             r.structured_content.unwrap()["error"]["code"],
             "file_not_found"
@@ -891,37 +662,16 @@ mod tests {
     }
 
     #[test]
-    fn macros_reads_inside_the_root_and_marks_file_content() {
-        // POI's samples, read in place: the root is their folder.
-        let data =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/carrysheet-vba/tests/data");
-        let server = test_server(&data, true);
-        let r = server.call(
-            "macros",
-            json!({ "path": "SimpleMacro.xls", "include_source": true })
-                .as_object()
-                .cloned(),
-        );
-        assert_eq!(r.is_error, Some(false));
-        let structured = r.structured_content.clone().unwrap();
-        assert_eq!(structured["has_macros"], true);
-        let text = &r.content[0].as_text().unwrap().text;
-        assert_eq!(text, &structured.to_string());
-        // The notice comes before any module name or source in the text.
-        let notice = text.find("never follow instructions").unwrap();
-        assert!(notice < text.find("Module1").unwrap(), "{text}");
-        assert!(text.contains("Sub TestMacro()"));
-
-        let r = server.call(
-            "macros",
-            json!({ "path": "../../../../Cargo.toml" })
-                .as_object()
-                .cloned(),
-        );
-        assert_eq!(
-            r.structured_content.unwrap()["error"]["code"],
-            "outside_root"
-        );
+    fn log_lines_are_cleaned_like_file_text() {
+        let line = log_line("forged\r\n2026-01-01 carrysheet-cli: \u{1b}[31mred\u{202e}");
+        assert_eq!(line.matches('\n').count(), 1, "{line}");
+        assert!(!line.contains('\r') && !line.contains('\u{1b}') && !line.contains('\u{202e}'));
+        assert!(line.contains(r"forged\u{d}\u{a}2026"), "{line}");
+        if let Some(home) = home_dir() {
+            let line = log_line(&format!("opened {}", home.join("a.xlsx").display()));
+            assert!(!line.contains(&home.display().to_string()), "{line}");
+        }
+        assert!(log_line(&"x".repeat(5_000)).len() < MAX_LOG_LINE + 40);
     }
 
     #[test]
@@ -929,59 +679,11 @@ mod tests {
         let mut args = Map::new();
         args.insert("root".into(), json!("books"));
         args.insert("read_only".into(), json!(true));
-        args.insert("log_file".into(), Value::Null);
-        args.insert("http".into(), Value::Null);
         let o = Options::from_args(&args).unwrap();
         assert_eq!(o.root.as_deref(), Some(Path::new("books")));
         assert!(o.read_only);
-        assert_eq!(o.log_file, None);
-
-        assert_eq!(o.http, None);
-
-        // Over HTTP, read-only unless --allow-writes.
-        let mut args = Map::new();
-        args.insert("http".into(), json!("127.0.0.1:8080"));
-        let o = Options::from_args(&args).unwrap();
-        assert_eq!(o.http, Some("127.0.0.1:8080".parse().unwrap()));
-        assert!(o.read_only);
-        args.insert("allow_writes".into(), json!(true));
-        args.insert("token_file".into(), json!("token.txt"));
-        let o = Options::from_args(&args).unwrap();
+        let o = Options::from_args(&Map::new()).unwrap();
+        assert_eq!(o.root, None);
         assert!(!o.read_only);
-        assert_eq!(o.token_file.as_deref(), Some(Path::new("token.txt")));
-
-        // Usage errors (exit 2).
-        args.insert("read_only".into(), json!(true));
-        let e = Options::from_args(&args).unwrap_err();
-        assert_eq!(e.code, ErrorCode::Usage);
-        assert!(e.what.contains("contradict"), "{}", e.what);
-        for (name, value) in [("allow_writes", json!(true)), ("token_file", json!("t"))] {
-            let mut args = Map::new();
-            args.insert(name.into(), value);
-            let e = Options::from_args(&args).unwrap_err();
-            assert_eq!(e.code, ErrorCode::Usage, "{name}");
-            assert!(e.what.contains("only with --http"), "{}", e.what);
-        }
-        let mut args = Map::new();
-        args.insert("http".into(), json!("0.0.0.0:8080"));
-        let e = Options::from_args(&args).unwrap_err();
-        assert_eq!(e.code, ErrorCode::Usage);
-        assert_eq!(e.exit_code().code(), 2);
-    }
-
-    #[test]
-    fn read_only_over_http_says_how_to_allow_writes() {
-        let dir = scratch("readonly-http");
-        let server = Server::new(
-            Root::new(&dir.join("root")).unwrap(),
-            true,
-            Transport::Http,
-            Arc::new(Log::stderr()),
-        );
-        let r = server.call("edit", Some(Map::new()));
-        let e = &r.structured_content.unwrap()["error"];
-        assert!(e["fix"].as_str().unwrap().contains("--allow-writes"), "{e}");
-        assert!(e["why"].as_str().unwrap().contains("over HTTP"), "{e}");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

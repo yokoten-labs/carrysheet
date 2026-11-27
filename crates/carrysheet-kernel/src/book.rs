@@ -173,9 +173,9 @@ impl Book {
             .and_then(|e| e.to_str())
             .map(str::to_ascii_lowercase)
             .unwrap_or_default();
-        // GridCraft reads text named .xlsx as csv. An .xlsx that is not a
-        // zip package is damaged or not what it says, so refuse it.
-        if matches!(ext.as_str(), "xlsx" | "xlsm" | "xltx" | "xltm")
+        // GridCraft reads text named .xlsx as csv. An .xlsx or .xlsb that is
+        // not a zip package is damaged or not what it says, so refuse it.
+        if matches!(ext.as_str(), "xlsx" | "xlsm" | "xltx" | "xltm" | "xlsb")
             && sniffed == gridcraft_xlsx::Format::Csv
         {
             return Err(CommandError::new(
@@ -192,8 +192,12 @@ impl Book {
             gridcraft_xlsx::Format::Ods => SourceKind::Imported("ods"),
             _ => SourceKind::Imported("xls"),
         };
-        let (mut wb, warnings) =
-            gridcraft_engine::io::open_bytes(&name, &bytes).map_err(|e| open_error(path, &e))?;
+        // Text goes through the csv front end, which keeps what was written.
+        let (mut wb, warnings) = if kind == SourceKind::Csv {
+            crate::csv::read(path, &name, &bytes)?
+        } else {
+            gridcraft_engine::io::open_bytes(&name, &bytes).map_err(|e| open_error(path, &e))?
+        };
         // Relative links to other workbooks are rewritten when saving to
         // another folder.
         wb.source_dir = std::path::absolute(path)
@@ -271,6 +275,15 @@ impl Book {
                 .iter()
                 .map(|w| clean_from_file(w, 200))
                 .collect(),
+            macros: match self.kind {
+                SourceKind::Package => crate::package::macros(&self.source, true),
+                // An .xlsb is a zip with the same part names.
+                SourceKind::Imported("xlsb") => crate::package::macros(&self.source, false),
+                SourceKind::Imported(format) => Some(format!(
+                    "not checked: Carrysheet cannot see macros in .{format} files; it never runs them"
+                )),
+                SourceKind::Csv => None,
+            },
         })
     }
 

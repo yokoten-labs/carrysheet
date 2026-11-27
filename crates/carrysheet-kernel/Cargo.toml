@@ -17,6 +17,10 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # Lists and unpacks package parts for the save report: the hardened zip
 # reader (issue 40).
 carrysheet-zip = { path = "../carrysheet-zip", version = "0.1.0" }
+# The csv front end: decodes legacy encodings (record 0010, decision 3);
+# the versions the old csv reader used.
+encoding_rs = "=0.8.42"
+chardetng = "=0.1.17"
 
 [dev-dependencies]
 # Builds deflate streams for the hostile-file tests, and checks CRC-32s in

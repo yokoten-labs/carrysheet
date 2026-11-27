@@ -164,6 +164,9 @@ pub fn overview<E: Engine>(
     data.insert("sheets".into(), Value::Array(sheets));
     data.insert("date_system".into(), json!(overview.date_system));
     data.insert("defined_names".into(), json!(overview.defined_names));
+    if let Some(macros) = &overview.macros {
+        data.insert("macros".into(), json!(macros));
+    }
     if !overview.warnings.is_empty() {
         data.insert("warnings".into(), json!(overview.warnings));
     }

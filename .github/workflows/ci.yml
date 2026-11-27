@@ -163,7 +163,7 @@ jobs:
         run: node --test scripts/tests/lines.test.mjs
 
       - name: node scripts/lines.mjs
-        run: node scripts/lines.mjs --max 29000
+        run: node scripts/lines.mjs --max 16400
 
   # Record 0009 decision 5.1, kept by record 0010: vendor/gridcraft is
   # upstream GridCraft at the pinned commit plus our patch files. verify

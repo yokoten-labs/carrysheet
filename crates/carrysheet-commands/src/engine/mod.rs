@@ -86,6 +86,10 @@ pub struct Overview {
     /// What the engine skipped or repaired while reading the file.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// When the file holds macros (which kinds, never run, kept on save or
+    /// not), or that they were not checked. Absent: none, or a csv file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub macros: Option<String>,
 }
 
 impl Overview {
@@ -110,6 +114,7 @@ impl Overview {
             date_system: wb.date_system.as_str().to_owned(),
             defined_names: wb.defined_names.len(),
             warnings: Vec::new(),
+            macros: None,
         }
     }
 }

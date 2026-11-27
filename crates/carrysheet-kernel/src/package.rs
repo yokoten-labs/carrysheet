@@ -728,6 +728,77 @@ fn features(p: &mut Package<'_>) -> (BTreeMap<&'static str, u64>, Vec<&'static s
     (m, unchecked)
 }
 
+/// Features that are macros: never run, kept when the save keeps them.
+const MACRO_FEATURES: &[&str] = &["VBA project", "macro sheets (Excel 4)"];
+
+/// Content types that declare macros, lowercased: a VBA project, and
+/// Excel 4 macro sheets (`macrosheet` also matches `intlmacrosheet` and the
+/// binary .xlsb type).
+const MACRO_TYPES: &[(&str, &[u8])] = &[
+    ("VBA project", b"vbaproject"),
+    ("macro sheets (Excel 4)", b"macrosheet"),
+];
+
+/// What `overview` says about macros in a zip package (xlsx, xlsm, xlsb),
+/// found by part name and by the content types in `[Content_Types].xml`:
+/// Excel finds a VBA project by relationship and content type, so a
+/// renamed part is still found. Only that one part is unpacked, and nothing
+/// in the text comes from the file. `None` only when both were read and
+/// neither names a macro; when either cannot be read, says that macros were
+/// not checked. `kept` is false when a save cannot keep them (an .xlsb is
+/// imported).
+pub(crate) fn macros(bytes: &[u8], kept: bool) -> Option<String> {
+    let mut p = match Package::open(bytes) {
+        Ok(p) => p,
+        Err(why) => {
+            return Some(format!(
+                "not checked: Carrysheet cannot list the file's parts ({why}); it never runs macros"
+            ));
+        }
+    };
+    let mut found: Vec<&str> = PART_FEATURES
+        .iter()
+        .filter(|(label, test)| MACRO_FEATURES.contains(label) && p.names().any(test))
+        .map(|(label, _)| *label)
+        .collect();
+    let mut typed = [false; MACRO_TYPES.len()];
+    // A plain byte search cannot see through XML character references or a
+    // UTF-16 encoding, so content types written that way are not checked.
+    let mut encoded = false;
+    let read = p.each(|n| n == "[content_types].xml", &mut |data| {
+        let low = data.to_ascii_lowercase();
+        for (seen, (_, needle)) in typed.iter_mut().zip(MACRO_TYPES) {
+            *seen |= count(&low, needle) > 0;
+        }
+        encoded |= count(data, b"&#") > 0
+            || data.contains(&0)
+            || data.starts_with(&[0xFF, 0xFE])
+            || data.starts_with(&[0xFE, 0xFF]);
+    });
+    for (seen, (label, _)) in typed.iter().zip(MACRO_TYPES) {
+        if *seen && !found.contains(label) {
+            found.push(label);
+        }
+    }
+    if found.is_empty() && (!read || encoded) {
+        return Some(
+            "not checked: Carrysheet cannot read the file's content types; it never runs macros"
+                .to_owned(),
+        );
+    }
+    let save = if kept {
+        "keeps them on save where the format can hold them, and says before a save that would drop them"
+    } else {
+        "a save may not keep them (what the import skips is not listed)"
+    };
+    (!found.is_empty()).then(|| {
+        format!(
+            "has macros ({}): Carrysheet never runs them; {save}",
+            found.join(", ")
+        )
+    })
+}
+
 /// Feature counts of a package, for reports when the output is not one.
 /// When its parts cannot be listed, why.
 pub(crate) fn source_features(bytes: &[u8]) -> Result<BTreeMap<&'static str, u64>, String> {
@@ -1180,5 +1251,77 @@ mod tests {
         assert_eq!(label("xl/drawings/drawing1.xml"), Some("drawings"));
         assert_eq!(label("customxml/itemprops1.xml"), None);
         assert_eq!(label("xl/worksheets/sheet1.xml"), None);
+    }
+
+    #[test]
+    fn macros_are_found_by_part_name_or_said_unchecked() {
+        let vba = zip_of(&[("xl/vbaProject.bin", b"x", None)]);
+        let said = macros(&vba, true).unwrap();
+        assert!(
+            said.contains("VBA project") && said.contains("keeps them"),
+            "{said}"
+        );
+        let said = macros(&vba, false).unwrap();
+        assert!(
+            said.contains("never runs") && said.contains("may not keep"),
+            "{said}"
+        );
+
+        let xlm = zip_of(&[("xl/macrosheets/sheet1.xml", b"<x/>", None)]);
+        let said = macros(&xlm, true).unwrap();
+        assert!(said.contains("macro sheets (Excel 4)"), "{said}");
+
+        let none = zip_of(&[("xl/worksheets/sheet1.xml", b"<x/>", None)]);
+        assert_eq!(macros(&none, true), None);
+
+        // Excel finds the project by content type, so the part name is free.
+        let renamed = zip_of(&[
+            (
+                "[Content_Types].xml",
+                br#"<Types><Override PartName="/xl/project1.bin" ContentType="application/vnd.ms-office.VbaProject"/><Override PartName="/xl/x/m.xml" ContentType="application/vnd.ms-excel.intlmacrosheet+xml"/></Types>"#,
+                None,
+            ),
+            ("xl/project1.bin", b"x", None),
+            ("xl/x/m.xml", b"<x/>", None),
+        ]);
+        let said = macros(&renamed, true).unwrap();
+        assert!(
+            said.contains("VBA project") && said.contains("macro sheets (Excel 4)"),
+            "{said}"
+        );
+        let plain = zip_of(&[(
+            "[Content_Types].xml",
+            br#"<Types><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>"#,
+            None,
+        )]);
+        assert_eq!(macros(&plain, true), None);
+
+        // Content types a byte search cannot read are said unchecked.
+        let referenced = zip_of(&[
+            (
+                "[Content_Types].xml",
+                br#"<Types><Override PartName="/xl/project1.bin" ContentType="application/vnd.ms-office.vba&#x50;roject"/></Types>"#,
+                None,
+            ),
+            ("xl/project1.bin", b"x", None),
+        ]);
+        let said = macros(&referenced, true).unwrap();
+        assert!(said.starts_with("not checked:"), "{said}");
+        let utf16: Vec<u8> = [0xFF, 0xFE]
+            .into_iter()
+            .chain("<Types/>".bytes().flat_map(|b| [b, 0]))
+            .collect();
+        let wide = zip_of(&[
+            ("[Content_Types].xml", utf16.as_slice(), None),
+            ("xl/project1.bin", b"x", None),
+        ]);
+        let said = macros(&wide, true).unwrap();
+        assert!(said.starts_with("not checked:"), "{said}");
+
+        let said = macros(b"not a zip", true).unwrap();
+        assert!(
+            said.starts_with("not checked:") && said.contains("never runs"),
+            "{said}"
+        );
     }
 }

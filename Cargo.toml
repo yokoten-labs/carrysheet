@@ -30,14 +30,6 @@ opt-level = 3
 [profile.dev.package.flate2]
 opt-level = 3
 
-# The same for the VBA reader (carrysheet-vba tests/hostile.rs probes):
-# unoptimized, 400 sources full of hits took 3.3 s of a 10 s limit on an
-# M-series Mac and 12.5 s on a GitHub macOS runner, so the limit measured
-# the debug build. Optimized: 0.24 s. Overflow checks stay on (they follow
-# the dev profile, not opt-level).
-[profile.dev.package.carrysheet-vba]
-opt-level = 3
-
 # Release builds: small and fast binaries. Measured on carrysheet-cli 0.1.0,
 # x86_64-unknown-linux-gnu, rustc 1.99.1, one build job:
 #   default profile                          1,522,184 bytes, 22 s
@@ -54,13 +46,10 @@ lto = "fat"
 codegen-units = 1
 strip = "symbols"
 opt-level = 3
-# "unwind" is the default. No reader relies on catch_unwind any more
-# (carrysheet-cfb returns errors, issue 42); moving to "abort" (8% smaller,
-# see above) is a separate decision.
+# "unwind" is the default: a command catches a panic from GridCraft and fails
+# cleanly. Moving to "abort" (8% smaller, see above) is a separate decision.
 panic = "unwind"
 # Overflow checks stay on in releases (issue 59): a size or offset from a
 # hostile file that overflows should stop (a panic) rather than wrap and be
-# misread. Measured with a bench outside the repo that reads each crate's
-# tests/data, median of 3 runs [spread], checks off -> this profile:
-#   vba, 5 files x 500            1607 ms [1587-1632] -> 1631 ms [1618-1652]  +2%
+# misread. Measured on the VBA reader that has since left: +2%.
 overflow-checks = true
