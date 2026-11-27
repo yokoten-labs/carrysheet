@@ -116,6 +116,9 @@ fn open_read_edit_save_reopen() {
             .unwrap();
     assert!(done["output"].as_str().unwrap().ends_with("prices-edited.xlsx"));
     assert_eq!(done["changes_total"], 4);
+    // A dry run still works once that file exists: it writes nothing.
+    let e = call("edit", json!({ "path": p(&book), "ops": ops, "dry_run": true })).unwrap();
+    assert_eq!(e["dry_run"], true, "{e:?}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

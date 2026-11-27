@@ -169,7 +169,9 @@ pub fn prepare_output(
         None => default_output(&path),
     };
     output_format(&output, text(args, "format"))?;
-    check_output(&output, overwrite, exists)?;
+    if !flag(args, "dry_run") {
+        check_output(&output, overwrite, exists)?;
+    }
     args.insert("output".into(), json!(output.to_string_lossy()));
     Ok(Some(output))
 }

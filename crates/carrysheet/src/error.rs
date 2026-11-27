@@ -55,8 +55,6 @@ pub enum ErrorCode {
     NoSuchSheet,
     /// Deleting or overwriting needs `confirm: true`, and it was not given.
     ConfirmationRequired,
-    /// A formula could not be computed.
-    Formula,
     /// Reading or writing failed.
     Io,
     /// A bug in Carrysheet (including a caught panic in the kernel).

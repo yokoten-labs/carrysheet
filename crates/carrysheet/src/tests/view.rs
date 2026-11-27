@@ -275,4 +275,8 @@ fn read_empty_sheet_and_outside_used_range() {
         ..ReadRequest::default()
     };
     assert_eq!(e.read_range(&b, &req).unwrap_err().code, ErrorCode::NoSuchSheet);
+    // A missing sheet's name is escaped: no terminal codes reach stderr.
+    let range = Some(SheetRange::parse("'\u{1b}]52;c;eA==\u{7}'!A1").unwrap());
+    let e = e.read_range(&b, &ReadRequest { range, ..ReadRequest::default() }).unwrap_err();
+    assert!(!e.what.contains(['\u{1b}', '\u{7}']), "{}", e.what);
 }

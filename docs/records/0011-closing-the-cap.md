@@ -28,7 +28,7 @@ The owner's options were: format only; format and the sweep; format and cut `eva
 | Change | Lines, measured |
 |---|---|
 | `rustfmt.toml`: `use_small_heuristics = "Max"`, then `cargo fmt --all`. One commit, no logic change | 5,467 to 5,218 (-249) |
-| `range::validate_sheet_name`, `range::Shape`, `CommandError::not_implemented` and `ErrorCode::NotImplemented` (nothing returned it) | to 5,163 (-55) |
+| `range::validate_sheet_name` (a range check; `changes/sheet-name-check.md` has the visible change), `range::Shape`, `CommandError::not_implemented` and `ErrorCode::NotImplemented` (nothing returned it) | to 5,163 (-55) |
 | `eval`: the command, its arguments, its view code and its MCP tool | to 5,042 (-121) |
 | `edit` without `output` writes only `name-edited.xlsx`; the `-edited-2` to `-edited-99` search leaves | to 5,020 (-22) |
 | The `parts` counts in the save report (identical, rewritten, dropped, added) | to 4,993 (-27) |
@@ -54,13 +54,13 @@ Record 0010's budget assumed `cap-std` and an `eval` in `view.rs`. These are the
 |---|---|---|
 | `carrysheet/src/lib.rs` | 242 | 239 |
 | `args.rs` | 598 | 579 |
-| `error.rs` | 188 | 160 |
+| `error.rs` | 188 | 158 |
 | `text.rs` | 100 | 95 |
 | `open.rs` | 318 | 301 |
 | `range.rs` | 145 | 96 |
 | `view.rs` | 715 | 572 |
 | `edit.rs` | 765 | 691 |
-| `save.rs` | 515 | 447 |
+| `save.rs` | 515 | 449 |
 | `save/loss.rs` | 270 | 231 |
 | `commands/limits.rs` | 40 | 40 |
 | `carrysheet-cli/src/main.rs` | 77 | 71 |

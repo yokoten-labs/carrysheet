@@ -174,7 +174,7 @@ impl Book {
 pub(crate) fn no_such_sheet(name: &str) -> CommandError {
     CommandError::new(
         ErrorCode::NoSuchSheet,
-        format!("there is no sheet named \"{name}\""),
+        format!("there is no sheet named {}", crate::text::quote(name, 64)),
         "the workbook has no sheet with that name (names are compared without case)",
         "Run overview to see the sheet names.",
     )

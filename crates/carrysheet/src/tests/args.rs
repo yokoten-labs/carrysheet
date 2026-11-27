@@ -35,7 +35,7 @@ fn names_are_unique_snake_case() {
 
 #[test]
 fn mvp_commands_are_all_there() {
-    for name in ["overview", "read", "eval", "convert", "edit", "mcp_serve", "commands"] {
+    for name in ["overview", "read", "convert", "edit", "mcp_serve", "commands"] {
         assert!(command(name).is_some(), "{name}");
     }
 }
@@ -101,7 +101,7 @@ fn read_only_commands_are_not_destructive() {
 #[test]
 fn mcp_tools_in_fixed_order_and_few() {
     let tools: Vec<_> = mcp_tools().map(|c| c.name).collect();
-    assert_eq!(tools, ["overview", "read", "eval", "convert", "edit"]);
+    assert_eq!(tools, ["overview", "read", "convert", "edit"]);
 }
 
 #[test]
@@ -255,9 +255,9 @@ fn refuses_missing_required() {
     assert!(e.fix.contains("The workbook"), "{}", e.fix);
     let e = validate_args(read(), &json!({ "path": null })).unwrap_err();
     assert!(e.why.contains("missing field `path`"));
-    let eval = command("eval").unwrap();
-    let e = validate_args(eval, &json!({ "path": "a" })).unwrap_err();
-    assert!(e.what.contains("`formula`"), "{}", e.what);
+    let edit = command("edit").unwrap();
+    let e = validate_args(edit, &json!({ "path": "a" })).unwrap_err();
+    assert!(e.what.contains("`ops`"), "{}", e.what);
 }
 
 #[test]
