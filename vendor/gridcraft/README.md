@@ -53,11 +53,11 @@ Every change is in a patch file in `patches/`; "Check" below says how CI proves 
 
 3. Patches from review round 1 of issue 45 (record 0003: a hostile file fails fast and a save
    loses nothing silently). Each is marked `Carrysheet patch` in the code; Carrysheet's
-   regression tests are in `crates/carrysheet-kernel/tests/limits.rs` and `keep.rs`.
+   regression tests are in `crates/carrysheet/tests/limits.rs` and `keep.rs`.
 
    Limits of one call (H2, H3, M3, M7). Carrysheet sets them before each call
-   (`crates/carrysheet-kernel/src/limits.rs`; the values are in
-   `crates/carrysheet-commands/src/limits.rs`). Without them GridCraft behaves as upstream.
+   (`Limits` in `crates/carrysheet/src/lib.rs`; the values are in
+   `crates/carrysheet/src/commands/limits.rs`). Without them GridCraft behaves as upstream.
 
    | File | Change | Why |
    |---|---|---|
@@ -75,7 +75,7 @@ Every change is in a patch file in `patches/`; "Check" below says how CI proves 
 
    Content kept on save (H4). GridCraft does not model these; they are kept as read and written
    back in schema order. Elements of a sheet that name cells are dropped by Carrysheet when rows
-   or columns move (`crates/carrysheet-kernel/src/edit.rs`, `forget_kept`), and the save report
+   or columns move (`crates/carrysheet/src/edit.rs`, `forget_kept`), and the save report
    then lists them.
 
    | File | Change | Why |
@@ -94,7 +94,7 @@ Every change is in a patch file in `patches/`; "Check" below says how CI proves 
    | `functions/src/engineering.rs` | `EULER` is the literal for γ, with a unit test that its bits equal `std::f64::consts::EULER_GAMMA` | That constant is newer than `rust-version = 1.90` |
    | `xlsx/src/passthrough.rs` | `rebase` keeps a link's target as written when the new relative path would need another drive or names of the source's folders | A save could write home or user folder names into the file (L3) |
 
-   Review round 2 of issue 45 (same tests, plus `crates/carrysheet-kernel/src/package.rs`).
+   Review round 2 of issue 45 (same tests, plus `crates/carrysheet/src/kernel/package.rs`).
    Carrysheet now sets the limits once per command, so opening, calculating and saving share one
    time budget.
 
@@ -154,4 +154,4 @@ Checked in the copied crates:
   returns an error.
 
 Carrysheet's own lints (`print_stdout`, `clippy.toml`) do not apply here: this folder is a
-workspace of its own, built as path dependencies of `crates/carrysheet-kernel`.
+workspace of its own, built as path dependencies of `crates/carrysheet`.

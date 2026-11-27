@@ -76,9 +76,9 @@ characters; XML with a DOCTYPE and entities.
 
 **Open:**
 - Use carrysheet-zip for every reader ([issue 40][i40], partly done).
-  carrysheet::kernel lists and unpacks package parts through carrysheet-zip,
-  but the vendored GridCraft `.xlsx` and engine crates still use the `zip`
-  crate.
+  The save check (`crates/carrysheet/src/kernel/package.rs`) lists and
+  unpacks package parts through carrysheet-zip, but the vendored GridCraft
+  `.xlsx` and engine crates still use the `zip` crate.
 - On wasm32 a panic aborts (`docs/web-build.md`). The readers return errors
   instead of panicking, but a Web Worker should still run the parsing.
 - One shared work budget with a deadline ([issue 56][i56]).
