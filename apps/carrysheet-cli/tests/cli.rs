@@ -326,7 +326,7 @@ fn typed_text_in_errors_is_shown_with_tilde() {
         // A reference error repeats the reference.
         vec!["read", book, &quoted, "--json"],
         vec!["read", book, &quoted],
-        // The confirmation example repeats the call.
+        // A confirmation error on a file in the home folder.
         vec!["edit", book, "--ops", ops, "--json"],
         vec!["edit", book, "--ops", ops],
     ] {

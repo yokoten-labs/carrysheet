@@ -42,11 +42,11 @@ Few, workflow-level tools. Names of built tools match `COMMANDS` in `crates/carr
 
 | Tool | Does | Changes files | Toolset |
 |---|---|---|---|
-| `overview` | Sheets, used ranges, headers, column types, formula and error counts, and whether the file has macros (never run; kept on save where the format can hold them). For .xls and .ods files, and a zip it cannot list, it says macros were not checked. The first call on any workbook | No | `core` |
+| `overview` | Sheets, used ranges, cell, formula and error counts, defined names, and whether the file has macros (never run; kept on save where the format can hold them). For .xls and .ods files, and a zip it cannot list, it says macros were not checked. The first call on any workbook | No | `core` |
 | `read` | A range as a compact table with A1 addresses, values or formulas, paged | No | `core` |
 | `eval` | Compute a formula against the workbook without saving | No | `core` |
 | `edit` | A batch of operations: set values or formulas, insert or delete rows, rename sheets. `dry_run` returns the change list; the batch is all or nothing | Yes | `core` |
-| `convert` | Save as xlsx, xls or csv, to a new file | Yes (new file) | `core` |
+| `convert` | Save as xlsx or csv, to a new file | Yes (new file) | `core` |
 | `find` | Search values or formulas, returns addresses. Not built | No | not decided |
 | `undo` | Restore the snapshot taken before an `edit`. Not built | Yes | not decided |
 
@@ -88,8 +88,8 @@ Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, in PR 88 until it 
 ### Output size
 
 - Reads return a bounded window by default (200 rows, 50 columns, at most about 10,000 cells), as a compact table, plus `next_cursor` and a hint on how to narrow the request. Pass `next_cursor` back as `cursor` and keep the other limits the same; pages go across a band of rows, then down.
-- Long text is cut, never dropped quietly: a cell's text or formula at most 2,000 characters in `read` and `overview`, and less when a page holds many cells, so one answer carries at most 200,000 characters of cell text. The answer then has a `cut` field with the cells cut (up to 20 named, plus the total) and a hint on how to get more: read fewer cells at a time, or get the rest of one cell with `eval`, like `MID(Sheet1!A1,2001,2000)`.
-- `response_format`: `concise` (default) or `detailed`. Concise matters for local models with 4k–8k context.
+- Long text is cut, never dropped quietly: a cell's text or formula at most 2,000 characters in `read`, and less when a page holds many cells, so one answer carries at most 200,000 characters of cell text. The answer then has a `cut` field with the cells cut (up to 20 named, plus the total) and a hint on how to get more: read fewer cells at a time, or get the rest of one cell with `eval`, like `MID(Sheet1!A1,2001,2000)`.
+- `response_format` of `read`: `concise` (default) or `detailed`. Concise matters for local models with 4k–8k context.
 - The same data goes in the text content and in `structuredContent` (Cursor drops structured-only results). `outputSchema` is declared only where structured output always comes back.
 - Bulk reads set `_meta["anthropic/maxResultSizeChars"]`. Whole sheets are exported to a file and returned as a path, not inlined.
 
@@ -111,7 +111,7 @@ Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, in PR 88 until it 
   - `confirm: true` (`--confirm`) for destructive edits: deleting sheets, rows or columns, and overwriting a file.
   - `confirm_loss: true` (`--confirm-loss`) for a save that would lose content (macros, charts…). `dry_run` lists that content in `save.lost`.
   - `--yes` gives both on the command line. Nobody is ever asked, at a terminal or not. MCP adds `_meta["anthropic/requiresUserInteraction"]` where supported.
-  - Without the right one the call fails with `confirmation_required` (exit 1), and the fix shows the same call with it set. `dry_run` never needs either.
+  - Without the right one the call fails with `confirmation_required` (exit 1), and the fix says to call again with the same arguments and it set. `dry_run` never needs either.
 - **Dangerous formulas** (WEBSERVICE, external links, DDE, HYPERLINK to files) are refused when written by an agent. The check reads GridCraft's parse tree of the formula, the tree the kernel stores, in any letter case. A formula that does not parse is refused too, with a fix that says to correct it.
 - **CSV import keeps what the file says** (record 0006). A field becomes a number only when the number prints back as the same text: `007`, `1E5`, `+1`, long numbers, gene names such as `SEPT1` and dates stay text. A plain decimal such as `12.50` becomes a number with a `0.00` format, so it sums and saves back as `12.50`. More than 15 significant digits (`4111111111111111`) or 30 decimals stay text. A byte order mark decides the encoding; otherwise valid UTF-8 is UTF-8, and other bytes are guessed (GBK, Big5, Shift_JIS, Windows-1252...). Bytes the encoding cannot hold are a `damaged_file` error, never replacement characters. A guessed encoding is named in the `overview` warnings; a guess on a very short file can be wrong, so save such a file as UTF-8.
 - **CSV export escapes formula-like text** by default: text starting with `=`, `+`, `-` or `@` gets a `'` before it, so spreadsheet apps don't run it. `csv_raw: true` (`--csv-raw`) writes it as it is.

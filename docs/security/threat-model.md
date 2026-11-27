@@ -70,9 +70,11 @@ characters; XML with a DOCTYPE and entities.
   caught panic as a failure, not a pass.
 - Zip archives: GridCraft's patched reader and the save check
   (`crates/carrysheet/src/save/loss.rs`) both read with the `zip` crate.
-  Both cap the packed bytes a part may read for what it unpacks, so runs of
-  empty deflate blocks are refused within the time limit (issue 80). The
-  save check also caps one run without output at 16 KiB. carrysheet-zip,
+  GridCraft's patch caps the packed bytes a part may read for what it
+  unpacks, so runs of empty deflate blocks are refused within the time
+  limit (issue 80). The save check reads the zip directory only. It
+  unpacks one part, `[Content_Types].xml`, and only when its sizes there
+  are within bounds (record 0010, step 6b). carrysheet-zip,
   the hardened opener that no code used any more, left in record 0010
   step 5.
 - The VBA reader (carrysheet-vba, carrysheet-cfb) left with the `macros`
@@ -109,7 +111,7 @@ text from a person while a model still reads it ("ASCII smuggling").
 - One helper, `carrysheet::text`, with a Unicode range table, escapes and
   cuts text from files in messages, in the sheet names and warnings of
   `overview`, in the text form for people and in the MCP log
-  ([issue 67][i67]). Cell values, headers and cursors in JSON stay as stored.
+  ([issue 67][i67]). Cell values and cursors in JSON stay as stored.
 - Changes need `dry_run` or confirmation: overwriting and deleting need
   `confirm` (or `--yes` on the command line), and `--read-only` hides every
   tool that changes files.
@@ -117,7 +119,7 @@ text from a person while a model still reads it ("ASCII smuggling").
   what a steered agent can reach through us.
 
 **Open:**
-- Cell values, headers and cursors in JSON still carry hidden characters
+- Cell values and cursors in JSON still carry hidden characters
   raw; a flag or an escape is to be decided ([issue 67][i67]).
 - Comments returned in a clearly marked data field, never as instructions
   ([issue 64][i64]).

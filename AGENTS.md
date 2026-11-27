@@ -118,6 +118,7 @@ You must never copy, translate or closely paraphrase code from GPL, LGPL, AGPL o
 - Errors for people and agents have three parts: what happened, why, and how to fix it.
 - The limits type is GridCraft's `Limits`; Carrysheet's values are `carrysheet::LIMITS`. Start from `LIMITS`, never from `Limits::default()`, which means no limit.
 - The formula check in `edit.rs` walks GridCraft's parse tree, the same tree the kernel stores. A formula that does not parse is refused, so links to other workbooks and DDE stay out.
+- The save check in `save/loss.rs` compares parts by the zip directory. It unpacks only `[Content_Types].xml`, under a size cap. Do not search inside parts again (record 0010, decision 11).
 - `mcp.rs` finds a tool by name and checks its arguments with `validate_args`. Do not use rmcp's `ToolRouter`: it sorts `tools/list`, and it reports errors in its own words, not as a three-part error with `isError`.
 - A command's arguments are one struct in `crates/carrysheet/src/args.rs`. Its flags, MCP schema and help are derived from it; never write a schema, a flag or a validator by hand (record 0010, decision 2). An argument that names a file or folder goes into `PATHS`, so `--root` confines it.
 - Tests use small files committed under the crate's `tests/data/` (made by us or from Apache POI's test data with its license noted). Never commit large corpora.

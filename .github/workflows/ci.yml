@@ -44,7 +44,7 @@ jobs:
         with:
           node-version: "24"
       - run: node --test scripts/tests/lines.test.mjs
-      - run: node scripts/lines.mjs --max 6500
+      - run: node scripts/lines.mjs --max 5500
 
   # Record 0009 decision 5.1: vendor/gridcraft is upstream at the pinned
   # commit plus our patch files. verify fetches that commit (network).
