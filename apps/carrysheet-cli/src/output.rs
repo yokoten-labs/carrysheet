@@ -4,13 +4,13 @@
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use carrysheet::commands::paths::redact_home;
 use carrysheet::commands::{CommandError, ErrorCode};
 use carrysheet::save::clean_from_file;
 use clap::error::ErrorKind;
 use serde_json::{Map, Value, json};
 
 use crate::cli::BIN;
+use crate::files::{redact_error, redact_home};
 use crate::run::Done;
 
 /// Set while `mcp serve` runs: stdout then belongs to the MCP transport.
@@ -117,6 +117,7 @@ pub fn render(data: &Map<String, Value>) -> String {
 /// Prints an error: JSON on stdout with `--json`, and always text on stderr.
 /// Both forms show the home folder as `~`.
 pub fn print_error(err: &CommandError, json: bool) {
+    let err = &redact_error(err);
     if json {
         stdout_line(&err.to_envelope().to_string());
     }

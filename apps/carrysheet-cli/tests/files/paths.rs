@@ -1,4 +1,4 @@
-use crate::commands::paths::*;
+use crate::files::*;
 
 #[test]
 fn home_becomes_tilde() {

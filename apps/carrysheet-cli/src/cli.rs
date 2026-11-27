@@ -1,10 +1,10 @@
 //! The clap command line, generated from the command table.
 
-use std::io::Read;
 use std::path::Path;
 
 use carrysheet::commands::table::{self, Arg, ArgType, COMMANDS, Command};
 use carrysheet::commands::{CommandError, ErrorCode};
+use carrysheet::open::ReadFailure;
 use clap::builder::PossibleValuesParser;
 use clap::{ArgAction, ArgMatches};
 use serde_json::{Map, Value};
@@ -130,70 +130,34 @@ pub fn chosen(matches: &ArgMatches) -> Option<(&'static Command, &ArgMatches)> {
     table::command_by_path(&[first, second]).map(|c| (c, m2))
 }
 
-/// Why [`read_bounded`] gave up.
-#[derive(Debug)]
-pub(crate) enum BoundedReadError {
-    Io(std::io::Error),
-    /// A folder, device, pipe or socket: it may never end, or block.
-    NotAFile,
-    TooLarge,
-}
-
-impl From<std::io::Error> for BoundedReadError {
-    fn from(e: std::io::Error) -> Self {
-        BoundedReadError::Io(e)
-    }
-}
-
-/// Reads a regular file of at most `max` bytes. The size the system
-/// reports is not trusted: the read itself stops after `max + 1` bytes.
-/// Anything but a regular file is refused before it is opened, because
-/// opening a pipe waits for a writer and a device may never end.
-pub(crate) fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>, BoundedReadError> {
-    if !std::fs::metadata(path)?.is_file() {
-        return Err(BoundedReadError::NotAFile);
-    }
-    let file = std::fs::File::open(path)?;
-    // The path may have been swapped since the check above.
-    if !file.metadata()?.is_file() {
-        return Err(BoundedReadError::NotAFile);
-    }
-    let mut bytes = Vec::new();
-    file.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > max {
-        return Err(BoundedReadError::TooLarge);
-    }
-    Ok(bytes)
-}
-
 /// Reads an `@file` argument value, or returns the text as it is.
 fn read_at_file(arg: &Arg, text: &str) -> Result<String, CommandError> {
     let Some(file) = text.strip_prefix('@') else {
         return Ok(text.to_owned());
     };
     let path = Path::new(file);
-    let shown = carrysheet::commands::paths::display_path(path);
+    let shown = crate::files::display_path(path);
     let flag = format!("--{}", flag_name(arg));
     let what = format!("cannot read {flag} from {shown}");
-    let bytes = read_bounded(path, MAX_ARG_FILE_BYTES).map_err(|e| match e {
-        BoundedReadError::Io(e) if e.kind() == std::io::ErrorKind::NotFound => CommandError::new(
+    let bytes = crate::files::read_bounded(path, MAX_ARG_FILE_BYTES).map_err(|e| match e {
+        ReadFailure::Io(e) if e.kind() == std::io::ErrorKind::NotFound => CommandError::new(
             ErrorCode::FileNotFound,
             &what,
             e.to_string(),
             format!("Check the file path after @, or pass the JSON itself to {flag}."),
         ),
-        BoundedReadError::Io(e) => CommandError::new(
+        ReadFailure::Io(e) => CommandError::new(
             ErrorCode::Io,
             &what,
             e.to_string(),
             "Check that the file exists and you can read it.",
         ),
-        BoundedReadError::NotAFile => CommandError::invalid_argument(
+        ReadFailure::NotAFile => CommandError::invalid_argument(
             arg.name,
             format!("{shown} is not a regular file (a folder, device or pipe)"),
             format!("Save the JSON to a file and pass {flag} @file.json, or pass the JSON itself."),
         ),
-        BoundedReadError::TooLarge => CommandError::invalid_argument(
+        ReadFailure::TooLarge => CommandError::invalid_argument(
             arg.name,
             format!("{shown} is larger than 16 MB"),
             "Split the operations into several files.",

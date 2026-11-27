@@ -449,7 +449,7 @@ fn slow_unpacking_counts_against_the_time_limit() {
 #[test]
 fn one_time_budget_covers_the_whole_command() {
     use carrysheet::commands::{COMMANDS, validate_args};
-    use carrysheet::run_within;
+    use common::run_within;
     // Round 2, N5: opening alone, with no calculation, counts as well.
     let dir = scratch("budget");
     let path = dir.join("num.xlsx");

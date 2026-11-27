@@ -274,7 +274,12 @@ impl Outcome {
 
 fn exercise(kernel: &Kernel, input: Input<'_>, depth: Depth) -> Result<(), CommandError> {
     let book = match input {
-        Input::File(path) => kernel.open(path)?,
+        Input::File(path) => {
+            carrysheet::open::check_opens(path)?;
+            let read = std::fs::read(path);
+            let bytes = read.map_err(|e| carrysheet::open::ReadFailure::Io(e).error(path))?;
+            kernel.open_bytes(path, bytes)?
+        }
         Input::Bytes(name, bytes) => kernel.open_bytes(Path::new(name), bytes)?,
     };
     let overview = kernel.overview(&book)?;

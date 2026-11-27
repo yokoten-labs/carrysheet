@@ -1,6 +1,5 @@
+use crate::files::{Root, home_dir};
 use crate::mcp::*;
-use carrysheet::commands::paths::home_dir;
-use carrysheet::commands::root::Root;
 use carrysheet::commands::schema::tool_definition;
 use carrysheet::commands::table::mcp_tools;
 use serde_json::{Map, Value};

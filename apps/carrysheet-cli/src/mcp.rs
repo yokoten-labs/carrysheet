@@ -20,8 +20,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use carrysheet::commands::paths::{display_path, home_dir, redact_home};
-use carrysheet::commands::root::Root;
 use carrysheet::commands::schema::tool_definition;
 use carrysheet::commands::table::{ArgType, Command, mcp_tools};
 use carrysheet::commands::{CommandError, ErrorCode, validate_args};
@@ -34,6 +32,7 @@ use rmcp::service::{QuitReason, RequestContext, ServerInitializeError};
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{Map, Value};
 
+use crate::files::{Root, display_path, home_dir, redact_error, redact_home};
 use crate::output::ok_envelope;
 use crate::run::{self, Context};
 
@@ -166,9 +165,12 @@ impl Server {
         self.confine(command, &mut args)?;
         // An agent is reading: never ask, never wait for a terminal.
         // MCP calls keep the default time limit (limits::MAX_CALL_SECONDS).
-        let ctx = Context::default();
         // Writes stay inside the root even if a link changes meanwhile.
-        let _confined = carrysheet::save::confine_writes(&self.inner.root.dir());
+        let root = Some(self.inner.root.dir());
+        let ctx = Context {
+            root,
+            ..Context::default()
+        };
         run::run(command, &args, &ctx).map(|done| done.data)
     }
 
@@ -259,7 +261,7 @@ const MAX_DETAIL: usize = 200;
 /// folder shown as `~`), with `what` cut to [`MAX_WHAT`] characters and
 /// `fix` and `why` to [`MAX_DETAIL`].
 pub fn error_envelope(e: &CommandError) -> Value {
-    let mut envelope = e.to_envelope();
+    let mut envelope = redact_error(e).to_envelope();
     for (part, max) in [
         ("/error/what", MAX_WHAT),
         ("/error/fix", MAX_DETAIL),

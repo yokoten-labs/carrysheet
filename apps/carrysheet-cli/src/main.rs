@@ -4,6 +4,7 @@
 //! Exit codes: 0 done, 1 failed, 2 usage error, 3 nothing to do.
 
 mod cli;
+mod files;
 mod mcp;
 mod output;
 mod run;
@@ -36,6 +37,7 @@ fn real_main(args: Vec<OsString>) -> u8 {
     let mut ctx = run::Context {
         yes: matches.get_flag("yes"),
         max_seconds: None,
+        root: None,
     };
     if let Some(&seconds) = matches.get_one::<f64>("max-seconds") {
         let max = carrysheet::commands::limits::MAX_CLI_SECONDS;

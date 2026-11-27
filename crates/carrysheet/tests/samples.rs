@@ -2,10 +2,13 @@
 //! before saving that they would be lost (record 0003, point 3). Then the
 //! csv samples in `tests/data/formats/csv`.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
+use carrysheet::Kernel;
 use carrysheet::commands::{COMMANDS, CommandError, ErrorCode, validate_args};
-use carrysheet::{Kernel, run, run_within};
+use common::{run, run_within};
 use serde_json::{Map, Value, json};
 
 fn data(name: &str) -> PathBuf {

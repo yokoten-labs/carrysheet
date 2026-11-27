@@ -6,8 +6,10 @@
 
 use std::path::{Path, PathBuf};
 
-use carrysheet::commands::{COMMANDS, CommandError, validate_args};
-use carrysheet::{Kernel, Limits, run};
+use carrysheet::commands::{COMMANDS, Command, CommandError, validate_args};
+use carrysheet::open::{ReadFailure, check_opens};
+use carrysheet::save::prepare_output;
+use carrysheet::{Kernel, Limits};
 use serde_json::{Map, Value};
 
 pub const NS: &str = r#"xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#;
@@ -288,6 +290,37 @@ pub fn call_with(
     let command = COMMANDS.iter().find(|c| c.name == name).unwrap();
     let args = validate_args(command, &args)?;
     run(kernel, command, &args)
+}
+
+/// Runs a command the way the program does: reads `path`, writes `output`.
+pub fn run(
+    kernel: &Kernel,
+    command: &Command,
+    args: &Map<String, Value>,
+) -> Result<Map<String, Value>, CommandError> {
+    run_within(kernel, command, args, None)
+}
+
+/// [`run`] with a time limit in seconds.
+pub fn run_within(
+    kernel: &Kernel,
+    command: &Command,
+    args: &Map<String, Value>,
+    seconds: Option<f64>,
+) -> Result<Map<String, Value>, CommandError> {
+    let mut args = args.clone();
+    let output = prepare_output(command, &mut args, &|p: &Path| p.exists())?;
+    let path = PathBuf::from(args["path"].as_str().unwrap_or(""));
+    check_opens(&path)?;
+    let input = std::fs::read(&path).map_err(|e| ReadFailure::Io(e).error(&path))?;
+    let answer = carrysheet::run_within(kernel, command, &args, input, seconds)?;
+    let mut data = answer.data;
+    if let (Some(bytes), Some(output)) = (answer.save, output) {
+        std::fs::write(&output, &bytes).map_err(|e| carrysheet::save::write_error(&output, &e))?;
+        data.insert("written".into(), Value::Bool(true));
+        data.insert("bytes".into(), bytes.len().into());
+    }
+    Ok(data)
 }
 
 pub fn lowered(f: impl FnOnce(&mut Limits)) -> Kernel {

@@ -12,16 +12,14 @@ use gridcraft_engine::{EngineError, Session};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use crate::args::{flag, input, shown, text};
+use crate::args::{input, shown, text};
 pub use crate::commands::limits::{MAX_BATCH_CELLS, MAX_FILL_CELLS, MAX_OPS};
 use crate::error::{CommandError, ErrorCode};
 use crate::open::Book;
 use crate::range::{Shape, SheetRange, validate_sheet_name};
-use crate::save::{
-    EncodeOptions, check_output, clean_from_file, default_output, finish_save, output_format,
-};
+use crate::save::{EncodeOptions, clean_from_file, finish_save, output_format};
 use crate::view::value_json;
-use crate::{Kernel, internal};
+use crate::{Answer, Kernel, internal};
 
 /// Most cell changes listed in an edit result; the rest are counted.
 pub const MAX_LISTED_CHANGES: usize = 200;
@@ -1066,21 +1064,17 @@ fn recalculated(
 }
 
 /// Applies a batch of operations and saves the result.
+/// The caller fills in `output` ([`crate::save::prepare_output`]).
 pub(crate) fn edit(
     kernel: &Kernel,
     args: &Map<String, Value>,
-) -> Result<Map<String, Value>, CommandError> {
+    bytes: Vec<u8>,
+) -> Result<Answer, CommandError> {
     let path = input(args)?;
     let ops = parse_ops(args.get("ops").unwrap_or(&Value::Null))?;
-    let overwrite = flag(args, "overwrite");
-    let output = match text(args, "output") {
-        Some(o) => PathBuf::from(o),
-        None if overwrite => path.clone(),
-        None => default_output(&path)?,
-    };
+    let output = text(args, "output").map_or_else(|| path.clone(), PathBuf::from);
     let format = output_format(&output, None)?;
-    check_output(&output, overwrite)?;
-    let mut book = kernel.open(&path)?;
+    let mut book = kernel.open_bytes(&path, bytes)?;
     let result = kernel.edit(&mut book, &ops)?;
     let encoded = kernel.encode(&book, &output, format, &EncodeOptions::default())?;
     let mut data = Map::new();

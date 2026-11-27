@@ -61,31 +61,6 @@ fn text_has_three_parts() {
 }
 
 #[test]
-fn every_way_of_showing_hides_the_home_folder() {
-    let Some(home) = crate::commands::paths::home_dir() else {
-        return;
-    };
-    let p = home.join("q1.xlsx").display().to_string();
-    let e = CommandError::new(ErrorCode::Io, format!("cannot open {p}"), &p, &p);
-    let home = home.display().to_string();
-    for shown in [
-        e.to_text(),
-        e.to_json().to_string(),
-        e.to_envelope().to_string(),
-        serde_json::to_string(&e).unwrap(),
-        e.to_string(),
-    ] {
-        assert!(!shown.contains(&home), "{shown}");
-        assert!(shown.contains('~'), "{shown}");
-    }
-    // A reference error repeats what was typed.
-    let typed = format!("'{p}'!A1");
-    let e: CommandError = crate::range::SheetRange::parse(&typed).unwrap_err().into();
-    assert!(e.what.contains(&home), "the field keeps the text");
-    assert!(!e.to_json().to_string().contains(&home));
-}
-
-#[test]
 fn ref_errors_become_usage_errors() {
     let e: CommandError = crate::range::SheetRange::parse("XFE1").unwrap_err().into();
     assert_eq!(e.code, ErrorCode::InvalidReference);

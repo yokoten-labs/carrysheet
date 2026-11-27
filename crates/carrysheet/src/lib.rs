@@ -9,7 +9,9 @@
 //! - [`save`]: `convert`, and what a save keeps and loses.
 //! - [`range`]: A1 ranges with a sheet name.
 //! - [`error`]: errors with a code, what, why and fix, and exit codes.
-//! - [`commands`]: the command table, its schemas, the limit values, paths.
+//! - [`commands`]: the command table, its schemas, the limit values.
+//!
+//! The program reads and writes the files (record 0010, decision 2).
 
 pub mod commands;
 pub mod edit;
@@ -47,14 +49,29 @@ pub const ENGINE_COMMANDS: &[&str] = &["overview", "read", "eval", "edit", "conv
 
 /// Runs one of [`ENGINE_COMMANDS`]. `args` were checked by
 /// [`validate_args`](crate::commands::validate_args) (absent ones are
-/// `null`); the answer is the JSON fields of the result, with paths shown
-/// with `~` for the home folder.
+/// `null`); `input` holds the bytes of the file `path` names.
 pub fn run(
     kernel: &Kernel,
     command: &Command,
     args: &Map<String, Value>,
-) -> Result<Map<String, Value>, CommandError> {
-    run_within(kernel, command, args, None)
+    input: Vec<u8>,
+) -> Result<Answer, CommandError> {
+    run_within(kernel, command, args, input, None)
+}
+
+/// What a command gives back: the JSON fields of its result, and for a
+/// save, the bytes the caller writes to `output`. The caller then adds
+/// `written` and `bytes`.
+#[derive(Debug)]
+pub struct Answer {
+    pub data: Map<String, Value>,
+    pub save: Option<Vec<u8>>,
+}
+
+impl From<Map<String, Value>> for Answer {
+    fn from(data: Map<String, Value>) -> Self {
+        Answer { data, save: None }
+    }
 }
 
 /// [`run`] with the command's time limit in seconds (`None`: the kernel's,
@@ -64,15 +81,16 @@ pub fn run_within(
     kernel: &Kernel,
     command: &Command,
     args: &Map<String, Value>,
+    input: Vec<u8>,
     seconds: Option<f64>,
-) -> Result<Map<String, Value>, CommandError> {
+) -> Result<Answer, CommandError> {
     kernel.begin_call(seconds);
     let result = match command.name {
-        "overview" => view::overview(kernel, args),
-        "read" => view::read(kernel, args),
-        "eval" => view::eval(kernel, args),
-        "edit" => edit::edit(kernel, args),
-        "convert" => save::convert(kernel, args),
+        "overview" => view::overview(kernel, args, input).map(Answer::from),
+        "read" => view::read(kernel, args, input).map(Answer::from),
+        "eval" => view::eval(kernel, args, input).map(Answer::from),
+        "edit" => edit::edit(kernel, args, input),
+        "convert" => save::convert(kernel, args, input),
         _ => Err(CommandError::not_implemented(&command.cli_name())),
     };
     // A limit that ran out wins over what the calls returned.
@@ -86,7 +104,6 @@ pub(crate) mod args {
 
     use serde_json::{Map, Value, json};
 
-    use crate::commands::paths::display_path;
     use crate::error::CommandError;
 
     pub(crate) fn text<'a>(args: &'a Map<String, Value>, name: &str) -> Option<&'a str> {
@@ -118,8 +135,9 @@ pub(crate) mod args {
         })
     }
 
+    /// The program shows it with `~` for the home folder.
     pub(crate) fn shown(path: &Path) -> Value {
-        json!(display_path(path))
+        json!(path.display().to_string())
     }
 }
 
@@ -157,13 +175,8 @@ impl Kernel {
         self.limits.end_call()
     }
 
-    /// Opens a workbook file (xlsx, xlsm, xls, xlsb, csv) and recalculates it.
-    pub fn open(&self, path: &Path) -> Result<Book, CommandError> {
-        let bytes = open::read_file(path)?;
-        self.guard("opening the file", || Book::from_bytes(path, bytes))
-    }
-
-    /// Opens a file's bytes. `path` names it in messages and picks the
+    /// Opens a file's bytes (xlsx, xlsm, xls, xlsb, ods, csv) and
+    /// recalculates them. `path` names it in messages and picks the
     /// format when the bytes do not say.
     pub fn open_bytes(&self, path: &Path, bytes: Vec<u8>) -> Result<Book, CommandError> {
         if bytes.len() as u64 > MAX_FILE_BYTES {

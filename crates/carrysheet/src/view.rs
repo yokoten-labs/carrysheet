@@ -750,9 +750,10 @@ const HEADER_CELLS_DETAILED: u32 = DEFAULT_PAGE_COLUMNS;
 pub(crate) fn overview(
     kernel: &Kernel,
     args: &Map<String, Value>,
+    bytes: Vec<u8>,
 ) -> Result<Map<String, Value>, CommandError> {
     let path = input(args)?;
-    let book = kernel.open(&path)?;
+    let book = kernel.open_bytes(&path, bytes)?;
     let overview = kernel.overview(&book)?;
     let width = if detailed(args) {
         HEADER_CELLS_DETAILED
@@ -833,6 +834,7 @@ pub(crate) fn overview(
 pub(crate) fn read(
     kernel: &Kernel,
     args: &Map<String, Value>,
+    bytes: Vec<u8>,
 ) -> Result<Map<String, Value>, CommandError> {
     let path = input(args)?;
     let mut request = ReadRequest {
@@ -852,7 +854,7 @@ pub(crate) fn read(
     }
     request.max_rows = number(args, "max_rows").unwrap_or(DEFAULT_PAGE_ROWS);
     request.max_columns = number(args, "max_columns").unwrap_or(DEFAULT_PAGE_COLUMNS);
-    let book = kernel.open(&path)?;
+    let book = kernel.open_bytes(&path, bytes)?;
     let page = kernel.read_range(&book, &request)?;
     let more = page.next_cursor.is_some();
     let mut data = match serde_json::to_value(&page) {
@@ -873,6 +875,7 @@ pub(crate) fn read(
 pub(crate) fn eval(
     kernel: &Kernel,
     args: &Map<String, Value>,
+    bytes: Vec<u8>,
 ) -> Result<Map<String, Value>, CommandError> {
     let path = input(args)?;
     let formula = text(args, "formula").unwrap_or("");
@@ -883,7 +886,7 @@ pub(crate) fn eval(
             "Give a formula like SUM(Sheet1!B2:B9).",
         ));
     }
-    let book = kernel.open(&path)?;
+    let book = kernel.open_bytes(&path, bytes)?;
     let result = kernel.evaluate(&book, text(args, "sheet"), formula)?;
     let mut data = match serde_json::to_value(&result) {
         Ok(Value::Object(map)) => map,

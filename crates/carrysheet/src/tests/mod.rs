@@ -1,5 +1,3 @@
-mod commands_paths;
-mod commands_root;
 mod commands_schema;
 mod commands_schema_validate;
 mod commands_table;
