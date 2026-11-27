@@ -64,7 +64,7 @@ fn usage_errors_join_clap_lists() {
     let raw = |text: &str| clap::Error::raw(clap::error::ErrorKind::InvalidValue, text);
     let e = usage_error(&raw("a list:\n  <A>\n  --b <B>\n\nUsage: x\n"));
     assert_eq!(e.what, "a list: <A>, --b <B>");
-    assert_eq!(e.fix, "Usage: x");
+    assert_eq!(e.fix, "Usage: x Run `carrysheet-cli --help` to list commands.");
     let e = usage_error(&raw("bad 'x'\n  [possible values: a, b]\n\n  tip: hm\n"));
     assert_eq!(e.what, "bad 'x'");
     assert_eq!(e.fix, "[possible values: a, b] tip: hm");
@@ -75,6 +75,20 @@ fn unknown_commands_get_a_suggestion() {
     let err = crate::cli::build().try_get_matches_from([BIN, "overveiw"]).unwrap_err();
     let e = usage_error(&err);
     assert!(e.fix.contains("overview"), "{}", e.fix);
+}
+
+#[test]
+fn an_error_with_no_tip_points_to_the_help() {
+    let e = usage_of(&[BIN, "nothing-like-it"]);
+    assert!(e.fix.ends_with("Run `carrysheet-cli --help` to list commands."), "{}", e.fix);
+}
+
+#[test]
+fn the_text_form_leaves_out_null_fields() {
+    let mut data = Map::new();
+    data.insert("next_cursor".to_owned(), Value::Null);
+    data.insert("rows".to_owned(), Value::from(2));
+    assert_eq!(render(&data), "rows: 2\n");
 }
 
 #[test]

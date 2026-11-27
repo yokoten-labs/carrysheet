@@ -254,6 +254,19 @@ fn unknown_commands_are_refused_with_a_suggestion() {
 }
 
 #[test]
+fn help_shows_an_example_and_the_global_options() {
+    for name in ["read", "convert", "edit"] {
+        let text = stdout(&run(&[name, "--help"]));
+        assert!(text.contains("Example:\n  carrysheet-cli "), "{name}: {text}");
+        assert!(text.contains("Global options:"), "{name}: {text}");
+    }
+    let text = stdout(&run(&["edit", "--help"]));
+    assert!(text.contains(carrysheet::args::OPERATION_EXAMPLE), "{text}");
+    let root = stderr(&run(&[]));
+    assert!(root.contains("github.com/yokoten-labs/carrysheet/issues"), "{root}");
+}
+
+#[test]
 fn json_after_double_dash_is_not_a_flag() {
     let o = run(&["read", "--", "--json"]);
     assert_eq!(code(&o), 1, "{}", stderr(&o));

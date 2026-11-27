@@ -56,6 +56,9 @@ fn cell(value: &Value) -> String {
 }
 
 fn lines(key: &str, value: &Value, pad: &str, out: &mut String) {
+    if value.is_null() {
+        return;
+    }
     let rows = value.as_array().filter(|l| !l.is_empty() && l.iter().all(Value::is_object));
     if let Some(rows) = rows {
         let mut keys: Vec<&str> = Vec::new();
@@ -119,8 +122,10 @@ pub(crate) fn usage_error(err: &clap::Error) -> CommandError {
     };
     let fix = if fix.is_empty() {
         format!("Run `{BIN} commands` to list commands, or add --help.")
-    } else {
+    } else if fix.iter().any(|line| line.starts_with("tip: ")) {
         fix.join(" ")
+    } else {
+        format!("{} Run `{BIN} --help` to list commands.", fix.join(" "))
     };
     let why = "the command line was not understood";
     CommandError::new(ErrorCode::Usage, what, why, fix)

@@ -277,10 +277,6 @@ pub fn serve(args: &Map<String, Value>) -> Result<(), CommandError> {
                 "Report this at https://github.com/yokoten-labs/carrysheet/issues.",
             )
         })?;
-    // A panic (a damaged file can make a dependency panic; the call is
-    // caught and fails cleanly) is logged like everything else, with
-    // control characters escaped, instead of raw on stderr.
-    std::panic::set_hook(Box::new(|info| log(&format!("panic (caught): {info}"))));
     let server = Server::new(root.clone(), read_only);
     let versions = server.supported_protocol_versions();
     log(&format!(
