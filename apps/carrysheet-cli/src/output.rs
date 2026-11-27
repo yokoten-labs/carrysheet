@@ -121,9 +121,10 @@ pub(crate) fn usage_error(err: &clap::Error) -> CommandError {
         None => "the command line could not be understood".to_owned(),
     };
     let list = format!("Run `{BIN} commands` to list commands, or add --help.");
+    let has_tip = fix.iter().any(|line| line.starts_with("tip: "));
     let fix = if fix.is_empty() {
         list
-    } else if err.kind() == ErrorKind::InvalidSubcommand && !fix.iter().any(|l| l.starts_with("tip: ")) {
+    } else if err.kind() == ErrorKind::InvalidSubcommand && !has_tip {
         format!("{}. {list}", fix.join(" "))
     } else {
         fix.join(" ")
