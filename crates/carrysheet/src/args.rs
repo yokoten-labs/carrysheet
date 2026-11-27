@@ -4,13 +4,12 @@
 //! a call, and `clap` (feature `cli`) makes the flags, read back as text and checked here like
 //! a call. An optional argument is an `Option`: absent and `null` mean the same.
 
-use std::path::{Path, PathBuf};
-
 use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
+use std::path::{Path, PathBuf};
 
 use crate::edit::EditKind;
 use crate::error::{CommandError, ErrorCode};
@@ -559,9 +558,10 @@ pub fn check_confirmation(command: &Command, args: &Checked) -> Result<(), Comma
         1 => String::new(),
         n => format!(" and {} more", n - 1),
     };
+    let cli = command.cli_name();
     Err(CommandError::new(
         ErrorCode::ConfirmationRequired,
-        format!("`{}` would {first}{more}; confirm is not true", command.cli_name()),
+        format!("`{cli}` would {first}{more}; confirm is not true"),
         "deleting sheets, rows or columns and overwriting files cannot be undone, so they need confirm: true. dry_run lists the changes without it.",
         "Call again with the same arguments and \"confirm\":true. On the command line, add --confirm.",
     ))
