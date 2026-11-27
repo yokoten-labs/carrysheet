@@ -181,7 +181,7 @@ pub struct Operation {
     pub count: Option<u32>,
 }
 
-/// One operation for `edit`, shown in errors and help.
+/// One operation for `edit`, shown in the fix line of an error about `ops`.
 pub const OPERATION_EXAMPLE: &str = r#"{"op":"set_value","target":"A1","value":3}"#;
 
 // A cell value. The JSON type says whether "3" is text or a number.
@@ -442,15 +442,16 @@ pub fn validate_args(command: &Command, args: &Value) -> Result<Checked, Command
         let fix = format!("Use one of: {}.", names.join(", "));
         return Err(invalid(unknown, why, fix));
     }
+    // Sizes first: they bound the work serde and culprit() do below.
+    for (name, value) in &given {
+        check_limits(name, name, value)?;
+    }
     if let Err(why) = (command.check)(given.clone().into()) {
         let name = culprit(command, &given, &why);
         let fix = fix_for(&input_schema(command), &name, &why).unwrap_or(help);
         // serde repeats a wrong value; keep a long one out of the error.
         let why: String = why.chars().take(300).collect();
         return Err(invalid(&name, why, fix));
-    }
-    for (name, value) in &given {
-        check_limits(name, name, value)?;
     }
     let all = names.into_iter().map(|name| {
         let value = given.remove(&name).unwrap_or(Value::Null);

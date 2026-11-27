@@ -506,6 +506,13 @@ fn limits_list_sizes_and_text_length() {
         .collect();
     let e = validate_args(edit, &json!({ "path": "a", "ops": ops })).unwrap_err();
     assert!(e.why.contains("limit"));
+    // A bad last item still gets the size error, before any type check.
+    let mut ops = ops;
+    *ops.last_mut().unwrap() = json!({ "op": "nope", "target": "A1" });
+    let e = validate_args(edit, &json!({ "path": "a", "ops": ops })).unwrap_err();
+    assert!(e.what.contains("`ops`"), "{}", e.what);
+    assert!(e.why.contains("the limit is"), "{}", e.why);
+    assert!(!e.why.contains("variant"), "{}", e.why);
     let long = "x".repeat(MAX_TEXT_CHARS + 1);
     assert!(validate_args(read(), &json!({ "path": long })).is_err());
 }
