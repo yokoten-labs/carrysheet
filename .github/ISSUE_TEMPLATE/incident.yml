@@ -1,0 +1,32 @@
+name: Incident
+description: "Something went wrong in how we work. The rca skill turns it into a check. Title: `area: symptom` (what you saw, not the fix), for example `check: misses a key in a JSON file`. At most 60 characters, no full stop, no #N."
+title: "area: "
+labels: [incident]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Facts only, in order, with times in UTC.
+    validations:
+      required: true
+  - type: textarea
+    id: matters
+    attributes:
+      label: Why it matters
+      description: "What it cost, or can cost, when it happens again. One or two sentences. `yokoten learn` uses it as the check's reason."
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it got through
+      description: Which check should have caught it, and why it did not (or that there was none).
+  - type: textarea
+    id: fix
+    attributes:
+      label: Fix
+      description: What changed so it can't happen again, and the check that now holds it.
+  - type: textarea
+    id: spread
+    attributes:
+      label: Other places it can happen
+      description: Other projects or paths with the same gap (yokoten).
