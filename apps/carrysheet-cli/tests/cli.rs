@@ -199,15 +199,14 @@ fn commands_json_is_json_only_and_every_schema_passes_the_lint() {
 }
 
 #[test]
-fn commands_for_people_fit_80_columns() {
+fn commands_for_people_are_a_table() {
     let o = run(&["commands"]);
     assert_eq!(code(&o), 0);
     no_escape_codes(&o);
     let out = stdout(&o);
     assert!(out.contains("overview"));
-    for line in out.lines() {
-        assert!(line.chars().count() <= 80, "{line}");
-    }
+    assert!(out.starts_with("commands:\n  command\tsummary\n"), "{out}");
+    assert!(!out.contains("input_schema"));
 }
 
 #[test]
@@ -255,13 +254,7 @@ fn json_with_a_value_is_refused_as_json() {
         assert_eq!(code(&o), 2, "{form}");
         let e = error_json(&o);
         assert_eq!(e["code"], "usage");
-        assert!(
-            e["fix"]
-                .as_str()
-                .unwrap()
-                .contains("--json without a value"),
-            "{e}"
-        );
+        assert!(e["what"].as_str().unwrap().contains("--json"), "{e}");
         let o = run(&[form, "commands"]);
         assert_eq!(code(&o), 2, "{form}");
         assert_eq!(error_json(&o)["code"], "usage");
@@ -503,7 +496,8 @@ fn the_core_path_works_from_the_command_line() {
     assert!(stdout(&o).contains("2\tTea\t3\t6\n"), "{}", stdout(&o));
 
     let o = run_in(&home, &["eval", edited, "SUM(C:C)"]);
-    assert_eq!((code(&o), stdout(&o)), (0, "15\n".to_owned()));
+    assert_eq!(code(&o), 0);
+    assert!(stdout(&o).contains("value: 15\n"), "{}", stdout(&o));
 
     // A damaged file is an error with a code, not a crash.
     std::fs::write(home.join("broken.xlsx"), b"PK\x03\x04 not really").unwrap();

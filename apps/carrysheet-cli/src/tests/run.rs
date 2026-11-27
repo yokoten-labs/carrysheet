@@ -64,9 +64,14 @@ fn commands_lists_everything() {
         COMMANDS.len()
     );
     assert_eq!(done.data["commands"][0]["implemented"], true);
-    for line in done.text.lines() {
-        assert!(line.chars().count() <= 80, "{line}");
-    }
+    let plain = done.plain.unwrap();
+    assert_eq!(plain["commands"].as_array().unwrap().len(), COMMANDS.len());
+    assert!(
+        !plain["commands"][0]
+            .as_object()
+            .unwrap()
+            .contains_key("input_schema")
+    );
 }
 
 // Issue 102: `commands` says every listed command is implemented, so

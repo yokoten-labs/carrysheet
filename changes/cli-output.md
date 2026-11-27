@@ -1,0 +1,3 @@
+Changed
+
+Without `--json`, every command prints one plain text form (record 0010 decision 4): a list of rows is a table with tab-separated columns, and every other field is `key: value`, with nested fields indented. The hand-written text of each command is gone, so `overview`, `read`, `eval` and the edit commands show their fields in the same layout as their JSON. `eval` prints `formula`, `value`, `kind` and `file` lines, such as `value: 15`, instead of the bare value. `commands` prints a two-column table of command and summary. A usage error now carries clap's own message in the same error, fix and why lines, and the fix holds clap's suggestion and usage line. `--json` output does not change.
