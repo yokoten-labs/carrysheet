@@ -2,13 +2,14 @@
 
 use std::path::{Path, PathBuf};
 
+use carrysheet::args::{PATHS, input_schema};
 use carrysheet::commands::{COMMANDS, Command, CommandError, ErrorCode, check_confirmation};
 use carrysheet::open::{MAX_FILE_BYTES, check_opens};
 use carrysheet::save::prepare_output;
 use carrysheet::{Kernel, run_within};
 use serde_json::{Map, Value, json};
 
-use crate::cli::command_json;
+use crate::cli::{clap_command, kind};
 use crate::files::{display_path, exists, read_bounded, write_atomic};
 
 /// How the program was started. Nobody is ever asked a question: a
@@ -118,4 +119,45 @@ fn commands() -> Done {
         data,
         plain: Some(plain),
     }
+}
+
+/// Everything about a command, for `commands --json`.
+pub fn command_json(command: &Command) -> Value {
+    let schema = input_schema(command);
+    let (summary, description) = command.doc();
+    let args: Vec<Value> = clap_command("", command)
+        .get_arguments()
+        .map(|arg| {
+            let name = arg.get_id().as_str();
+            let property = &schema["properties"][name];
+            let type_name = match kind(property)["type"].as_str() {
+                Some("string") if kind(property).get("enum").is_some() => "enum",
+                Some("string") if PATHS.contains(&name) => "path",
+                Some("string") if name == "range" => "range",
+                Some("string") => "text",
+                Some("array") => "object_list",
+                Some(other) => other,
+                None => "value",
+            };
+            json!({
+                "name": name,
+                "flag": arg.get_long().map(|long| format!("--{long}")),
+                "positional": arg.is_positional(),
+                "required": arg.is_required_set(),
+                "type": type_name,
+                "description": property["description"],
+            })
+        })
+        .collect();
+    json!({
+        "name": command.name,
+        "cli": command.cli_name(),
+        "summary": summary,
+        "description": description,
+        "changes_files": command.changes_files(),
+        "mcp_tool": command.mcp_tool,
+        "annotations": command.annotations(),
+        "args": args,
+        "input_schema": schema,
+    })
 }

@@ -1,5 +1,6 @@
 use crate::cli::*;
 use crate::files::read_bounded;
+use crate::run::command_json;
 use carrysheet::commands::{COMMANDS, CommandError, ErrorCode, command};
 use carrysheet::open::ReadFailure;
 use serde_json::{Map, Value, json};

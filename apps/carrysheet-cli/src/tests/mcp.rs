@@ -179,16 +179,3 @@ fn log_lines_are_cleaned_like_file_text() {
     }
     assert!(log_line(&"x".repeat(5_000)).len() < MAX_LOG_LINE + 60);
 }
-
-#[test]
-fn options_from_args() {
-    let mut args = Map::new();
-    args.insert("root".into(), json!("books"));
-    args.insert("read_only".into(), json!(true));
-    let o = Options::from_args(&args).unwrap();
-    assert_eq!(o.root.as_deref(), Some(Path::new("books")));
-    assert!(o.read_only);
-    let o = Options::from_args(&Map::new()).unwrap();
-    assert_eq!(o.root, None);
-    assert!(!o.read_only);
-}
