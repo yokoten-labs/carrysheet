@@ -74,7 +74,7 @@ characters; XML with a DOCTYPE and entities.
   unpacks, so runs of empty deflate blocks are refused within the time
   limit (issue 80). The save check reads the zip directory only. It
   unpacks one part, `[Content_Types].xml`, and only when its sizes there
-  are within bounds (record 0010, step 6b). carrysheet-zip,
+  are within bounds. carrysheet-zip,
   the hardened opener that no code used any more, left in record 0010
   step 5.
 - The VBA reader (carrysheet-vba, carrysheet-cfb) left with the `macros`
