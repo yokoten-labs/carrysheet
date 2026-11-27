@@ -368,11 +368,31 @@ fn csv_fields_become_numbers_only_when_nothing_changes() {
 }
 
 #[test]
+fn csv_fields_past_excel_digits_stay_text() {
+    // 30, 31 and 40 decimals, and a long run of zeros.
+    let zeros = |n: usize| format!("0.5{}", "0".repeat(n - 1));
+    let (d30, d31, d40) = (zeros(30), zeros(31), zeros(40));
+    let long = format!("1.{}", "0".repeat(1_500));
+    let line = format!("{d30},{d31},{d40},{long},4111111111111111,123456789012345,1.10\n");
+    let rows = read_csv("digits", line.as_bytes()).unwrap();
+    assert_eq!(rows[0][0], json!(0.5));
+    let text = [d31.as_str(), &d40, &long, "4111111111111111"];
+    assert_eq!(rows[0][1..5], text.map(|t| json!(t)));
+    assert_eq!(rows[0][5..], [json!(123456789012345.0), json!(1.1)]);
+}
+
+#[test]
 fn csv_decimals_with_trailing_zeros_sum_and_save_as_written() {
     let dir = scratch("csv-money");
-    let text = "amount,cost\r\n12.50,-3.00\r\n0.10,1.0\r\n";
+    // The last row: 15 digits, 1E20 and 1E-20 written out, and a negative.
+    let edges =
+        "123456789012345.0,100000000000000000000.00,0.00000000000000000001000,-99999999999999.90";
+    let text = format!("a,b,c,d\r\n12.50,-3.00,7,8\r\n0.10,1.0,9,10\r\n{edges}\r\n");
     let src = dir.join("money.csv");
-    std::fs::write(&src, text).unwrap();
+    std::fs::write(&src, &text).unwrap();
+    let rows = read_csv("edges", edges.as_bytes()).unwrap();
+    let numbers = [123456789012345.0, 1e20, 1e-20, -99999999999999.9];
+    assert_eq!(rows[0], numbers.map(|n| json!(n)));
     let sum = call("eval", json!({ "path": p(&src), "formula": "=SUM(A2:B3)" })).unwrap();
     let total = sum["value"].as_f64().unwrap();
     assert!((total - 10.6).abs() < 1e-9, "{sum:?}");
