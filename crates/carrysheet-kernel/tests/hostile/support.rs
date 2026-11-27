@@ -4,12 +4,14 @@
 //!
 //! - [`run_case`] opens one input the way the program does and checks the
 //!   contract: it opens, or it fails with a three-part error. A caught panic
-//!   is a failure (record 0003), and so is a case slower than the budget.
+//!   is a failure (record 0003), and so is a case slower than the budget
+//!   (in a debug build, slower than the hang backstop: see [`BUDGET`]).
 //! - [`settle`] fails the test on a failure that no waiver covers, on a
 //!   waiver that no case needs any more, and on a waiver without a reason,
 //!   an issue and the expiry.
 //! - [`Rng`] is a small seeded generator, so every run tries the same inputs.
-//! - [`load_parts`] loads the hand-written `.parts` packages as a zip.
+//! - [`load_parts`] loads the hand-written `.parts` packages as a zip;
+//!   [`unpack`] and [`pack`] take a package apart and build it again.
 
 use std::cell::{Cell, RefCell};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -23,7 +25,24 @@ use carrysheet_kernel::Kernel;
 use carrysheet_model::{SheetRange, format_sheet_name};
 
 /// The budget of one command (`carrysheet_commands::limits::MAX_CALL_SECONDS`).
+///
+/// A release build fails a case over it. A debug build, which CI's
+/// `cargo test` runs, fails a case only past [`HANG`]: debug code is about
+/// 18x slower than release here (biff/SharedFormulaTest.xls, 31 KB at
+/// [`Depth::Save`]: 3.4 s debug, 0.19 s release on the Mac), and a GitHub
+/// macOS runner is about 3.8x slower again, so an honest case would cross
+/// 10 s there. A case the kernel stops with its own `limit_exceeded`
+/// error is refused, which keeps the contract. Each report prints its
+/// slowest case.
 pub const BUDGET: Duration = Duration::from_secs(10);
+
+/// The hang backstop of a debug build: see [`BUDGET`].
+pub const HANG: Duration = Duration::from_secs(60);
+
+/// What a case may take in this build: [`BUDGET`] in release, [`HANG`] in debug.
+pub fn time_limit() -> Duration {
+    if cfg!(debug_assertions) { HANG } else { BUDGET }
+}
 
 /// The only expiry a waiver may have: every waiver is gone before v0.1.0.
 pub const EXPIRY: &str = "v0.1.0";
@@ -130,9 +149,21 @@ const CSV_BYTES: &[u8] = &[
     0xFE, 0xFF,
 ];
 
+/// Bytes that matter to XML.
+pub const XML_BYTES: &[u8] = &[
+    b'<', b'>', b'/', b'"', b'\'', b'&', b';', b'#', b'=', b':', b' ', b'0', b'9', b'-', 0x00,
+    0x80, 0xC3, 0xEF, 0xFF,
+];
+
 /// Damages a csv file in small ways, as the removed csv reader's mutation
 /// test did: flips, csv bytes put in or taken out, cuts and copies.
 pub fn mutate_csv(rng: &mut Rng, input: &[u8]) -> (Vec<u8>, String) {
+    mutate_text(rng, input, CSV_BYTES)
+}
+
+/// Damages text in small ways: flips, bytes of `alphabet` put in or taken
+/// out, cuts and copies.
+pub fn mutate_text(rng: &mut Rng, input: &[u8], alphabet: &[u8]) -> (Vec<u8>, String) {
     let mut out = input.to_vec();
     let mut what = Vec::new();
     for _ in 0..=rng.below(4) {
@@ -143,11 +174,11 @@ pub fn mutate_csv(rng: &mut Rng, input: &[u8]) -> (Vec<u8>, String) {
                 what.push(format!("flip at {at}"));
             }
             1 if at < out.len() => {
-                out[at] = CSV_BYTES[rng.below(CSV_BYTES.len())];
+                out[at] = alphabet[rng.below(alphabet.len())];
                 what.push(format!("set at {at}"));
             }
             2 => {
-                out.insert(at, CSV_BYTES[rng.below(CSV_BYTES.len())]);
+                out.insert(at, alphabet[rng.below(alphabet.len())]);
                 what.push(format!("insert at {at}"));
             }
             3 if at < out.len() => {
@@ -284,16 +315,22 @@ pub fn run_case(input: Input<'_>, depth: Depth) -> Result<Outcome, String> {
         },
         Ok(Err(e)) => Outcome::Refused(e),
     };
+    // A panic caught and swallowed below the kernel counts too, even when
+    // the open then went on and worked.
+    if !panics.is_empty() {
+        return Err(format!("panicked at {panics:?}: {outcome:?}"));
+    }
     if let Outcome::Refused(e) = &outcome {
-        if e.code == ErrorCode::Internal || !panics.is_empty() {
-            return Err(format!("panicked at {panics:?}: {}", e.why));
+        if e.code == ErrorCode::Internal {
+            return Err(format!("internal error: {}", e.why));
         }
         if e.what.trim().is_empty() || e.why.trim().is_empty() || e.fix.trim().is_empty() {
             return Err(format!("an error without all three parts: {e:?}"));
         }
     }
-    if took > BUDGET {
-        return Err(format!("took {took:?}, over the {BUDGET:?} budget"));
+    let limit = time_limit();
+    if took > limit {
+        return Err(format!("took {took:?}, over the {limit:?} limit"));
     }
     Ok(outcome)
 }
@@ -302,12 +339,21 @@ pub fn run_case(input: Input<'_>, depth: Depth) -> Result<Outcome, String> {
 pub struct Waiver {
     /// The case's name, exactly as the test reports it.
     pub case: &'static str,
+    /// A part of the failure's text: the waiver covers only this failure,
+    /// so a panic or a slow run of the same case still fails.
+    pub problem: &'static str,
     /// What goes wrong, in a few words.
     pub reason: &'static str,
     /// The issue that tracks the fix.
     pub issue: Option<u32>,
     /// Must be [`EXPIRY`].
     pub expires: &'static str,
+}
+
+impl Waiver {
+    fn covers(&self, case: &str, problem: &str) -> bool {
+        self.case == case && problem.contains(self.problem)
+    }
 }
 
 /// Collects the cases of one test and judges them against its waivers.
@@ -372,21 +418,25 @@ impl Report {
     pub fn settle(self, waivers: &[Waiver]) {
         let mut problems = Vec::new();
         for w in waivers {
-            if w.reason.trim().is_empty() || w.issue.is_none() || w.expires != EXPIRY {
+            if w.reason.trim().is_empty()
+                || w.problem.trim().is_empty()
+                || w.issue.is_none()
+                || w.expires != EXPIRY
+            {
                 problems.push(format!(
-                    "waiver {:?} needs a reason, an issue and the expiry {EXPIRY}",
+                    "waiver {:?} needs a problem, a reason, an issue and the expiry {EXPIRY}",
                     w.case
                 ));
             }
         }
         for (case, problem) in &self.failures {
-            if !waivers.iter().any(|w| w.case == case) {
+            if !waivers.iter().any(|w| w.covers(case, problem)) {
                 problems.push(format!("{case}: {problem}"));
             }
         }
         for w in waivers {
             let ran = self.cases.iter().any(|c| c == w.case);
-            let failed = self.failures.iter().any(|(c, _)| c == w.case);
+            let failed = self.failures.iter().any(|(c, p)| w.covers(c, p));
             if ran && !failed {
                 problems.push(format!(
                     "waiver {:?} is not needed any more: remove it",
@@ -412,6 +462,11 @@ pub fn check_waivers(waivers: &[Waiver]) {
             "waiver {:?}: no reason",
             w.case
         );
+        assert!(
+            !w.problem.trim().is_empty(),
+            "waiver {:?}: no problem",
+            w.case
+        );
         assert!(w.issue.is_some(), "waiver {:?}: no issue", w.case);
         assert_eq!(w.expires, EXPIRY, "waiver {:?}: wrong expiry", w.case);
     }
@@ -421,6 +476,31 @@ pub fn check_waivers(waivers: &[Waiver]) {
 pub fn mentions(text: &str, words: &[&str]) -> bool {
     let text = text.to_ascii_lowercase();
     words.iter().any(|w| text.contains(&w.to_ascii_lowercase()))
+}
+
+/// The parts of a zip package, in their order, or `None` when it is not a
+/// zip (an encrypted package is a compound file).
+pub fn unpack(package: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
+    let mut zip = carrysheet_zip::Archive::open(
+        std::io::Cursor::new(package),
+        carrysheet_zip::Limits::default(),
+    )
+    .ok()?;
+    let names: Vec<String> = zip.entries().iter().map(|e| e.name.clone()).collect();
+    let mut parts = Vec::new();
+    for (i, name) in names.into_iter().enumerate() {
+        parts.push((name, zip.read(i, u64::MAX).ok()?));
+    }
+    Some(parts)
+}
+
+/// A package of `parts`, each stored with its CRC-32.
+pub fn pack(parts: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let entries: Vec<_> = parts
+        .iter()
+        .map(|(name, body)| crate::common::entry(name, body.clone()))
+        .collect();
+    crate::common::zip(&entries)
 }
 
 /// A `.parts` file as a zip package: each `=== name` line starts a part,

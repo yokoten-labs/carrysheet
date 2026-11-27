@@ -17,24 +17,28 @@ use crate::{cfb, xlsb};
 const WAIVERS: &[Waiver] = &[
     Waiver {
         case: "biff2 sheet, raw",
+        problem: "not refused with its version",
         reason: "GridCraft reads an .xls that is not a compound file as csv text",
         issue: Some(ISSUE),
         expires: EXPIRY,
     },
     Waiver {
         case: "biff4 workbook, raw",
+        problem: "not refused with its version",
         reason: "GridCraft reads an .xls that is not a compound file as csv text",
         issue: Some(ISSUE),
         expires: EXPIRY,
     },
     Waiver {
         case: "a raw BIFF8 stream without a container",
+        problem: "opened as text",
         reason: "GridCraft reads an .xls that is not a compound file as csv text",
         issue: Some(ISSUE),
         expires: EXPIRY,
     },
     Waiver {
         case: "text named .xls",
+        problem: "opened as text",
         reason: "GridCraft reads an .xls that is not a compound file as csv text",
         issue: Some(ISSUE),
         expires: EXPIRY,

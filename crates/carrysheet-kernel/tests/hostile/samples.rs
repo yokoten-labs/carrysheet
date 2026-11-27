@@ -8,8 +8,9 @@ use std::path::Path;
 use carrysheet_commands::ErrorCode;
 
 use crate::support::{
-    Depth, EXPIRY, ISSUE, Input, Report, Rng, Waiver, check_waivers, load_parts, mentions,
-    mutate_binary, mutate_csv, sample_files, short_name,
+    Depth, EXPIRY, ISSUE, Input, Outcome, Report, Rng, Waiver, XML_BYTES, check_waivers,
+    load_parts, mentions, mutate_binary, mutate_csv, mutate_text, pack, sample_files, short_name,
+    unpack,
 };
 use crate::{biff, cfb, xlsb};
 
@@ -18,17 +19,26 @@ use crate::{biff, cfb, xlsb};
 const WAIVERS: &[Waiver] = &[
     Waiver {
         case: "biff/testEXCEL_3.xls",
+        problem: "not refused with its version",
         reason: "GridCraft reads a raw BIFF3 stream named .xls as csv text",
         issue: Some(ISSUE),
         expires: EXPIRY,
     },
     Waiver {
         case: "biff/testEXCEL_4.xls",
+        problem: "not refused with its version",
         reason: "GridCraft reads a raw BIFF4 stream named .xls as csv text",
         issue: Some(ISSUE),
         expires: EXPIRY,
     },
 ];
+
+/// How many samples are older than BIFF8: a miss of [`kind`] would let a
+/// file skip the old-version check.
+const OLD_EXCEL_SAMPLES: usize = 13;
+
+/// Words of the error that refuses an old Excel file.
+const OLD_VERSION: &[&str] = &["BIFF", "Excel 5", "version"];
 
 /// Damaged copies made of each input.
 const MUTATIONS_PER_INPUT: usize = 6;
@@ -66,10 +76,14 @@ fn every_sample_opens_or_is_refused_clearly() {
     let files = sample_files();
     assert!(files.len() >= 100, "{} sample files", files.len());
     let mut report = Report::default();
+    let mut old = 0;
     for path in &files {
         let name = short_name(path);
         let bytes = std::fs::read(path).unwrap();
         let kind = kind(path, &bytes);
+        if matches!(kind, Kind::OldExcel(_)) {
+            old += 1;
+        }
         let (case, outcome) = if name.ends_with(".parts") {
             // A package written as text: zipped, it is an xlsx.
             let case = format!("{name} as xlsx");
@@ -86,7 +100,14 @@ fn every_sample_opens_or_is_refused_clearly() {
         let Some(outcome) = outcome else { continue };
         let refused = outcome.refused();
         match kind {
-            Kind::Opens => {}
+            Kind::Opens => {
+                if refused.is_some_and(|e| mentions(&e.why, OLD_VERSION)) {
+                    report.fail(
+                        &case,
+                        format!("refused as an old version the test did not see: {outcome:?}"),
+                    );
+                }
+            }
             Kind::Numbers => match refused {
                 Some(e) if e.code == ErrorCode::UnsupportedFormat => {}
                 _ => report.fail(
@@ -95,7 +116,7 @@ fn every_sample_opens_or_is_refused_clearly() {
                 ),
             },
             Kind::OldExcel(v) => match refused {
-                Some(e) if mentions(&e.why, &["BIFF", "Excel 5", "version"]) => {}
+                Some(e) if mentions(&e.why, OLD_VERSION) => {}
                 _ => report.fail(
                     &case,
                     format!("a BIFF{v} file was not refused with its version: {outcome:?}"),
@@ -105,10 +126,12 @@ fn every_sample_opens_or_is_refused_clearly() {
         println!("{case}: {kind:?}, {}", describe(&outcome));
     }
     println!("{}", report.summary("samples"));
+    println!("{old} samples older than BIFF8");
+    assert_eq!(old, OLD_EXCEL_SAMPLES, "samples older than BIFF8");
     report.settle(WAIVERS);
 }
 
-fn describe(outcome: &crate::support::Outcome) -> String {
+fn describe(outcome: &Outcome) -> String {
     match outcome.refused() {
         Some(e) => format!("refused ({}): {} / {}", e.code.as_str(), e.what, e.why),
         None => "opened".to_owned(),
@@ -126,6 +149,44 @@ struct Seed {
     bytes: Vec<u8>,
     /// Wraps a mutated stream back into a file; `None` opens it as is.
     wrap: Option<Wrap>,
+    /// A package's parts: most copies damage one part and build the
+    /// package again, so the CRC-32 matches and the damage reaches the
+    /// xlsx or xlsb parser instead of stopping at the zip reader.
+    parts: Option<Vec<(String, Vec<u8>)>>,
+}
+
+impl Seed {
+    fn whole(case: String, file_name: &'static str, bytes: Vec<u8>) -> Seed {
+        Seed {
+            case,
+            file_name,
+            bytes,
+            wrap: None,
+            parts: None,
+        }
+    }
+
+    /// A package: its parts when it is a zip (an encrypted one is not).
+    fn package(case: String, file_name: &'static str, bytes: Vec<u8>) -> Seed {
+        let parts = unpack(&bytes);
+        Seed {
+            parts,
+            ..Seed::whole(case, file_name, bytes)
+        }
+    }
+}
+
+/// A small xlsx built in code: a number, a shared string, a formula and
+/// an inline string.
+fn built_xlsx() -> Vec<u8> {
+    let mut book = crate::common::Book::new(
+        r#"<row r="1"><c r="A1"><v>1.5</v></c><c r="B1" t="s"><v>0</v></c><c r="C1"><f>A1*2</f><v>3</v></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>inline</t></is></c></row>"#,
+    );
+    book.strings = Some(format!(
+        r#"<?xml version="1.0"?><sst {}><si><t>shared</t></si></sst>"#,
+        crate::common::NS
+    ));
+    book.bytes()
 }
 
 fn seeds(extension: &str) -> Vec<Seed> {
@@ -143,37 +204,22 @@ fn seeds(extension: &str) -> Vec<Seed> {
                 // the container around them.
                 if let Some(stream) = cfb::read_stream(&bytes, "Workbook") {
                     out.push(Seed {
-                        case: format!("{name} (stream)"),
-                        file_name: "book.xls",
-                        bytes: stream,
                         wrap: Some(cfb::workbook),
+                        ..Seed::whole(format!("{name} (stream)"), "book.xls", stream)
                     });
                 }
-                out.push(Seed {
-                    case: name,
-                    file_name: "book.xls",
-                    bytes,
-                    wrap: None,
-                });
+                out.push(Seed::whole(name, "book.xls", bytes));
             }
-            "csv" if matches("csv") || matches("txt") => out.push(Seed {
-                case: name,
-                file_name: "data.csv",
-                bytes,
-                wrap: None,
-            }),
+            "csv" if matches("csv") || matches("txt") => {
+                out.push(Seed::whole(name, "data.csv", bytes));
+            }
             "xlsx" if matches("xlsx") || matches("parts") => {
                 let bytes = if matches("parts") {
                     load_parts(&path)
                 } else {
                     bytes
                 };
-                out.push(Seed {
-                    case: name,
-                    file_name: "book.xlsx",
-                    bytes,
-                    wrap: None,
-                });
+                out.push(Seed::package(name, "book.xlsx", bytes));
             }
             _ => {}
         }
@@ -191,31 +237,98 @@ fn seeds(extension: &str) -> Vec<Seed> {
             ];
             for (case, stream) in built {
                 out.push(Seed {
-                    case: case.to_owned(),
-                    file_name: "book.xls",
-                    bytes: stream,
                     wrap: Some(cfb::workbook),
+                    ..Seed::whole(case.to_owned(), "book.xls", stream)
                 });
             }
         }
-        "xlsb" => out.push(Seed {
-            case: "xlsb (built)".to_owned(),
-            file_name: "book.xlsb",
-            bytes: xlsb::small_book(),
-            wrap: None,
-        }),
+        "xlsx" => {
+            // The kernel's own xlsx samples, and one built here.
+            for name in ["WithTwoCharts.xlsx", "SimpleMacro.xlsm"] {
+                let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/data")
+                    .join(name);
+                out.push(Seed::package(
+                    name.to_owned(),
+                    "book.xlsx",
+                    std::fs::read(path).unwrap(),
+                ));
+            }
+            out.push(Seed::package(
+                "xlsx (built)".to_owned(),
+                "book.xlsx",
+                built_xlsx(),
+            ));
+        }
+        "xlsb" => out.push(Seed::package(
+            "xlsb (built)".to_owned(),
+            "book.xlsb",
+            xlsb::small_book(),
+        )),
         _ => {}
     }
     out
 }
 
-/// Damages every seed of one format and opens each copy.
-fn mutate_all(extension: &str, seed: u64, minimum: usize) {
+/// Whether a mutation may pick this part: the binary records of an xlsb,
+/// the XML of an xlsx.
+fn target(extension: &str, part: &str) -> bool {
+    if extension == "xlsb" {
+        part.ends_with(".bin")
+    } else {
+        part.ends_with(".xml") || part.ends_with(".rels")
+    }
+}
+
+/// Damages every seed of one format and opens each copy: `per_seed`
+/// copies of each, and of a package, one in four is damaged as a whole
+/// file and the rest in one part.
+fn mutate_all(extension: &str, seed: u64, per_seed: usize, minimum: usize) -> Report {
     let seeds = seeds(extension);
     let mut rng = Rng(seed);
     let mut report = Report::default();
+    let (mut in_parts, mut parts_opened) = (0, 0);
+    let mut refusals = std::collections::BTreeMap::<String, usize>::new();
     for s in &seeds {
-        for case in 0..MUTATIONS_PER_INPUT {
+        let targets: Vec<usize> = s
+            .parts
+            .iter()
+            .flatten()
+            .enumerate()
+            .filter(|(_, (name, _))| target(extension, name))
+            .map(|(i, _)| i)
+            .collect();
+        let copies = if s.parts.is_some() {
+            per_seed
+        } else {
+            MUTATIONS_PER_INPUT
+        };
+        for case in 0..copies {
+            let parts = s.parts.as_ref().filter(|_| case % 4 != 0);
+            if let (Some(parts), false) = (parts, targets.is_empty()) {
+                let mut parts = parts.clone();
+                let at = targets[rng.below(targets.len())];
+                let (name, body) = &mut parts[at];
+                let (damaged, what) = if extension == "xlsx" && case % 2 == 1 {
+                    mutate_text(&mut rng, body, XML_BYTES)
+                } else {
+                    mutate_binary(&mut rng, body, case)
+                };
+                *body = damaged;
+                let case = format!("{} mutation {case} ({name}: {what})", s.case);
+                let outcome =
+                    report.run(case, Input::Bytes(s.file_name, pack(&parts)), Depth::Read);
+                in_parts += 1;
+                match outcome {
+                    Some(Outcome::Opened) => parts_opened += 1,
+                    Some(Outcome::Refused(e)) => {
+                        let why: String = e.why.chars().take(90).collect();
+                        *refusals.entry(why).or_insert(0) += 1;
+                    }
+                    None => {}
+                }
+                continue;
+            }
             let (damaged, what) = if extension == "csv" {
                 mutate_csv(&mut rng, &s.bytes)
             } else {
@@ -238,23 +351,46 @@ fn mutate_all(extension: &str, seed: u64, minimum: usize) {
         "{} cases",
         report.cases.len()
     );
-    report.settle(WAIVERS);
+    if matches!(extension, "xlsx" | "xlsb") {
+        println!("{extension}: {parts_opened} of {in_parts} copies damaged in one part opened");
+        for (why, n) in &refusals {
+            println!("  {n} refused: {why}");
+        }
+        // A copy damaged in one part reached the parser when it opened or
+        // when the parser, not the zip reader, refused it.
+        let parser = if extension == "xlsb" { "XLSB" } else { "XML" };
+        let reached = parts_opened
+            + refusals
+                .iter()
+                .filter(|(why, _)| why.contains(parser))
+                .map(|(_, n)| n)
+                .sum::<usize>();
+        assert!(
+            reached * 2 >= in_parts,
+            "{extension}: {reached} of {in_parts} copies damaged in one part reached the parser"
+        );
+    }
+    report
 }
 
 #[test]
 fn mutated_xls_never_panics_or_hangs() {
-    mutate_all("xls", 0x00C0_FFEE_D00D_F00D, 500);
+    mutate_all("xls", 0x00C0_FFEE_D00D_F00D, MUTATIONS_PER_INPUT, 500).settle(WAIVERS);
 }
 
 #[test]
 fn mutated_csv_never_panics_or_hangs() {
-    mutate_all("csv", 0x9E37_79B9_7F4A_7C15, 60);
+    mutate_all("csv", 0x9E37_79B9_7F4A_7C15, MUTATIONS_PER_INPUT, 60).settle(WAIVERS);
 }
 
 #[test]
-fn mutated_packages_never_panic_or_hang() {
-    mutate_all("xlsx", 0x5EED_0010, 30);
-    mutate_all("xlsb", 0x5EED_0011, 6);
+fn mutated_xlsx_never_panics_or_hangs() {
+    mutate_all("xlsx", 0x5EED_0010, 24, 100).settle(WAIVERS);
+}
+
+#[test]
+fn mutated_xlsb_never_panics_or_hangs() {
+    mutate_all("xlsb", 0x5EED_0011, 60, 60).settle(WAIVERS);
 }
 
 /// The built samples open: if the test's compound file writer stopped
@@ -269,10 +405,11 @@ fn built_samples_open() {
             cfb::workbook(&biff::biff8_split_sst()),
         ),
         ("xlsb", "book.xlsb", xlsb::small_book()),
+        ("xlsx", "book.xlsx", built_xlsx()),
     ] {
         let outcome = report.run(case.to_owned(), Input::Bytes(name, bytes), Depth::Save);
         assert!(
-            matches!(outcome, Some(crate::support::Outcome::Opened)),
+            matches!(outcome, Some(Outcome::Opened)),
             "{case}: {outcome:?}"
         );
     }

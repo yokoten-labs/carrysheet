@@ -440,11 +440,15 @@ pub fn one_sheet(globals: impl FnOnce(&mut Stream), body: impl FnOnce(&mut Strea
 }
 
 /// The BIFF version of a workbook: the BOF of a raw stream (BIFF2 to
-/// BIFF4), or of the `Workbook` or `Book` stream in a compound file.
+/// BIFF4) or of the `Workbook` stream in a compound file. A compound file
+/// with a `Book` stream and no `Workbook` stream is BIFF5 (Excel 5 and 95
+/// name it so), whatever its BOF says and even when the stream is cut.
 pub fn version(file: &[u8]) -> Option<u16> {
     let stream = if file.starts_with(&crate::cfb::SIGNATURE) {
-        crate::cfb::read_stream(file, "Workbook")
-            .or_else(|| crate::cfb::read_stream(file, "Book"))?
+        if !crate::cfb::has_stream(file, "Workbook") && crate::cfb::has_stream(file, "Book") {
+            return Some(5);
+        }
+        crate::cfb::read_stream(file, "Workbook")?
     } else {
         file.to_vec()
     };

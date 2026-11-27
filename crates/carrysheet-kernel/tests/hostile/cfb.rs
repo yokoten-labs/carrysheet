@@ -133,45 +133,73 @@ pub fn workbook(stream: &[u8]) -> Vec<u8> {
     compound(&[("Workbook", stream)])
 }
 
-/// The stream called `name` under the root storage of a compound file, or
-/// `None` when the file cannot be followed. For trusted samples: the FAT
-/// is read from the header only, and every loop is bounded.
-pub fn read_stream(file: &[u8], name: &str) -> Option<Vec<u8>> {
+/// Follows a sector chain from `start` through `table`, reading each
+/// sector with `data`; bounded by the table's length.
+fn chain(start: u32, table: &[u32], data: &dyn Fn(u32) -> Option<Vec<u8>>) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut id = start;
+    for _ in 0..table.len() {
+        if id == END_OF_CHAIN {
+            return Some(out);
+        }
+        out.extend(data(id)?);
+        id = *table.get(id as usize)?;
+    }
+    (id == END_OF_CHAIN).then_some(out)
+}
+
+/// The sector size, the FAT and the directory of a compound file.
+fn directory(file: &[u8]) -> Option<(usize, Vec<u32>, Vec<u8>)> {
     if !file.starts_with(&SIGNATURE) || get16(file, 32)? != 6 {
         return None;
     }
     let size = 1usize << get16(file, 30)?;
-    let sector = |id: u32| file.get((id as usize + 1) * size..(id as usize + 2) * size);
     let mut fat = Vec::new();
     for i in 0..109 {
         let id = get32(file, 76 + i * 4)?;
         if id < 0xFFFF_FFFA {
-            let s = sector(id)?;
+            let s = file.get((id as usize + 1) * size..(id as usize + 2) * size)?;
             fat.extend((0..size / 4).filter_map(|j| get32(s, j * 4)));
         }
     }
-    let chain = |start: u32, table: &[u32], data: &dyn Fn(u32) -> Option<Vec<u8>>| {
-        let mut out = Vec::new();
-        let mut id = start;
-        for _ in 0..table.len() {
-            if id == END_OF_CHAIN {
-                return Some(out);
-            }
-            out.extend(data(id)?);
-            id = *table.get(id as usize)?;
-        }
-        (id == END_OF_CHAIN).then_some(out)
+    let regular = |id: u32| {
+        file.get((id as usize + 1) * size..(id as usize + 2) * size)
+            .map(<[u8]>::to_vec)
     };
-    let regular = |id: u32| sector(id).map(<[u8]>::to_vec);
     let dir = chain(get32(file, 48)?, &fat, &regular)?;
+    Some((size, fat, dir))
+}
+
+/// The name of a directory entry when it is a stream.
+fn stream_name(e: &[u8]) -> Option<String> {
+    let len = usize::from(get16(e, 64)?).clamp(2, 64);
+    let units: Vec<u16> = (0..(len - 2) / 2).filter_map(|i| get16(e, i * 2)).collect();
+    (e[66] == 2).then(|| String::from_utf16_lossy(&units))
+}
+
+/// Whether the directory of a compound file lists a stream called `name`,
+/// even when the stream itself cannot be read (a cut file).
+pub fn has_stream(file: &[u8], name: &str) -> bool {
+    directory(file).is_some_and(|(_, _, dir)| {
+        (1..dir.len() / 128)
+            .filter_map(|k| stream_name(&dir[k * 128..(k + 1) * 128]))
+            .any(|n| n.eq_ignore_ascii_case(name))
+    })
+}
+
+/// The stream called `name` under the root storage of a compound file, or
+/// `None` when the file cannot be followed. For trusted samples: the FAT
+/// is read from the header only, and every loop is bounded.
+pub fn read_stream(file: &[u8], name: &str) -> Option<Vec<u8>> {
+    let (size, fat, dir) = directory(file)?;
+    let sector = |id: u32| file.get((id as usize + 1) * size..(id as usize + 2) * size);
+    let regular = |id: u32| sector(id).map(<[u8]>::to_vec);
     let cutoff = u64::from(get32(file, 56)?);
     let entry = |k: usize| dir.get(k * 128..(k + 1) * 128);
     let root = entry(0)?;
     for k in 1..dir.len() / 128 {
         let e = entry(k)?;
-        let len = usize::from(get16(e, 64)?).clamp(2, 64);
-        let units: Vec<u16> = (0..(len - 2) / 2).filter_map(|i| get16(e, i * 2)).collect();
-        if e[66] != 2 || !String::from_utf16_lossy(&units).eq_ignore_ascii_case(name) {
+        if !stream_name(e).is_some_and(|n| n.eq_ignore_ascii_case(name)) {
             continue;
         }
         let start = get32(e, 116)?;
