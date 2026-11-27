@@ -525,6 +525,42 @@ fn a_whole_drive_or_the_home_folder_needs_an_explicit_root() {
 }
 
 #[test]
+fn mcp_serve_keeps_stdout_for_json_rpc_even_with_json() {
+    let scratch = Scratch::new();
+    let serve = |cwd: &std::path::Path, args: &[&str], input: &[u8]| {
+        let mut child = Command::new(BIN)
+            .args(["mcp", "serve", "--json"])
+            .args(args)
+            .current_dir(cwd)
+            .env("HOME", scratch.path("home"))
+            .env("USERPROFILE", scratch.path("home"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(input).unwrap();
+        child.wait_with_output().unwrap()
+    };
+    // Before the session: the error is text on stderr, not JSON on stdout.
+    let o = serve(&scratch.path("home"), &[], b"");
+    assert_eq!(o.status.code(), Some(2));
+    assert!(
+        o.stdout.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&o.stdout)
+    );
+    assert!(String::from_utf8_lossy(&o.stderr).contains("too wide to serve"));
+    // A session that ends on a broken message: stdout still holds JSON-RPC only.
+    let root = scratch.path("root");
+    let o = serve(&root, &["--root", root.to_str().unwrap()], b"not json\n{\n");
+    for line in String::from_utf8_lossy(&o.stdout).lines() {
+        jsonrpc(line);
+    }
+    eprintln!("broken message: exit {:?}", o.status.code());
+}
+
+#[test]
 fn startup_is_fast() {
     // A second, separate measurement with nothing else in the session.
     let scratch = Scratch::new();

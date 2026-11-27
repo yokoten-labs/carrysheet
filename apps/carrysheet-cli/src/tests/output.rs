@@ -70,16 +70,14 @@ fn text_form_prints_tables_and_fields() {
 }
 
 #[test]
-fn clap_messages_keep_their_lists() {
-    assert_eq!(
-        clap_message("error: a list:\n  <A>\n  --b <B>\n\nUsage: x\n").as_deref(),
-        Some("a list: <A>, --b <B>")
-    );
-    assert_eq!(
-        clap_message("error: bad 'x'\n  [possible values: a, b]\n\n  tip: hm\n").as_deref(),
-        Some("bad 'x'")
-    );
-    assert_eq!(clap_message("\n\n"), None);
+fn usage_errors_join_clap_lists() {
+    let raw = |text: &str| clap::Error::raw(clap::error::ErrorKind::InvalidValue, text);
+    let e = usage_error(&raw("a list:\n  <A>\n  --b <B>\n\nUsage: x\n"));
+    assert_eq!(e.what, "a list: <A>, --b <B>");
+    assert_eq!(e.fix, "Usage: x");
+    let e = usage_error(&raw("bad 'x'\n  [possible values: a, b]\n\n  tip: hm\n"));
+    assert_eq!(e.what, "bad 'x'");
+    assert_eq!(e.fix, "[possible values: a, b] tip: hm");
 }
 
 #[test]

@@ -1,19 +1,12 @@
 //! `mcp serve`: the MCP server over stdio, built on rmcp.
 //!
-//! - Tools come from `carrysheet::args`, in its fixed order, with all four
-//!   annotations. `--read-only` leaves out every tool that changes files.
-//! - A call goes through the same `validate_args` and [`run::run`] as the
-//!   command line. The result carries the same JSON as compact text and as
-//!   `structuredContent`; a failure is `isError: true` with `fix` first.
-//! - Every path argument must stay inside `--root` and is handed on resolved.
-//! - stdout carries only JSON-RPC. The log goes to stderr, cleaned like
-//!   text from a file.
-//! - Both lifecycles, as rmcp implements them: `initialize` (2025-11-25 and
-//!   older) and `server/discover` (2026-07-28), with rmcp's version list.
+//! Tools come from `carrysheet::args` in table order, with all four annotations; a call runs
+//! the same `validate_args` and [`run::run`] as the command line, with every path kept inside
+//! `--root`. Both lifecycles rmcp implements: `initialize` (2025-11-25 and older) and
+//! `server/discover` (2026-07-28). stdout carries only JSON-RPC; the log goes to stderr.
 
 use std::io::Write as _;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Instant;
 
 use carrysheet::args::{Command, McpServe, PATHS, mcp_tools, tool_definition};
@@ -39,9 +32,8 @@ server's root folder; files outside it are refused. Name the workbook by its pat
 /// Longest log line kept, in characters.
 pub(crate) const MAX_LOG_LINE: usize = 2_000;
 
-/// Writes one line to stderr, never stdout: the home folder shown as `~`,
-/// and control and invisible characters escaped as for text from a file,
-/// so a client's text cannot forge a line or hide escape codes.
+/// Writes one line to stderr, never stdout: home shown as `~`, and control and invisible
+/// characters escaped as for file text, so a client cannot forge a line or hide escape codes.
 pub fn log(message: &str) {
     let _ = std::io::stderr()
         .lock()
@@ -53,52 +45,38 @@ pub(crate) fn log_line(message: &str) -> String {
     format!("carrysheet-cli: {line}\n")
 }
 
-/// The server: the tools it offers and the folder it may use.
+/// The server: the folder it may use and the commands it offers as tools, in table order.
+/// A clone per call is two small fields.
 #[derive(Clone)]
 pub struct Server {
-    pub(crate) inner: Arc<Inner>,
-}
-
-pub(crate) struct Inner {
     root: Root,
-    read_only: bool,
-    /// The offered commands, in table order, and their tool definitions.
     pub(crate) commands: Vec<&'static Command>,
-    pub(crate) tools: Vec<Tool>,
 }
 
-/// The commands offered as tools: every MCP tool in the table; in read-only
-/// mode, only those that never change files and say so in `readOnlyHint`.
+/// The commands offered as tools: every MCP tool in the table; with `--read-only`, only
+/// those that never change files and say so in `readOnlyHint`.
 pub fn offered(read_only: bool) -> Vec<&'static Command> {
     mcp_tools()
-        .filter(|c| !read_only || is_read_only(c))
+        .filter(|c| !read_only || (!c.changes_files() && c.is_read_only()))
         .collect()
-}
-
-/// Offered in read-only mode: never changes files and is marked read-only.
-fn is_read_only(command: &Command) -> bool {
-    !command.changes_files() && command.is_read_only()
-}
-
-/// A command's tool definition as rmcp's type. The JSON comes from its
-/// argument struct, so nothing here can drift from `commands --json`.
-fn tool(command: &Command) -> Tool {
-    serde_json::from_value(tool_definition(command))
-        .expect("tool definitions from the argument structs are valid MCP tools")
 }
 
 impl Server {
     pub fn new(root: Root, read_only: bool) -> Server {
         let commands = offered(read_only);
-        let tools = commands.iter().map(|c| tool(c)).collect();
-        Server {
-            inner: Arc::new(Inner {
-                root,
-                read_only,
-                commands,
-                tools,
-            }),
-        }
+        Server { root, commands }
+    }
+
+    /// The tool definitions as rmcp's type. The JSON comes from the argument structs, so
+    /// nothing here can drift from `commands --json`.
+    pub(crate) fn tools(&self) -> Vec<Tool> {
+        let tools = self
+            .commands
+            .iter()
+            .map(|c| serde_json::from_value::<Tool>(tool_definition(c)));
+        tools
+            .collect::<Result<_, _>>()
+            .expect("tool definitions from the argument structs are valid MCP tools")
     }
 
     /// Runs one tool call and turns the outcome into a tool result. Never a
@@ -133,17 +111,15 @@ impl Server {
         name: &str,
         arguments: Option<Map<String, Value>>,
     ) -> Result<Map<String, Value>, CommandError> {
-        let Some(command) = self.inner.commands.iter().find(|c| c.name == name) else {
+        let Some(command) = self.commands.iter().find(|c| c.name == name) else {
             return Err(self.unknown_tool(name));
         };
-        let args = Value::Object(arguments.unwrap_or_default());
-        let mut args = validate_args(command, &args)?;
+        let mut args = validate_args(command, &Value::Object(arguments.unwrap_or_default()))?;
         self.confine(&mut args)?;
         // Never asks; keeps the agents' time limit (limits::MAX_CALL_SECONDS).
         // Writes stay inside the root even if a link changes meanwhile.
-        let root = Some(self.inner.root.dir());
         let ctx = Context {
-            root,
+            root: Some(self.root.dir()),
             ..Context::default()
         };
         run::run(command, &args, &ctx).map(|done| done.data)
@@ -162,7 +138,7 @@ impl Server {
     }
 
     fn resolve(&self, given: &str) -> Result<String, CommandError> {
-        let path = self.inner.root.resolve(given)?;
+        let path = self.root.resolve(given)?;
         path.into_os_string().into_string().map_err(|_| {
             CommandError::invalid_argument(
                 "path",
@@ -172,38 +148,35 @@ impl Server {
         })
     }
 
+    /// The refusal of a name not offered. Only `--read-only` hides a real MCP tool.
     fn unknown_tool(&self, name: &str) -> CommandError {
-        let names: Vec<_> = self.inner.commands.iter().map(|c| c.name).collect();
-        let fix = format!("Use one of: {}.", names.join(", "));
-        if self.inner.read_only && mcp_tools().any(|c| c.name == name && !is_read_only(c)) {
-            return CommandError::new(
-                ErrorCode::InvalidArgument,
+        let names: Vec<_> = self.commands.iter().map(|c| c.name).collect();
+        let mut fix = format!("Use one of: {}.", names.join(", "));
+        let (what, why) = if mcp_tools().any(|c| c.name == name) {
+            fix.push_str(" To change files, restart the server without --read-only.");
+            let why =
+                "the server was started with --read-only, which hides tools that change files";
+            (
                 format!("the tool `{name}` is not offered in read-only mode"),
-                "the server was started with --read-only, which hides tools that change files",
-                format!("{fix} To change files, restart the server without --read-only."),
-            );
-        }
-        CommandError::new(
-            ErrorCode::InvalidArgument,
-            format!("there is no tool named `{name}`"),
-            "the name is not in this server's tool list",
-            fix,
-        )
+                why,
+            )
+        } else {
+            let why = "the name is not in this server's tool list";
+            (format!("there is no tool named `{name}`"), why)
+        };
+        CommandError::new(ErrorCode::InvalidArgument, what, why, fix)
     }
 }
 
-/// The longest `what` a tool error carries, so `fix` always starts within
-/// the first 200 characters: some clients keep only the start of an error.
+/// The longest `what` of a tool error, so `fix` starts in the first 200 characters, which
+/// is all some clients keep.
 const MAX_WHAT: usize = 100;
 
-/// The longest `fix` and `why` a tool error carries. Errors name the
-/// argument or value at fault, which comes from the client and can be any
-/// length.
+/// The longest `fix` and `why` of a tool error: they name the client's own value.
 const MAX_DETAIL: usize = 200;
 
-/// The command line's error envelope (`code`, `what`, `fix`, `why`, home
-/// folder shown as `~`), with `what` cut to [`MAX_WHAT`] characters and
-/// `fix` and `why` to [`MAX_DETAIL`].
+/// The command line's error envelope (home shown as `~`), with `what` cut to [`MAX_WHAT`]
+/// characters and `fix` and `why` to [`MAX_DETAIL`].
 pub fn error_envelope(e: &CommandError) -> Value {
     let mut envelope = redact_error(e).to_envelope();
     for (part, max) in [
@@ -235,7 +208,7 @@ impl ServerHandler for Server {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(self.inner.tools.clone()))
+        Ok(ListToolsResult::with_all_items(self.tools()))
     }
 
     async fn call_tool(
@@ -255,7 +228,7 @@ impl ServerHandler for Server {
                     ErrorCode::Internal,
                     "the tool call stopped unexpectedly",
                     e.to_string(),
-                    STOPPED_FIX,
+                    "Try the call again; if it happens again, report it at https://github.com/yokoten-labs/carrysheet/issues.",
                 );
                 CallToolResult::structured_error(error_envelope(&err))
             });
@@ -263,13 +236,8 @@ impl ServerHandler for Server {
     }
 }
 
-/// The fix for a tool call whose thread stopped.
-const STOPPED_FIX: &str = "Try the call again; if it happens again, report it at https://github.com/yokoten-labs/carrysheet/issues.";
-
-/// Opens the root folder. Without `--root` the current folder is used, but
-/// never a whole drive or the home folder: clients often start servers
-/// there, and every file in it would be open to the agent. With `--root`
-/// those are allowed, with a warning for the log.
+/// Opens the root: `--root`, or else the current folder, but never a whole drive or the home
+/// folder, where clients often start servers. With `--root` those get a warning for the log.
 fn open_root(given: Option<&Path>) -> Result<(Root, Option<String>), CommandError> {
     let fix = "Start it with --root set to the folder that holds the workbooks, like: carrysheet-cli mcp serve --root ~/Documents/books";
     let explicit = given.is_some();
@@ -334,14 +302,12 @@ pub fn serve(args: &Map<String, Value>) -> Result<(), CommandError> {
     // control characters escaped, instead of raw on stderr.
     std::panic::set_hook(Box::new(|info| log(&format!("panic (caught): {info}"))));
     let server = Server::new(root.clone(), read_only);
-    // From here on, stdout is the transport's alone.
-    crate::output::reserve_stdout_for_mcp();
     let versions = server.supported_protocol_versions();
     log(&format!(
         "mcp serve {} over stdio: root {}, {} tools{}, MCP {} to {}",
         env!("CARGO_PKG_VERSION"),
         display_path(&root.dir()),
-        server.inner.tools.len(),
+        server.commands.len(),
         if read_only { " (read-only)" } else { "" },
         versions.first().map_or("?", |v| v.as_str()),
         versions.last().map_or("?", |v| v.as_str()),
