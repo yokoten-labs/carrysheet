@@ -16,10 +16,10 @@ exclude = ["codegen"]
 # Only the derive macros and the runtime; the generated code is committed.
 prost = { version = "0.14.4", default-features = false, features = ["derive", "std"] }
 # Read-only zip with Deflate only, decoded by the pure-Rust miniz_oxide.
-# =9.0.2: the newest release past the 7-day cooldown (docs/dependencies.md)
-# on 2026-10-20; it has the 9.0.0/9.0.1 overflow fixes. Move up on or after
-# 2026-10-24.
-zip = { version = "=9.0.2", default-features = false, features = ["deflate-flate2"] }
+# =9.0.5: the first release past RUSTSEC-2026-0548 (header-consistency check);
+# it also has the 9.0.0/9.0.1 overflow fixes. Reading only: this crate never
+# streams or extracts, so it needs no opt-in check.
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2"] }
 flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 
 [dev-dependencies]

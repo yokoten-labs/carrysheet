@@ -5,6 +5,21 @@ error codes are the public interface (`carrysheet-cli commands --json`).
 
 ## Unreleased
 
+### Security
+
+- **zip 9.0.5.** Fixes RUSTSEC-2026-0548 (local header names that differ from the
+  central directory in the streaming reader). Carrysheet only reads archives
+  through the central directory and never extracts or streams, so it is not
+  affected and needs no new check. Also updated for the same cargo-deny run:
+  calamine 0.38 (dev only, drops zip 8; RUSTSEC-2026-0436), rmcp 3.9.0
+  (RUSTSEC-2026-0457, 0461 and 0462; 0461 is the unbounded tool schema cache in
+  the Streamable HTTP server that `mcp serve --http` uses), rustix 1.1.6
+  (RUSTSEC-2026-0486) and ctutils 0.4.4 (RUSTSEC-2026-0385).
+- **rusqlite 0.41.1 (bundled SQLite 3.54.1).** Fixes RUSTSEC-2026-0459 (stale
+  memory returned when a database file is opened with a `-wal` file of another
+  page size). `query` only opens in-memory databases, so it was not exposed;
+  updated anyway so no affected SQLite ships.
+
 ### Breaking changes for scripts
 
 - **Saving content a file would lose needs `confirm_loss`.** `edit` and

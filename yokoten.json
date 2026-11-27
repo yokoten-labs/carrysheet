@@ -1,0 +1,17 @@
+{
+  "layout": {
+    "maxEntries": 7,
+    "exempt": [
+      ".",
+      "docs/records",
+      "crates",
+      "crates/*/src",
+      "crates/*/tests",
+      "crates/*/tests/data",
+      "crates/*/tests/data/**",
+      "apps/*/src",
+      "vendor/**"
+    ]
+  },
+  "notNow": {}
+}

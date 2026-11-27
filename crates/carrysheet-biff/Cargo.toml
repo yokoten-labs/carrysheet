@@ -14,7 +14,7 @@ carrysheet-cfb = { path = "../carrysheet-cfb", version = "0.1.0" }
 encoding_rs = "0.8.35"
 
 [dev-dependencies]
-calamine = { version = "0.36", default-features = false }
+calamine = { version = "0.38", default-features = false }
 
 [lints]
 workspace = true
