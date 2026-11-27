@@ -38,7 +38,7 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"
 regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
 quick-xml = "0.41"
-zip = { version = "=9.0.2", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2"] }
 flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 sha2 = { version = "0.11", default-features = false }
 aes = { version = "0.9", default-features = false }

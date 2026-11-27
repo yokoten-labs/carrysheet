@@ -42,8 +42,8 @@ Items 1 and 2 are what building inside Carrysheet needs; item 3 lists the fixes 
    upstream's root manifest: the internal paths follow the folders above and carry a version
    (cargo-deny refuses path dependencies without one), and the dependencies only the UI and
    apps use (egui, eframe, rfd, rayon and the like) are gone.
-2. zip 3.0.0 → zip 9.0.2 (`deflate-flate2`, with flate2's pure-Rust backend added to
-   gridcraft-xlsx). Carrysheet already uses zip 9.0.2, and zip versions before 9 have advisories
+2. zip 3.0.0 → zip 9.0.5 (`deflate-flate2`, with flate2's pure-Rust backend added to
+   gridcraft-xlsx). Carrysheet already uses zip 9.0.5, and zip versions before 9 have advisories
    RUSTSEC-2026-0367/0368/0369. Two lines follow from it:
    - `xlsx/src/package.rs`: `ZipArchive::name_for_index` returns a `Result` in zip 9. An entry
      whose name cannot be decoded is skipped, as a missing name was before.
