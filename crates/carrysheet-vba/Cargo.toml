@@ -15,7 +15,7 @@ encoding_rs = "0.8.35"
 
 [dev-dependencies]
 # An independent reader, to check what the writer makes (tests only).
-cfb = "=0.15.0"
+cfb = "=0.16.0"
 
 [lints]
 workspace = true
