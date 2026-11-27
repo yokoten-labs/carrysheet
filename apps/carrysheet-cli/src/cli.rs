@@ -6,6 +6,7 @@ use std::path::Path;
 use carrysheet::args::{COMMANDS, Command, OPERATION_EXAMPLE, command, input_schema};
 use carrysheet::commands::limits::MAX_CLI_SECONDS;
 use carrysheet::commands::{CommandError, ErrorCode};
+use clap::builder::{Resettable, StyledStr};
 use clap::{ArgMatches, Args};
 use serde_json::{Map, Value};
 
@@ -17,6 +18,7 @@ const MAX_ARG_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// The flags every command takes.
 #[derive(Args)]
+#[command(next_help_heading = "Global options")]
 pub struct Global {
     /// Print only JSON on stdout, errors included
     #[arg(long, global = true)]
@@ -32,7 +34,21 @@ pub struct Global {
 /// One command as clap sees it: `name` is its last word, such as `serve`.
 pub(crate) fn clap_command(name: &'static str, command: &Command) -> clap::Command {
     let (summary, description) = command.doc();
-    (command.flags)(clap::Command::new(name)).about(summary).long_about(description)
+    let example = example(name).map(|line| format!("Example:\n  carrysheet-cli {line}"));
+    (command.flags)(clap::Command::new(name))
+        .about(summary)
+        .long_about(description)
+        .after_long_help(Resettable::from(example.map(StyledStr::from)))
+}
+
+/// The example `--help` ends with, if the command has one. A line stays under 80 columns.
+fn example(name: &str) -> Option<String> {
+    Some(match name {
+        "read" => "read book.xlsx 'Sheet1!A1:D20'".to_owned(),
+        "convert" => "convert book.xlsx book.csv --dry-run".to_owned(),
+        "edit" => format!("edit book.xlsx --dry-run \\\n    --ops '[{OPERATION_EXAMPLE}]'"),
+        _ => return None,
+    })
 }
 
 /// Builds the whole command line from [`COMMANDS`].
@@ -41,7 +57,9 @@ pub fn build() -> clap::Command {
         .version(env!("CARGO_PKG_VERSION"))
         .about("Carrysheet: read, convert and edit spreadsheets, for people and AI agents")
         .after_help(
-            "Agents: run `carrysheet-cli commands --json` for every command and its schema.",
+            "Agents: run `carrysheet-cli commands --json` for every command and its schema.\n\
+             Source: https://github.com/yokoten-labs/carrysheet\n\
+             Issues: https://github.com/yokoten-labs/carrysheet/issues",
         )
         .max_term_width(80)
         .subcommand_required(true)

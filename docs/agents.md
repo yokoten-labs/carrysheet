@@ -17,6 +17,7 @@ Carrysheet aims to be **AI-friendly, human-friendly and MCP-friendly**. The rule
 ## Command line
 
 - `--json` on every command. With it, stdout holds JSON only; errors are JSON too (`{"ok": false, "error": {"code", "what", "fix", "why"}}`, where `code` is a stable snake_case id such as `confirmation_required`) and also go to stderr. As text: error, fix, why.
+- `--json` is the stable interface. The text form is for people and may change between versions.
 - Fixed exit codes: 0 done, 1 failed, 2 usage error, 3 nothing to do.
 - Never prompt. A call that needs a confirmation fails with a three-part error that names `--confirm`, `--confirm-loss` and `--yes` (see Confirmation below).
 - `--dry-run` on every command that changes a file. It prints the change list.

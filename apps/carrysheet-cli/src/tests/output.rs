@@ -78,6 +78,24 @@ fn unknown_commands_get_a_suggestion() {
 }
 
 #[test]
+fn an_error_with_no_tip_points_to_the_help() {
+    let e = usage_of(&[BIN, "nothing-like-it"]);
+    let list = "Run `carrysheet-cli commands` to list commands, or add --help.";
+    assert_eq!(e.fix, format!("Usage: carrysheet-cli [OPTIONS] <COMMAND>. {list}"));
+    // A wrong argument to a known command keeps clap's usage line of that command only.
+    let e = usage_of(&[BIN, "read"]);
+    assert!(!e.fix.contains("list commands"), "{}", e.fix);
+}
+
+#[test]
+fn the_text_form_leaves_out_null_fields() {
+    let mut data = Map::new();
+    data.insert("next_cursor".to_owned(), Value::Null);
+    data.insert("rows".to_owned(), Value::from(2));
+    assert_eq!(render(&data), "rows: 2\n");
+}
+
+#[test]
 fn ok_envelope_puts_ok_first() {
     let mut data = Map::new();
     data.insert("x".into(), Value::from(1));

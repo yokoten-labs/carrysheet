@@ -5,7 +5,23 @@ Simplified Chinese name: 随身表格. Traditional Chinese: 隨身試算表.
 
 The first release will be `carrysheet-cli`: a command-line tool with an MCP server, so people and AI agents can open, read, edit and save spreadsheets. It will run on Windows, Linux and macOS. A desktop app comes later.
 
-> **Early preview.** Carrysheet is not released yet. There are no binaries to download. File formats, commands and APIs may change at any time. Please try it, read the code and report what you find, but don't trust it with files you can't replace.
+> **Early preview.** File formats, commands and APIs may change at any time. Please try it, read the code and report what you find, but don't trust it with files you can't replace.
+
+## Install
+
+Download `carrysheet-cli-<version>-<target>` from the [GitHub Releases](https://github.com/yokoten-labs/carrysheet/releases) page: a `.zip` for Windows, a `.tar.gz` for Linux and macOS. Check it against `SHA256SUMS` from the same release, unpack it, and put `carrysheet-cli` on your `PATH`.
+
+The program is not signed yet. On macOS, run `xattr -d com.apple.quarantine carrysheet-cli` once, or macOS refuses to start it. On Windows, run the examples below in PowerShell: `cmd.exe` does not read the single quotes.
+
+## Quick start
+
+```sh
+carrysheet-cli overview book.xlsx
+carrysheet-cli read book.xlsx 'Sheet1!A1:D20'
+carrysheet-cli edit book.xlsx --ops '[{"op":"set_value","target":"A1","value":3}]' --dry-run
+```
+
+`edit` writes a new file beside the original; `--dry-run` only lists the changes. Run `carrysheet-cli --help` for every command, and add `--json` for output that scripts and agents can parse.
 
 ## What it does
 
