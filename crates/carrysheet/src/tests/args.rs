@@ -17,9 +17,7 @@ fn is_snake(s: &str) -> bool {
 
 /// The argument names of a command, in order.
 fn names(c: &Command) -> Vec<String> {
-    let schema = input_schema(c);
-    let names = schema["required"].as_array().unwrap().iter();
-    names.map(|n| n.as_str().unwrap().to_owned()).collect()
+    c.arg_names()
 }
 
 // The commands.
@@ -30,7 +28,7 @@ fn names_are_unique_snake_case() {
     for c in COMMANDS {
         assert!(is_snake(c.name), "{}", c.name);
         assert!(seen.insert(c.name), "duplicate {}", c.name);
-        assert!(std::ptr::eq(command(c.name).unwrap(), c));
+        assert_eq!(command(c.name).unwrap().name, c.name);
         assert_eq!(c.cli_name().replace(' ', "_"), c.name);
     }
     assert_eq!(command("mcp_serve").unwrap().cli_name(), "mcp serve");

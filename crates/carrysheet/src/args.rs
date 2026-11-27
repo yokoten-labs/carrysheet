@@ -7,13 +7,14 @@
 //!   `clap` (feature `cli`, which only the program turns on) makes the flags.
 //!   The program reads the flags as text and checks them here like an MCP
 //!   call, so clap's typed result is never used.
-//! - [`input_schema`] is the strict form that Claude, Gemini and OpenAI
-//!   strict mode accept (`docs/agents.md`). The lint in `tests/lint` checks it.
+//! - An optional argument is an `Option`: absent and `null` mean the same.
 
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
+use schemars::generate::SchemaSettings;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 
 use crate::edit::EditKind;
@@ -29,17 +30,16 @@ pub const MAX_LIST_ITEMS: usize = 10_000;
 /// 8,192; this leaves room for long cell text).
 pub const MAX_TEXT_CHARS: usize = 32_767;
 
-/// The arguments that name a file or folder. `mcp serve` keeps them inside
-/// its root.
+/// The arguments that name a file or folder; `mcp serve` keeps them in its root.
 pub const PATHS: &[&str] = &["path", "output", "root"];
 
-/// Whole-number arguments with their smallest and largest value. The schema
-/// does not carry limits, because not every client accepts them.
-const RANGES: &[(&str, u64, u64)] = &[
-    ("max_rows", 1, 10_000),
-    ("max_columns", 1, 16_384),
-    ("count", 1, 1_048_576),
-];
+/// The largest value of each whole-number argument; the smallest is 1. The
+/// schema carries no limits, because not every client accepts them.
+const LARGEST: &[(&str, u64)] = &[("max_rows", 10_000), ("max_columns", 16_384), ("count", 1_048_576)];
+
+/// On the command line a true/false argument is a switch, such as `--dry-run`.
+#[cfg(feature = "cli")]
+const SWITCH: clap::ArgAction = clap::ArgAction::SetTrue;
 
 /// Show sheets, used ranges, headers and formula counts of a workbook
 ///
@@ -113,25 +113,20 @@ pub struct Convert {
     #[cfg_attr(feature = "cli", arg(long))]
     pub sheet: Option<String>,
     /// For csv, write text starting with = + - @ as is. Default: false: a ' before it stops apps running it as a formula.
-    #[cfg_attr(feature = "cli", arg(long))]
-    #[serde(default)]
-    pub csv_raw: bool,
+    #[cfg_attr(feature = "cli", arg(long, action = SWITCH))]
+    pub csv_raw: Option<bool>,
     /// Replace an existing file. Default: false.
-    #[cfg_attr(feature = "cli", arg(long))]
-    #[serde(default)]
-    pub overwrite: bool,
+    #[cfg_attr(feature = "cli", arg(long, action = SWITCH))]
+    pub overwrite: Option<bool>,
     /// Must be true to delete sheets, rows or columns or overwrite a file (not with dry_run). Default: false.
-    #[cfg_attr(feature = "cli", arg(long))]
-    #[serde(default)]
-    pub confirm: bool,
+    #[cfg_attr(feature = "cli", arg(long, action = SWITCH))]
+    pub confirm: Option<bool>,
     /// Must be true to save a file that loses content (macros, charts...), listed by dry_run in save.lost. Default: false.
-    #[cfg_attr(feature = "cli", arg(long))]
-    #[serde(default)]
-    pub confirm_loss: bool,
+    #[cfg_attr(feature = "cli", arg(long, action = SWITCH))]
+    pub confirm_loss: Option<bool>,
     /// List the changes, write nothing. Default: false.
-    #[cfg_attr(feature = "cli", arg(long))]
-    #[serde(default)]
-    pub dry_run: bool,
+    #[cfg_attr(feature = "cli", arg(long, action = SWITCH))]
+    pub dry_run: Option<bool>,
 }
 
 /// Change cells, rows and sheets in one all-or-nothing batch
@@ -149,21 +144,17 @@ pub struct Edit {
     #[cfg_attr(feature = "cli", arg(long))]
     pub output: Option<String>,
     /// Replace an existing file. Default: false.
-    #[cfg_attr(feature = "cli", arg(long))]
-    #[serde(default)]
-    pub overwrite: bool,
+    #[cfg_attr(feature = "cli", arg(long, action = SWITCH))]
+    pub overwrite: Option<bool>,
     /// Must be true to delete sheets, rows or columns or overwrite a file (not with dry_run). Default: false.
-    #[cfg_attr(feature = "cli", arg(long))]
-    #[serde(default)]
-    pub confirm: bool,
+    #[cfg_attr(feature = "cli", arg(long, action = SWITCH))]
+    pub confirm: Option<bool>,
     /// Must be true to save a file that loses content (macros, charts...), listed by dry_run in save.lost. Default: false.
-    #[cfg_attr(feature = "cli", arg(long))]
-    #[serde(default)]
-    pub confirm_loss: bool,
+    #[cfg_attr(feature = "cli", arg(long, action = SWITCH))]
+    pub confirm_loss: Option<bool>,
     /// List the changes, write nothing. Default: false.
-    #[cfg_attr(feature = "cli", arg(long))]
-    #[serde(default)]
-    pub dry_run: bool,
+    #[cfg_attr(feature = "cli", arg(long, action = SWITCH))]
+    pub dry_run: Option<bool>,
 }
 
 // The `ops` of `edit`: on the command line one JSON text, not a repeated
@@ -211,9 +202,8 @@ pub struct McpServe {
     #[cfg_attr(feature = "cli", arg(long))]
     pub root: Option<String>,
     /// Offer only tools that never change files. Default: false.
-    #[cfg_attr(feature = "cli", arg(long))]
-    #[serde(default)]
-    pub read_only: bool,
+    #[cfg_attr(feature = "cli", arg(long, action = SWITCH))]
+    pub read_only: Option<bool>,
 }
 
 /// List every command; with --json, with its argument schema
@@ -245,18 +235,8 @@ macro_rules! command {
             name: $name,
             mcp_tool: $mcp_tool,
             hints: $hints,
-            schema: || {
-                let settings = schemars::generate::SchemaSettings::draft2020_12();
-                let generator = settings
-                    .with(|s| s.inline_subschemas = true)
-                    .into_generator();
-                generator.into_root_schema_for::<$args>().to_value()
-            },
-            check: |given| {
-                <$args>::deserialize(given)
-                    .map(|_| ())
-                    .map_err(|e| e.to_string())
-            },
+            schema: schema_of::<$args>,
+            check: check::<$args>,
             #[cfg(feature = "cli")]
             flags: <$args as clap::Args>::augment_args,
         }
@@ -264,12 +244,7 @@ macro_rules! command {
 }
 
 /// The names of the four MCP annotations.
-pub const HINTS: [&str; 4] = [
-    "readOnlyHint",
-    "destructiveHint",
-    "idempotentHint",
-    "openWorldHint",
-];
+pub const HINTS: [&str; 4] = ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"];
 
 /// Never changes anything, and calling it again gives the same answer.
 const READS: [bool; 4] = [true, false, true, false];
@@ -310,9 +285,16 @@ impl Command {
         (summary.trim().to_owned(), description.trim().to_owned())
     }
 
+    /// The names of the command's arguments, in order.
+    pub fn arg_names(&self) -> Vec<String> {
+        let schema = input_schema(self);
+        let properties = schema["properties"].as_object();
+        properties.map(|p| p.keys().cloned().collect()).unwrap_or_default()
+    }
+
     /// True when the command takes an argument of this name.
     pub fn has_arg(&self, name: &str) -> bool {
-        input_schema(self)["properties"].get(name).is_some()
+        self.arg_names().iter().any(|arg| arg == name)
     }
 
     /// Never changes anything (`readOnlyHint`).
@@ -331,50 +313,60 @@ impl Command {
     }
 }
 
+/// What schemars writes for a struct, with nothing left as a `$ref`.
+fn schema_of<T: JsonSchema>() -> Value {
+    let settings = SchemaSettings::draft2020_12().with(|s| s.inline_subschemas = true);
+    settings.into_generator().into_root_schema_for::<T>().to_value()
+}
+
+/// What serde says when `given` is not a `T`.
+fn check<T: DeserializeOwned>(given: Value) -> Result<(), String> {
+    T::deserialize(given).map(|_| ()).map_err(|e| e.to_string())
+}
+
 /// The single-type schemas a value may match, without null: schemars'
-/// schema with `format`, limits, defaults and type lists taken out.
+/// schema with `format`, limits, defaults and type lists taken out. An
+/// object lists every property as required and allows no others.
 fn branches(node: &Value) -> Vec<Value> {
-    if let Some(any) = node.get("anyOf").and_then(Value::as_array) {
+    if let Some(any) = node["anyOf"].as_array() {
         return any.iter().flat_map(branches).collect();
     }
-    let types = match node.get("type") {
-        Some(Value::Array(types)) => types.clone(),
-        Some(one) => vec![one.clone()],
-        None => Vec::new(),
+    let mut types = match &node["type"] {
+        Value::Array(types) => types.clone(),
+        one => vec![one.clone()],
     };
-    let one = |kind: Value| {
+    types.retain(|kind| kind.is_string() && kind != "null");
+    let branch = |kind: Value| {
         let mut out = json!({ "type": kind });
-        if let Some(values) = node.get("enum").and_then(Value::as_array) {
+        if let Some(values) = node["enum"].as_array() {
             out["enum"] = values.iter().filter(|v| !v.is_null()).cloned().collect();
         }
-        if let Some(items) = node.get("items") {
-            out["items"] = property(items, false);
+        if node.get("items").is_some() {
+            out["items"] = property(&node["items"], false);
         }
         if out["type"] == "object" {
-            let required = node.get("required").and_then(Value::as_array);
-            let is_optional = |name: &String| !required.is_some_and(|r| r.contains(&json!(name)));
-            let fields = node.get("properties").and_then(Value::as_object);
-            let fields = fields.into_iter().flatten();
-            let properties: Map<String, Value> = fields
-                .map(|(name, field)| (name.clone(), property(field, is_optional(name))))
-                .collect();
+            let required = node["required"].as_array().cloned().unwrap_or_default();
+            let mut properties = Map::new();
+            for (name, field) in node["properties"].as_object().into_iter().flatten() {
+                let is_optional = !required.contains(&json!(name));
+                properties.insert(name.clone(), property(field, is_optional));
+            }
             let names: Value = properties.keys().cloned().collect();
-            out["properties"] = Value::Object(properties);
+            out["properties"] = properties.into();
             out["required"] = names;
             out["additionalProperties"] = json!(false);
         }
         out
     };
-    types.into_iter().filter(|t| t != "null").map(one).collect()
+    types.into_iter().map(branch).collect()
 }
 
-/// One property in the strict form: every object lists all its properties
-/// as required and allows no others, and an optional value is an `anyOf`
-/// of its types with null last.
-fn property(node: &Value, optional: bool) -> Value {
+/// One property in the strict form: its description, and for an optional
+/// value an `anyOf` of its types with null last.
+fn property(node: &Value, is_optional: bool) -> Value {
     let mut any = branches(node);
-    let mut out = if optional || any.len() != 1 {
-        any.extend(optional.then(|| json!({ "type": "null" })));
+    let mut out = if is_optional || any.len() != 1 {
+        any.extend(is_optional.then(|| json!({ "type": "null" })));
         json!({ "anyOf": any })
     } else {
         any.remove(0)
@@ -385,14 +377,12 @@ fn property(node: &Value, optional: bool) -> Value {
     out
 }
 
-/// The input schema of a command: an object with one property per argument.
+/// The input schema of a command: an object with one property per argument,
+/// in the strict form that Claude, Gemini and OpenAI strict mode accept
+/// (`docs/agents.md`). The lint in `tests/lint` checks it.
 pub fn input_schema(command: &Command) -> Value {
-    let mut schema = property(&(command.schema)(), false);
     // The struct's doc comment is the tool description, not part of this.
-    if let Some(root) = schema.as_object_mut() {
-        root.remove("description");
-    }
-    schema
+    branches(&(command.schema)()).pop().unwrap_or_default()
 }
 
 /// The MCP tool definition of a command: name, description, input schema and annotations.
@@ -405,7 +395,7 @@ pub fn tool_definition(command: &Command) -> Value {
     })
 }
 
-fn invalid(name: &str, why: String, fix: impl Into<String>) -> CommandError {
+fn invalid(name: &str, why: impl Into<String>, fix: impl Into<String>) -> CommandError {
     CommandError::invalid_argument(name, why, fix)
 }
 
@@ -422,76 +412,59 @@ fn without_nulls(value: &Value) -> Value {
 }
 
 /// Checks `args` (a JSON object) on our side, because a client may skip
-/// schema validation. Missing and `null` both mean "not given". Returns
-/// every argument of the command by name, absent ones as `null`.
+/// schema validation. Returns every argument of the command by name, absent
+/// ones as `null`.
 pub fn validate_args(command: &Command, args: &Value) -> Result<Map<String, Value>, CommandError> {
-    let cli = command.cli_name();
+    let help = format!("Run `carrysheet-cli {} --help` for the arguments.", command.cli_name());
     let Value::Object(mut given) = without_nulls(args) else {
-        return Err(invalid(
-            "arguments",
-            "the arguments must be a JSON object".to_owned(),
-            format!(
-                "Send an object such as {{\"path\": \"book.xlsx\"}}. Run `carrysheet-cli {cli} --help` for the arguments."
-            ),
-        ));
+        let fix = format!("Send an object such as {{\"path\": \"book.xlsx\"}}. {help}");
+        return Err(invalid("arguments", "the arguments must be a JSON object", fix));
     };
-    let schema = input_schema(command);
-    let names: Vec<&str> = schema["required"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect();
-    if let Some(unknown) = given.keys().find(|k| !names.contains(&k.as_str())) {
-        let why = format!("`{cli}` has no argument named `{unknown}`");
-        return Err(invalid(
-            unknown,
-            why,
-            format!("Use one of: {}.", names.join(", ")),
-        ));
+    let names = command.arg_names();
+    if let Some(unknown) = given.keys().find(|key| !names.contains(key)) {
+        let why = format!("`{}` has no argument named `{unknown}`", command.cli_name());
+        return Err(invalid(unknown, why, format!("Use one of: {}.", names.join(", "))));
     }
-    if let Err(why) = (command.check)(Value::Object(given.clone())) {
+    if let Err(why) = (command.check)(given.clone().into()) {
         let name = culprit(command, &given, &why);
         let field = name.split('[').next().unwrap_or_default();
+        let schema = input_schema(command);
         let fix = match schema["properties"][field]["description"].as_str() {
             Some(text) => format!("`{field}`: {text}"),
-            None => format!("Run `carrysheet-cli {cli} --help` for the arguments."),
+            None => help,
         };
         // serde repeats a wrong value; keep a long one out of the error.
-        return Err(invalid(&name, why.chars().take(160).collect(), fix));
+        return Err(invalid(&name, why.chars().take(160).collect::<String>(), fix));
     }
     for (name, value) in &given {
         check_limits(name, name, value)?;
     }
-    let mut all = Map::new();
-    for name in names {
-        all.insert(name.to_owned(), given.remove(name).unwrap_or(Value::Null));
-    }
-    Ok(all)
+    let all = names.into_iter().map(|name| {
+        let value = given.remove(&name).unwrap_or(Value::Null);
+        (name, value)
+    });
+    Ok(all.collect())
 }
 
 /// The argument a serde error is about: the one named as missing, or the
 /// first whose removal changes the error; for a list, the item too.
 fn culprit(command: &Command, given: &Map<String, Value>, why: &str) -> String {
-    let missing = why
-        .strip_prefix("missing field `")
-        .and_then(|rest| rest.split('`').next());
-    if let Some(name) = missing.filter(|name| !given.contains_key(*name) && command.has_arg(name)) {
-        return name.to_owned();
+    let missing = why.strip_prefix("missing field `").unwrap_or_default();
+    let missing = missing.split('`').next().unwrap_or_default();
+    if !given.contains_key(missing) && command.has_arg(missing) {
+        return missing.to_owned();
     }
-    let fails_the_same = |args: Map<String, Value>| {
-        (command.check)(Value::Object(args)).err().as_deref() == Some(why)
-    };
+    let fails_alike = |args: Map<String, Value>| (command.check)(args.into()).err().as_deref() == Some(why);
     for (name, value) in given {
         let mut rest = given.clone();
         rest.shift_remove(name);
-        if fails_the_same(rest.clone()) {
+        if fails_alike(rest.clone()) {
             continue;
         }
         for (i, item) in value.as_array().into_iter().flatten().enumerate() {
             let mut one = rest.clone();
             one.insert(name.clone(), json!([item]));
-            if fails_the_same(one) {
+            if fails_alike(one) {
                 return format!("{name}[{i}]");
             }
         }
@@ -510,32 +483,27 @@ fn check_limits(name: &str, key: &str, value: &Value) -> Result<(), CommandError
                 return Err(invalid(name, why, "Shorten it."));
             }
             if PATHS.contains(&key) && (text.is_empty() || text.contains('\0')) {
-                let why = format!("`{name}` is not a usable path");
-                return Err(invalid(
-                    name,
-                    why,
-                    "Give a file path like book.xlsx or reports/q1.xlsx.",
-                ));
+                let fix = "Give a file path like book.xlsx or reports/q1.xlsx.";
+                return Err(invalid(name, format!("`{name}` is not a usable path"), fix));
             }
             if key == "range" {
                 SheetRange::parse(text)?;
             }
         }
         Value::Number(number) => {
-            if let Some((_, min, max)) = RANGES.iter().find(|r| r.0 == key)
-                && !number.as_u64().is_some_and(|n| (*min..=*max).contains(&n))
+            let largest = LARGEST.iter().find(|(arg, _)| *arg == key);
+            if let Some((_, max)) = largest
+                && !number.as_u64().is_some_and(|n| (1..=*max).contains(&n))
             {
-                let expected = format!("a whole number from {min} to {max}");
+                let expected = format!("a whole number from 1 to {max}");
                 let why = format!("`{name}` must be {expected}, but it is {number}");
                 return Err(invalid(name, why, format!("Give `{name}` as {expected}.")));
             }
         }
         Value::Array(items) => {
             if items.len() > MAX_LIST_ITEMS {
-                let why = format!(
-                    "`{name}` has {} items; the limit is {MAX_LIST_ITEMS}",
-                    items.len()
-                );
+                let n = items.len();
+                let why = format!("`{name}` has {n} items; the limit is {MAX_LIST_ITEMS}");
                 return Err(invalid(name, why, "Split the work into several calls."));
             }
             for (i, item) in items.iter().enumerate() {
@@ -555,24 +523,17 @@ fn check_limits(name: &str, key: &str, value: &Value) -> Result<(), CommandError
 /// Checks that a call which deletes data or overwrites a file says
 /// `confirm: true`. `args` come from [`validate_args`]. `dry_run: true`
 /// never needs it, because nothing is written.
-pub fn check_confirmation(
-    command: &Command,
-    args: &Map<String, Value>,
-) -> Result<(), CommandError> {
+pub fn check_confirmation(command: &Command, args: &Map<String, Value>) -> Result<(), CommandError> {
     let is_true = |name: &str| args.get(name) == Some(&Value::Bool(true));
     if !args.contains_key("confirm") || is_true("confirm") || is_true("dry_run") {
         return Ok(());
     }
-    let ops = args
-        .get("ops")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten();
+    let ops = args.get("ops").and_then(Value::as_array);
     let deletes = |(i, op): (usize, &Value)| {
         let kind = op.get("op")?.as_str()?.strip_prefix("delete_")?;
         Some(format!("delete {kind} (ops[{i}])"))
     };
-    let mut actions: Vec<String> = ops.enumerate().filter_map(deletes).collect();
+    let mut actions: Vec<String> = ops.into_iter().flatten().enumerate().filter_map(deletes).collect();
     if is_true("overwrite") {
         actions.push("overwrite a file".to_owned());
     }
@@ -585,11 +546,10 @@ pub fn check_confirmation(
     };
     // The same call with `confirm: true`; long lists and text are summed up.
     let mut call = Vec::new();
-    for (name, value) in args
-        .iter()
-        .filter(|(name, value)| !value.is_null() && *name != "confirm")
-    {
+    for (name, value) in args {
         let shown = match value {
+            Value::Null => continue,
+            _ if name == "confirm" => continue,
             Value::Array(items) if value.to_string().chars().count() > 160 => {
                 format!("[...the same {} items...]", items.len())
             }
@@ -598,17 +558,14 @@ pub fn check_confirmation(
         };
         call.push(format!("\"{name}\":{shown}"));
     }
-    call.push("\"confirm\":true".to_owned());
+    let call = call.join(",");
+    let cli = command.cli_name();
     Err(CommandError::new(
         ErrorCode::ConfirmationRequired,
-        format!(
-            "`{}` would {first}{more}; confirm is not true",
-            command.cli_name()
-        ),
+        format!("`{cli}` would {first}{more}; confirm is not true"),
         "deleting sheets, rows or columns and overwriting files cannot be undone, so they need confirm: true. dry_run lists the changes without it.",
         format!(
-            "Call again with confirm set to true: {{{}}}. On the command line, add --confirm.",
-            call.join(",")
+            "Call again with confirm set to true: {{{call},\"confirm\":true}}. On the command line, add --confirm."
         ),
     ))
 }
@@ -624,9 +581,8 @@ pub(crate) fn flag(args: &Map<String, Value>, name: &str) -> bool {
 }
 
 pub(crate) fn number(args: &Map<String, Value>, name: &str) -> Option<u32> {
-    args.get(name)
-        .and_then(Value::as_u64)
-        .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
+    let number = args.get(name)?.as_u64()?;
+    Some(u32::try_from(number).unwrap_or(u32::MAX))
 }
 
 pub(crate) fn detailed(args: &Map<String, Value>) -> bool {
@@ -635,13 +591,8 @@ pub(crate) fn detailed(args: &Map<String, Value>) -> bool {
 
 /// The workbook path; validation makes sure it is there.
 pub(crate) fn input(args: &Map<String, Value>) -> Result<PathBuf, CommandError> {
-    text(args, "path").map(PathBuf::from).ok_or_else(|| {
-        invalid(
-            "path",
-            "no workbook was given".to_owned(),
-            "Name the workbook file, like book.xlsx.",
-        )
-    })
+    let missing = || invalid("path", "no workbook was given", "Name the workbook file, like book.xlsx.");
+    text(args, "path").map(PathBuf::from).ok_or_else(missing)
 }
 
 /// The program shows it with `~` for the home folder.
