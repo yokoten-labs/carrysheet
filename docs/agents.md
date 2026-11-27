@@ -38,7 +38,7 @@ Carrysheet aims to be **AI-friendly, human-friendly and MCP-friendly**. The rule
 
 ### Tools
 
-Few, workflow-level tools. Names of built tools match the command table in `crates/carrysheet-commands/src/table.rs`.
+Few, workflow-level tools. Names of built tools match the command table in `crates/carrysheet/src/commands/table.rs`.
 
 | Tool | Does | Changes files | Toolset |
 |---|---|---|---|
@@ -83,7 +83,7 @@ Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, in PR 88 until it 
 - Modes are enums. Everything is validated again on our side.
 - `anyOf` is only for nullable values: single-type branches, then exactly `{"type":"null"}` last. Values keep their JSON type: `3` is a number, `"3"` is text.
 - Compatible with OpenAI strict mode: every property listed in `required`, optional ones nullable, `additionalProperties: false`.
-- A lint (`crates/carrysheet-commands/src/schema/lint.rs`) checks the Claude, Gemini and OpenAI rules on every change; it runs as a test in `cargo test --workspace`.
+- A lint (`crates/carrysheet/tests/lint/mod.rs`, test code only) checks the Claude, Gemini and OpenAI rules on every change; it runs as a test in `cargo test --workspace`.
 
 ### Output size
 

@@ -8,7 +8,7 @@ use carrysheet::kernel::Kernel;
 use serde_json::{Map, Value, json};
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("carrysheet-kernel-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("carrysheet-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir

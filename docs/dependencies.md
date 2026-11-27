@@ -25,7 +25,7 @@ listed here with why.
 
 | Crate | Used by | Why |
 |---|---|---|
-| `flate2` 1.1.10 (MIT OR Apache-2.0) | `carrysheet-kernel` tests | Builds deflate streams for the hostile-file tests. The same version GridCraft ships, so it adds nothing to the graph. |
+| `flate2` 1.1.10 (MIT OR Apache-2.0) | `carrysheet` tests | Builds deflate streams for the hostile-file tests. The same version GridCraft ships, so it adds nothing to the graph. |
 
 ## Policy check: cargo-deny
 
