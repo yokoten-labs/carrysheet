@@ -75,6 +75,14 @@ pub struct Limits {
     pub max_entries: usize,
     /// Bytes one compressed container may decompress to.
     pub max_decompressed_bytes: usize,
+    /// Bytes all module sources of a project may decompress to together,
+    /// as a multiple of the VBA storage's size. Real source compresses two
+    /// to four times, and the storage also holds compiled code, so real
+    /// projects stay far below this; a small file whose every module hides
+    /// a decompression bomb does not. A project may always decompress
+    /// [`Limits::max_decompressed_bytes`] in all, however small it is, and
+    /// never more than [`Limits::max_storage_bytes`].
+    pub max_source_ratio: usize,
     /// Modules in one project.
     pub max_modules: usize,
     /// References in one project.
@@ -92,6 +100,7 @@ impl Default for Limits {
             max_storage_bytes: 256 << 20,
             max_entries: 20_000,
             max_decompressed_bytes: 16 << 20,
+            max_source_ratio: 32,
             max_modules: 4_096,
             max_references: 4_096,
             max_flags: 10_000,
@@ -356,21 +365,35 @@ pub fn encoding_for_code_page(code_page: u16) -> (&'static Encoding, bool) {
 
 /// Splits source text into lines at CR LF, LF or a lone CR (Mac Excel
 /// writes CR only). A final line break does not start another line.
+///
+/// The next CR and the next LF are each found with a single-byte search
+/// (memchr) and searched for again only once passed, so the walk stays
+/// linear and fast even for one huge line: a two-character search went
+/// character by character, 0.8 s for 16 MiB in a debug build (issue 53).
 pub(crate) fn source_lines(text: &str) -> impl Iterator<Item = &str> {
-    let mut rest = Some(text).filter(|t| !t.is_empty());
+    let next = |from: usize, c: char| text[from..].find(c).map_or(usize::MAX, |i| from + i);
+    let mut pos = 0;
+    let mut cr = next(0, '\r');
+    let mut lf = next(0, '\n');
     std::iter::from_fn(move || {
-        let t = rest?;
-        match t.find(['\r', '\n']) {
-            Some(i) => {
-                let skip = if t[i..].starts_with("\r\n") { 2 } else { 1 };
-                rest = Some(&t[i + skip..]).filter(|r| !r.is_empty());
-                Some(&t[..i])
-            }
-            None => {
-                rest = None;
-                Some(t)
-            }
+        if pos >= text.len() {
+            return None;
         }
+        let start = pos;
+        let i = cr.min(lf);
+        if i == usize::MAX {
+            pos = text.len();
+            return Some(&text[start..]);
+        }
+        let skip = if i == cr && lf == cr + 1 { 2 } else { 1 };
+        pos = i + skip;
+        if cr < pos {
+            cr = next(pos, '\r');
+        }
+        if lf < pos {
+            lf = next(pos, '\n');
+        }
+        Some(&text[start..i])
     })
 }
 
@@ -431,7 +454,10 @@ pub(crate) fn read_kept(kept: &KeptStorage, limits: &Limits) -> Result<VbaProjec
     let mut modules = Vec::with_capacity(dir.modules.len());
     let mut flags = Vec::new();
     let mut cut_reported = false;
-    let mut sources = Sources::default();
+    let mut sources = Sources {
+        budget: source_budget(kept, limits),
+        ..Sources::default()
+    };
     for raw in &dir.modules {
         let mbcs_name = decode(&raw.name, encoding);
         let name = match raw.name_unicode.as_deref() {
@@ -560,6 +586,28 @@ struct SourceInfo {
 /// Compressed bytes read beyond the storage size before it is a limit.
 const COMPRESSED_SLACK: usize = 64 * 1024;
 
+/// Bytes all module sources of the project may decompress to together:
+/// [`Limits::max_source_ratio`] times the storage size, at least one
+/// stream's worth and at most [`Limits::max_storage_bytes`]. One budget
+/// for the whole project, so a bomb in every module costs no more than
+/// one.
+fn source_budget(kept: &KeptStorage, limits: &Limits) -> usize {
+    kept.total_bytes()
+        .saturating_mul(limits.max_source_ratio)
+        .max(limits.max_decompressed_bytes)
+        .min(limits.max_storage_bytes)
+}
+
+/// Bytes of source text one decompressed byte may account for: decoding
+/// turns a byte into at most three UTF-8 bytes, and the text is held
+/// twice (the cache and the module). Modules that do not share a source
+/// therefore never reach `TEXT_PER_SOURCE_BYTE` times the source budget;
+/// many modules pointing at one source, which Excel never writes, do.
+const TEXT_PER_SOURCE_BYTE: usize = 6;
+
+/// The limit name for the project-wide source budget.
+const PROJECT_SOURCE_LIMIT: &str = "decompressed source bytes in the project";
+
 /// Decompressed sources, so modules that share a stream and offset cost
 /// one decompression, and the budgets that bound the work.
 #[derive(Default)]
@@ -569,11 +617,16 @@ struct Sources {
     scans: HashMap<(String, u32, bool), Rc<risk::Scan>>,
     /// Bytes produced by decompression, failed attempts included.
     decompressed: usize,
+    /// Bytes decompression may produce for the whole project, from
+    /// [`source_budget`].
+    budget: usize,
     /// Compressed bytes handed to the decompressor. Modules of a real
     /// project never overlap, so this stays within the storage size;
     /// modules pointing at many offsets of one stream would not.
     compressed_read: usize,
-    /// Bytes of source text handed out to modules.
+    /// Bytes of source text decoded and handed out to modules, the
+    /// cache's copy included. At most [`TEXT_PER_SOURCE_BYTE`] times
+    /// `budget`.
     decoded: usize,
 }
 
@@ -644,14 +697,20 @@ impl Sources {
                     budget,
                 ));
             }
-            let (result, produced) =
-                decompress::decompress_counted(compressed, limits.max_decompressed_bytes);
+            // Decompress no further than what is left of the project's
+            // budget, so the module that runs it out stops there instead
+            // of producing a whole stream first.
+            let left = self.budget.saturating_sub(self.decompressed);
+            if left == 0 {
+                return Err(VbaError::limit(PROJECT_SOURCE_LIMIT, self.budget));
+            }
+            let cap = limits.max_decompressed_bytes.min(left);
+            let (result, produced) = decompress::decompress_counted(compressed, cap);
             self.decompressed = self.decompressed.saturating_add(produced);
-            if self.decompressed > limits.max_storage_bytes {
-                return Err(VbaError::limit(
-                    "decompressed source bytes in the project",
-                    limits.max_storage_bytes,
-                ));
+            if matches!(result, Err(VbaError::LimitExceeded { .. }))
+                && cap < limits.max_decompressed_bytes
+            {
+                return Err(VbaError::limit(PROJECT_SOURCE_LIMIT, self.budget));
             }
             let entry = match result {
                 Ok(bytes) => {
@@ -675,11 +734,12 @@ impl Sources {
             Ok(info) => {
                 // Each module gets its own copy of the text: count it.
                 self.decoded = self.decoded.saturating_add(info.text.len());
-                if self.decoded > limits.max_storage_bytes {
-                    return Err(VbaError::limit(
-                        "source text in the project",
-                        limits.max_storage_bytes,
-                    ));
+                let text_budget = self
+                    .budget
+                    .saturating_mul(TEXT_PER_SOURCE_BYTE)
+                    .min(limits.max_storage_bytes);
+                if self.decoded > text_budget {
+                    return Err(VbaError::limit("source text in the project", text_budget));
                 }
                 if let Some(req) = scan {
                     let scan_key = (key.0.clone(), key.1, req.events);
@@ -693,5 +753,69 @@ impl Sources {
             Err(e) => Err(e.clone()),
         };
         Ok(read)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_lines;
+
+    /// The plain definition: split at CR LF, LF or CR, one character at a
+    /// time; a final break does not start another line.
+    fn naive(text: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        let mut rest = text;
+        while !rest.is_empty() {
+            match rest.find(['\r', '\n']) {
+                Some(i) => {
+                    let skip = if rest[i..].starts_with("\r\n") { 2 } else { 1 };
+                    out.push(&rest[..i]);
+                    rest = &rest[i + skip..];
+                }
+                None => {
+                    out.push(rest);
+                    rest = "";
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn source_lines_split_like_the_definition() {
+        let cases = [
+            "",
+            "a",
+            "\r",
+            "\n",
+            "\r\n",
+            "\n\r",
+            "\r\r\n\n",
+            "a\r\nb\rc\nd",
+            "a\r\nb\r\n",
+            "é\r中\n\r\nx",
+            "\n\n\n\rx\r",
+        ];
+        for text in cases {
+            assert_eq!(
+                source_lines(text).collect::<Vec<_>>(),
+                naive(text),
+                "{text:?}"
+            );
+        }
+        // Every mix of the three bytes up to length 6.
+        let parts = ["a", "\r", "\n"];
+        let mut texts = vec![String::new()];
+        for _ in 0..6 {
+            let mut longer = Vec::new();
+            for t in &texts {
+                for p in parts {
+                    let s = format!("{t}{p}");
+                    assert_eq!(source_lines(&s).collect::<Vec<_>>(), naive(&s), "{s:?}");
+                    longer.push(s);
+                }
+            }
+            texts = longer;
+        }
     }
 }

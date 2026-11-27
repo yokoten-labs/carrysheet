@@ -7,6 +7,8 @@
 //! rules that look for names that live in strings (ProgIDs such as
 //! `WScript.Shell`, DLL aliases).
 
+use std::borrow::Cow;
+
 use crate::{Module, ModuleKind, RiskFlag};
 
 /// What a flagged line or module may do.
@@ -238,7 +240,9 @@ pub(crate) const STOMPING_BYTES_PER_LINE: usize = 200;
 /// code keeps the comment text at about its own length.
 pub(crate) const STOMPING_BYTES_PER_COMMENT_CHAR: usize = 2;
 
-/// A source line split into the parts the rules look at.
+/// A source line split into the parts the rules look at. One is reused
+/// for every line of a source, so its buffers are allocated once.
+#[derive(Default)]
 struct Line {
     /// Code outside strings and comments, ASCII-lowercased.
     code: String,
@@ -248,10 +252,16 @@ struct Line {
     strings: Vec<usize>,
 }
 
-fn split_line(line: &str) -> Line {
-    let mut code = String::with_capacity(line.len());
-    let mut text = String::with_capacity(line.len());
-    let mut strings = Vec::new();
+/// Splits `line` into `out`, replacing what `out` held.
+fn split_line(line: &str, out: &mut Line) {
+    let Line {
+        code,
+        text,
+        strings,
+    } = out;
+    code.clear();
+    text.clear();
+    strings.clear();
     let mut chars = line.chars().peekable();
     let mut in_string = false;
     let mut current = 0usize;
@@ -299,11 +309,6 @@ fn split_line(line: &str) -> Line {
         text.clear();
         strings.clear();
     }
-    Line {
-        code,
-        text,
-        strings,
-    }
 }
 
 fn is_ident(b: u8) -> bool {
@@ -350,10 +355,11 @@ fn proc_name(code: &str) -> Option<&str> {
     }
 }
 
-fn line_matches(pattern: &Pattern, line: &Line) -> bool {
+/// Whether `pattern` matches `line`; `proc` is [`proc_name`] of its code.
+fn line_matches(pattern: &Pattern, line: &Line, proc: Option<&str>) -> bool {
     match *pattern {
-        Pattern::Proc(name) => proc_name(&line.code) == Some(name),
-        Pattern::ProcSuffix(suffix) => proc_name(&line.code).is_some_and(|n| n.ends_with(suffix)),
+        Pattern::Proc(name) => proc == Some(name),
+        Pattern::ProcSuffix(suffix) => proc.is_some_and(|n| n.ends_with(suffix)),
         Pattern::Word(w) => count_word(&line.code, w) > 0,
         Pattern::Text(w) => count_word(&line.text, w) > 0,
         Pattern::Sequence(seq) => {
@@ -378,6 +384,104 @@ fn line_matches(pattern: &Pattern, line: &Line) -> bool {
         }
         Pattern::LongString(n) => line.strings.iter().any(|&len| len >= n),
         Pattern::Module(_) => false,
+    }
+}
+
+/// The words a line must contain for a word rule to match: the leading
+/// word of a `Word` or `Text` needle (`wscript` for `wscript.shell`), the
+/// first word of a `Sequence`, every name of a `Repeated`. A match is
+/// always bounded by non-word characters, so its leading word is a whole
+/// word of the line's text; a line without any of a rule's keys cannot
+/// match it.
+fn rule_keys(pattern: &Pattern) -> Vec<&'static str> {
+    match *pattern {
+        Pattern::Word(w) | Pattern::Text(w) => {
+            let end = w.bytes().position(|b| !is_ident(b)).unwrap_or(w.len());
+            vec![&w[..end]]
+        }
+        Pattern::Sequence(seq) => seq.iter().take(1).copied().collect(),
+        Pattern::Repeated(names, _) => names.to_vec(),
+        _ => Vec::new(),
+    }
+}
+
+/// Rule sets as bit masks (bit `i` is `RULES[i]`), built once, so a line
+/// is checked only against the rules it can match.
+struct RuleSets {
+    /// Rules that need a word, by that word ([`rule_keys`]), sorted.
+    keys: Vec<(&'static str, u128)>,
+    /// The longest key.
+    longest: usize,
+    /// `Proc` rules: tried on lines that declare a procedure.
+    procs: u128,
+    /// `ProcSuffix` rules: the same, in modules where events fire.
+    events: u128,
+    /// `LongString` rules: tried on lines with a string.
+    strings: u128,
+    /// The overlong-line rule.
+    overlong: u128,
+}
+
+// Rule sets are `u128` bit masks.
+const _: () = assert!(RULES.len() <= 128);
+
+fn rule_sets() -> &'static RuleSets {
+    static SETS: std::sync::OnceLock<RuleSets> = std::sync::OnceLock::new();
+    SETS.get_or_init(|| {
+        let mut sets = RuleSets {
+            keys: Vec::new(),
+            longest: 0,
+            procs: 0,
+            events: 0,
+            strings: 0,
+            overlong: 0,
+        };
+        for (i, r) in RULES.iter().enumerate() {
+            let bit = 1u128 << i;
+            match r.pattern {
+                Pattern::Proc(_) => sets.procs |= bit,
+                Pattern::ProcSuffix(_) => sets.events |= bit,
+                Pattern::LongString(_) => sets.strings |= bit,
+                Pattern::Module(ModuleCheck::OverlongLine) => sets.overlong |= bit,
+                _ => {}
+            }
+            for k in rule_keys(&r.pattern) {
+                match sets.keys.iter_mut().find(|(t, _)| *t == k) {
+                    Some((_, bits)) => *bits |= bit,
+                    None => sets.keys.push((k, bit)),
+                }
+            }
+        }
+        sets.keys.sort_unstable_by_key(|&(k, _)| k);
+        sets.longest = sets.keys.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
+        sets
+    })
+}
+
+impl RuleSets {
+    /// The rules whose keys are words of `text`, in one pass over its bytes.
+    fn keyed(&self, text: &str) -> u128 {
+        let b = text.as_bytes();
+        let mut bits = 0;
+        let mut i = 0;
+        while i < b.len() {
+            if !is_ident(b[i]) {
+                i += 1;
+                continue;
+            }
+            let start = i;
+            while i < b.len() && is_ident(b[i]) {
+                i += 1;
+            }
+            // Word bytes are ASCII, so these are character boundaries.
+            let w = &text[start..i];
+            if w.len() <= self.longest
+                && let Ok(k) = self.keys.binary_search_by(|&(k, _)| k.cmp(w))
+            {
+                bits |= self.keys[k].1;
+            }
+        }
+        bits
     }
 }
 
@@ -471,11 +575,12 @@ fn starts_with_word(line: &str, word: &str) -> bool {
 /// of 64 lines (VBA allows 24), so a hostile module cannot make one huge
 /// line. An `Attribute` line is never continued: the line after it is read
 /// on its own.
-fn logical_lines(source: &str) -> impl Iterator<Item = (u32, String, bool)> + '_ {
+fn logical_lines(source: &str) -> impl Iterator<Item = (u32, Cow<'_, str>, bool)> + '_ {
     let mut lines = crate::source_lines(source).enumerate().peekable();
     std::iter::from_fn(move || {
         let (first, line) = lines.next()?;
-        let mut joined = line.to_string();
+        // Most lines are not continued and are handed out as they are.
+        let mut joined = Cow::Borrowed(line);
         let mut capped = false;
         if !starts_with_word(line.trim_start(), "attribute") {
             let mut parts = 1;
@@ -488,6 +593,7 @@ fn logical_lines(source: &str) -> impl Iterator<Item = (u32, String, bool)> + '_
                     break;
                 };
                 // Drop the `_` and keep the space before it.
+                let joined = joined.to_mut();
                 joined.truncate(joined.trim_end().len() - 1);
                 joined.push_str(next);
                 parts += 1;
@@ -527,33 +633,63 @@ pub(crate) struct Scan {
 /// standard module the same name is an ordinary procedure, so those rules
 /// are not tried there and cannot fill the room.
 pub(crate) fn scan_source(source: &str, room: usize, events: bool) -> Scan {
+    scan_lines(source, room, events, true)
+}
+
+/// [`scan_source`]; `keyed` false tries every rule on every line, the
+/// plain definition the tests compare the word filter with.
+fn scan_lines(source: &str, room: usize, events: bool, keyed: bool) -> Scan {
+    let sets = rule_sets();
     let mut scan = Scan::default();
     let hits = &mut scan.hits;
     let mut seen_kinds: Vec<RiskKind> = Vec::new();
-    for (number, mut raw, capped) in logical_lines(source) {
+    let mut line = Line::default();
+    for (number, raw, capped) in logical_lines(source) {
         if starts_with_word(raw.trim_start(), "attribute") {
             continue;
         }
         let overlong = capped || raw.len() > MAX_SCANNED_LINE;
-        if raw.len() > MAX_SCANNED_LINE {
-            let mut cut = MAX_SCANNED_LINE;
-            while !raw.is_char_boundary(cut) {
-                cut -= 1;
-            }
-            raw.truncate(cut);
+        let mut cut = raw.len().min(MAX_SCANNED_LINE);
+        while !raw.is_char_boundary(cut) {
+            cut -= 1;
         }
-        let line = split_line(&raw);
+        split_line(&raw[..cut], &mut line);
         if line.text.is_empty() && !overlong {
             continue;
         }
         seen_kinds.clear();
-        for (i, r) in RULES.iter().enumerate() {
+        let proc = proc_name(&line.code);
+        // Try only the rules this line can match: one pass over its words
+        // picks the word rules (trying every rule on every line took
+        // 1.2 s per 16 MiB of ordinary code, issue 53). `keyed` false tries
+        // them all, the plain definition the tests compare with.
+        let mut todo = if keyed {
+            let mut todo = sets.keyed(&line.text);
+            if proc.is_some() {
+                todo |= sets.procs | sets.events;
+            }
+            if !line.strings.is_empty() {
+                todo |= sets.strings;
+            }
+            if overlong {
+                todo |= sets.overlong;
+            }
+            todo
+        } else {
+            u128::MAX >> (128 - RULES.len())
+        };
+        if !events {
+            todo &= !sets.events;
+        }
+        while todo != 0 {
+            let i = todo.trailing_zeros() as usize;
+            todo &= todo - 1;
+            let r = &RULES[i];
             // An overlong line is always reported: other flags on the line
             // do not stand in for the part that was not checked.
             let (matched, exclusive) = match r.pattern {
                 Pattern::Module(ModuleCheck::OverlongLine) => (overlong, false),
-                Pattern::ProcSuffix(_) if !events => (false, true),
-                _ => (line_matches(&r.pattern, &line), true),
+                _ => (line_matches(&r.pattern, &line, proc), true),
             };
             if !matched || (exclusive && seen_kinds.contains(&r.kind)) {
                 continue;
@@ -861,5 +997,246 @@ mod tests {
             " _\r\n".repeat(23)
         );
         assert_eq!(flags_for(&src), [("Workbook_Open", Some(1))]);
+    }
+}
+
+#[cfg(test)]
+mod keyed {
+    use super::*;
+
+    #[test]
+    fn every_word_rule_has_a_lowercase_key_that_starts_a_word() {
+        for r in RULES {
+            if !matches!(
+                r.pattern,
+                Pattern::Word(_) | Pattern::Text(_) | Pattern::Sequence(_) | Pattern::Repeated(..)
+            ) {
+                continue;
+            }
+            let keys = rule_keys(&r.pattern);
+            assert!(!keys.is_empty(), "{}", r.id);
+            for k in keys {
+                assert!(!k.is_empty() && k.bytes().all(is_ident), "{}: {k:?}", r.id);
+                assert_eq!(k, k.to_ascii_lowercase(), "{}", r.id);
+            }
+            match r.pattern {
+                Pattern::Word(w) | Pattern::Text(w) => {
+                    assert_eq!(w, w.to_ascii_lowercase(), "{}", r.id);
+                }
+                Pattern::Repeated(_, n) => assert!(n > 0, "{}", r.id),
+                _ => {}
+            }
+        }
+    }
+
+    /// Random sources of procedure headers, `Open ... For` lines, `Chr`
+    /// chains, comments, strings, continuations, overlong lines and rule
+    /// words with near misses, scanned with and without the word filter.
+    /// The plain scan must find every line-level rule at least once, so the
+    /// comparison covers every rule kind the filter can skip.
+    #[test]
+    fn the_word_filter_changes_no_finding() {
+        let mut words: Vec<String> = Vec::new();
+        let mut names: Vec<String> = ["x", "Report_Build", "TextBox1", "_"]
+            .map(String::from)
+            .to_vec();
+        for r in RULES {
+            match r.pattern {
+                Pattern::Proc(w) => {
+                    names.push(w.to_string());
+                    names.push(w.to_ascii_uppercase());
+                    names.push(format!("{w}x"));
+                    names.push(format!("x{w}"));
+                }
+                Pattern::ProcSuffix(w) => {
+                    names.push(format!("textbox1{w}"));
+                    names.push(format!("CommandButton2{}", w.to_ascii_uppercase()));
+                    names.push(w.to_string());
+                    names.push(format!("x{w}x"));
+                }
+                Pattern::Word(w) | Pattern::Text(w) => {
+                    words.push(w.to_string());
+                    words.push(w.to_ascii_uppercase());
+                    words.push(format!("{w}x"));
+                    words.push(format!("x{w}"));
+                    words.push(format!("\"{w}\""));
+                    words.push(format!("\"x {w} x\""));
+                }
+                Pattern::Sequence(seq) | Pattern::Repeated(seq, _) => {
+                    words.extend(seq.iter().map(|w| w.to_string()));
+                }
+                _ => {}
+            }
+        }
+        for w in [
+            "x1", "é", "rem", "sub", "function", "open", "for", "output", "\"", "\"\"", "'", "a.b",
+            "ws.Cells", "Dim",
+        ] {
+            words.push(w.to_string());
+        }
+        words.push(format!("\"{}\"", "a".repeat(199)));
+        words.push(format!("\"{}\"", "a".repeat(210)));
+        // Mostly real separators; "" fuses two words into one now and then.
+        let seps = [" ", " ", " ", " ", "(", ")", ".", ", ", " & ", "$", "=", ""];
+        let ends = ["\r\n", "\r\n", "\r\n", "\n", "\r", " _\r\n"];
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move |n: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as usize
+        };
+        let mut found = vec![false; RULES.len()];
+        let (mut procs, mut long_lines, mut capped_lines) = (0, 0, 0);
+        let mut line = Line::default();
+        for round in 0..2_000 {
+            let mut src = String::new();
+            for _ in 0..next(24) {
+                let mut tail = next(4);
+                match next(16) {
+                    0..=3 => {
+                        src.push_str(["", "", "Private ", "public ", "friend "][next(5)]);
+                        src.push_str(["", "", "", "Static "][next(4)]);
+                        src.push_str(["Sub ", "Function ", "sub ", "FUNCTION "][next(4)]);
+                        src.push_str(&names[next(names.len())]);
+                        src.push_str(["()", "(ByVal x As Long)", " ()", ""][next(4)]);
+                    }
+                    4 => {
+                        src.push_str("Open ");
+                        tail = 0;
+                        for _ in 0..next(3) {
+                            src.push_str(&words[next(words.len())]);
+                            src.push(' ');
+                        }
+                        src.push_str(["For ", "for ", "Output ", ""][next(4)]);
+                        src.push_str(["Output", "append", "Binary", "Input", "for"][next(5)]);
+                        src.push_str(" As #1");
+                    }
+                    5 => {
+                        src.push_str("s = ");
+                        for k in 0..2 + next(5) {
+                            if k > 0 {
+                                src.push_str(" & ");
+                            }
+                            src.push_str(["Chr", "ChrW", "chrb", "Chr$", "xchr"][next(5)]);
+                            src.push_str("(65)");
+                        }
+                    }
+                    6 if next(32) == 0 => {
+                        // Over MAX_SCANNED_LINE, with rule words past the cut.
+                        let start = src.len();
+                        src.push_str("x = ");
+                        while src.len() - start < MAX_SCANNED_LINE + 32 {
+                            src.push_str("ab é ");
+                        }
+                        src.push_str(" Shell kill");
+                    }
+                    7 if next(32) == 0 => {
+                        // Past the cap of joined lines.
+                        for _ in 0..=MAX_JOINED_LINES {
+                            src.push_str("a _\r\n");
+                        }
+                        src.push_str("environ");
+                    }
+                    _ => tail = 1 + next(8),
+                }
+                for _ in 0..tail {
+                    src.push_str(seps[next(seps.len())]);
+                    src.push_str(&words[next(words.len())]);
+                }
+                src.push_str(ends[next(ends.len())]);
+            }
+            for (_, raw, capped) in logical_lines(&src) {
+                let mut cut = raw.len().min(MAX_SCANNED_LINE);
+                while !raw.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                split_line(&raw[..cut], &mut line);
+                procs += usize::from(proc_name(&line.code).is_some());
+                long_lines += usize::from(raw.len() > MAX_SCANNED_LINE);
+                capped_lines += usize::from(capped);
+            }
+            for events in [false, true] {
+                for room in [1_000, next(6)] {
+                    let fast = scan_lines(&src, room, events, true);
+                    let plain = scan_lines(&src, room, events, false);
+                    assert_eq!(fast.hits, plain.hits, "round {round}: {src:?}");
+                    assert_eq!(fast.cut, plain.cut, "round {round}");
+                    if room == 1_000 {
+                        for &(i, _) in &plain.hits {
+                            found[i] = true;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(procs > 1_000, "{procs} procedure lines");
+        assert!(
+            long_lines > 0 && capped_lines > 0,
+            "{long_lines} {capped_lines}"
+        );
+        for (r, found) in RULES.iter().zip(&found) {
+            let module_only =
+                matches!(r.pattern, Pattern::Module(c) if c != ModuleCheck::OverlongLine);
+            assert!(*found || module_only, "no line matched {}", r.id);
+        }
+    }
+
+    /// Ordinary code: short lines, no findings.
+    fn ordinary(bytes: usize) -> String {
+        let block = "Sub Report_Build()\r\n    Dim ws As Worksheet, i As Long ' loop counter\r\n    Set ws = ThisWorkbook.Sheets(\"Data\")\r\n    For i = 2 To ws.Cells(ws.Rows.Count, 1).End(xlUp).Row\r\n        If ws.Cells(i, 3).Value > 100 Then ws.Cells(i, 4).Value = \"High \" & ws.Cells(i, 2).Value\r\n    Next i\r\n    Call FormatSheet(ws, True)\r\nEnd Sub\r\n";
+        block.repeat(bytes / block.len() + 1)
+    }
+
+    /// 16 MiB of ordinary code took 1.2 s to scan in release before the
+    /// word filter (issue 53). The filter does not help crafted lines that
+    /// hold the keys it looks for in strings, where no rule matches them:
+    /// one line with every key, or one key per line. Run in
+    /// release to see the times:
+    /// `cargo test --release -p carrysheet-vba --lib speed -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "speed probe, prints times; run in release"]
+    fn scan_speed_probe() {
+        let mut keys: Vec<&str> = Vec::new();
+        for r in RULES {
+            for k in rule_keys(&r.pattern) {
+                // A `Text` key is the needle's first word; alone in a
+                // string it matches only when it is the whole needle.
+                if !matches!(r.pattern, Pattern::Text(w) if w == k) {
+                    keys.push(k);
+                }
+            }
+        }
+        let fill = |line: String| line.repeat((16 << 20) / line.len() + 1);
+        let every_key = fill(format!("x = \"{}\" & y\r\n", keys.join("\" & \"")));
+        let one_key: String = keys.iter().map(|k| format!("x = \"{k}\"\r\n")).collect();
+        let sources = [
+            ("ordinary code", ordinary(16 << 20)),
+            ("lines with every key", every_key),
+            ("lines with one key", fill(one_key)),
+        ];
+        for (what, src) in sources {
+            for keyed in [true, false] {
+                let t = std::time::Instant::now();
+                let scan = scan_lines(&src, 1_000_000, true, keyed);
+                eprintln!(
+                    "16 MiB of {what}, word filter {keyed}: {:?}, {} findings",
+                    t.elapsed(),
+                    scan.hits.len()
+                );
+            }
+        }
+    }
+
+    /// The same in a debug build, where tests run: a few MiB must scan
+    /// well under the 10-second command limit.
+    #[test]
+    fn ordinary_code_scans_fast() {
+        let src = ordinary(2 << 20);
+        let t = std::time::Instant::now();
+        let scan = scan_source(&src, 1_000, true);
+        let took = t.elapsed();
+        assert!(scan.hits.is_empty());
+        assert!(took.as_secs() < 3, "2 MiB took {took:?}");
     }
 }

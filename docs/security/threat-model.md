@@ -78,7 +78,10 @@ characters; XML with a DOCTYPE and entities.
   every use of a shared object to a whole-document budget. It reads end
   records only near the end of the zip and caps them.
 - VBA: carrysheet-vba bounds input, streams, storages, entries, decompressed
-  source, modules, references and flags.
+  source, modules, references and flags. All module sources share one
+  decompression budget tied to the storage size (`max_source_ratio`), so a
+  bomb behind every module cannot multiply the per-stream limit
+  ([issue 53][i53]).
 - Encrypted files: carrysheet-crypto caps the key-stretching spin count
   (default 10,000,000), reads the `EncryptionInfo` XML with a size and event
   budget, and refuses a DOCTYPE.
@@ -99,8 +102,7 @@ characters; XML with a DOCTYPE and entities.
   carrysheet-numbers still uses the `zip` crate.
 - On wasm32 a panic aborts (`docs/web-build.md`). The readers return errors
   instead of panicking, but a Web Worker should still run the parsing.
-- One shared work budget with a deadline ([issue 56][i56]); the VBA case
-  that takes 13 s on a 479 KB file ([issue 53][i53]).
+- One shared work budget with a deadline ([issue 56][i56]).
 - Continuous fuzzing of every reader ([issue 8][i8]; fuzzlite work in
   [issue 54][i54]).
 - Overflow checks in release builds ([issue 59][i59]).
