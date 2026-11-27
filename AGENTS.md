@@ -112,7 +112,7 @@ You must never copy, translate or closely paraphrase code from GPL, LGPL, AGPL o
 - CI is the merge gate: a PR is merged only when every job in `.github/workflows/ci.yml` is green. The jobs are plain cargo commands (fmt, clippy, tests, cargo-deny, wasm, Windows builds, MSRV) plus the `lines`, `vendor` and release privacy scan jobs. Run the same commands by hand: `cargo fmt --all --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace`, `cargo deny --locked check` and `cargo wasm-check`. The Rust version is in `rust-toolchain.toml`.
 - Parsers treat every input file as hostile: no panics, no unbounded allocation, limits on sizes and counts. A malformed file returns an error that says what is wrong.
 - Never drop data you don't understand when saving: keep it and write it back.
-- Commands call GridCraft directly, through `Kernel`: `lib.rs` holds the call limits, opening, `edit` and saving; `view.rs` holds `overview`, `read` and `eval`. Every call runs inside `Kernel::guard`. Cells and ranges are GridCraft's `CellRef` and `RangeRef`; `range.rs` adds only what GridCraft's parser does not do. Do not add an engine interface or our own workbook types again (record 0010, decision 4). Tests run on the real kernel.
+- Commands call GridCraft directly, through `Kernel`: `open.rs` opens a file, `edit.rs` holds `edit`, `save.rs` saves, `commands/limits.rs` holds the call limits, and `view.rs` holds `overview` and `read`. Every call runs inside `Kernel::guard`. Cells and ranges are GridCraft's `CellRef` and `RangeRef`; `range.rs` adds only what GridCraft's parser does not do. Do not add an engine interface or our own workbook types again (record 0010, decision 4). Tests run on the real kernel.
 - Text for people comes from one generic form in `apps/carrysheet-cli/src/output.rs`: a list of rows is a table, every other field is `key: value`. Do not write text by hand for one command. Every string from a file goes through `redact_home` and `carrysheet::text::escape` before it is printed.
 - The library never reads or writes files, and does not replace the home folder with `~`. The program does both in `apps/carrysheet-cli/src/files.rs`. Every error it shows goes through `redact_error` first (record 0010, decision 2).
 - Errors for people and agents have three parts: what happened, why, and how to fix it.
@@ -132,7 +132,7 @@ Our own source is at most 5,000 lines; the planning target is 4,500. [Record 001
 - Unit tests go in `src/tests/` behind `#[cfg(test)] mod tests;`. A counted Rust file with `#[path`, `include!(` or an unguarded `mod tests;` fails.
 - Above 4,500 the check prints a note. The pull request then says why.
 - `vendor/gridcraft/` is upstream GridCraft plus the patch files in `patches/`, and nothing else. The `vendor` CI job checks it (`node scripts/vendor.mjs verify`). A patch never carries a Carrysheet feature; the patch files add at most `PATCH_MAX` lines (`scripts/lines.mjs`).
-- During the cut, CI passes `--max` with the ceiling of the current step. A pull request never raises the ceiling or the cap; a new cap needs a new record.
+- The script takes no options; the cap changes only with a new record.
 - Before you push, run the command of the `lines` job in `.github/workflows/ci.yml`. It needs no Rust and takes under a second.
 - A reason that needs more than a few lines goes into a record or `docs/`, not into a code comment.
 

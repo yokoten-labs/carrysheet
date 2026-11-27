@@ -30,8 +30,6 @@ env:
 
 jobs:
   # Record 0010 decision 8: the 5,000-line cap. No Rust, answers in seconds.
-  # --max is the ceiling of the current step; the pull request that reaches
-  # 5,000 deletes the option.
   lines:
     name: lines (the 5,000-line cap)
     runs-on: ubuntu-latest
@@ -44,7 +42,7 @@ jobs:
         with:
           node-version: "24"
       - run: node --test scripts/tests/lines.test.mjs
-      - run: node scripts/lines.mjs --max 5500
+      - run: node scripts/lines.mjs
 
   # Record 0009 decision 5.1: vendor/gridcraft is upstream at the pinned
   # commit plus our patch files. verify fetches that commit (network).
