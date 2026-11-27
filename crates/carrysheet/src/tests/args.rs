@@ -430,7 +430,10 @@ fn checks_object_lists() {
     assert!(e.fix.starts_with(fix), "{}", e.fix);
     assert!(e.fix.contains(OPERATION_EXAMPLE), "{}", e.fix);
     // Every error inside `ops` says what an operation looks like.
-    for op in [json!({ "op": "explode", "target": "A1" }), json!({ "op": "set_value", "target": "A1", "value": [3] })] {
+    for op in [
+        json!({ "op": "explode", "target": "A1" }),
+        json!({ "op": "set_value", "target": "A1", "value": [3] }),
+    ] {
         let e = validate_args(edit, &json!({ "path": "a", "ops": [op] })).unwrap_err();
         assert!(e.fix.starts_with(fix), "{}", e.fix);
     }

@@ -35,7 +35,7 @@ fn every_command_is_reachable() {
 }
 
 #[test]
-fn flags_are_kebab_case() {
+fn every_flag_is_its_argument_in_kebab_case() {
     for c in COMMANDS {
         for a in command_json(c)["args"].as_array().unwrap() {
             if let Some(flag) = a["flag"].as_str() {
