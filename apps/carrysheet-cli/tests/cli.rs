@@ -6,10 +6,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use carrysheet_commands::lint::{lint_schema, lint_tools};
-use carrysheet_commands::schema::tool_definition;
-use carrysheet_commands::table::{COMMANDS, mcp_tools};
+use carrysheet::commands::schema::tool_definition;
+use carrysheet::commands::table::{COMMANDS, mcp_tools};
 use serde_json::Value;
+
+/// The schema lint is test code of the library (record 0010, step 3).
+#[path = "../../../crates/carrysheet/tests/lint/mod.rs"]
+mod lint;
+
+use lint::{lint_schema, lint_tools};
 
 const BIN: &str = env!("CARGO_BIN_EXE_carrysheet-cli");
 
@@ -457,7 +462,7 @@ fn deleting_or_overwriting_needs_confirm() {
 fn exit_code_3_is_reserved_for_nothing_to_do() {
     // No command returns it yet; the mapping lives in the command layer.
     assert_eq!(
-        carrysheet_commands::ErrorCode::NothingToDo
+        carrysheet::commands::ErrorCode::NothingToDo
             .exit_code()
             .code(),
         3

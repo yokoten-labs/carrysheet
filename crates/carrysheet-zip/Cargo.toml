@@ -17,7 +17,7 @@ flate2 = { version = "1.1.10", default-features = false, features = ["rust_backe
 # Tests only: which inflater the tests must find linked (tests/tail.rs).
 # The shipped CLI links miniz_oxide; `cargo test --workspace` unifies
 # flate2 to zlib-rs (calamine, a dev-dependency elsewhere, asks for it).
-# scripts/check.mjs runs this crate's tests once with each, so both are
+# CI runs this crate's tests once with each, so both are
 # exercised whatever the workspace unifies to.
 test-miniz = []
 test-zlib-rs = ["flate2/zlib-rs"]

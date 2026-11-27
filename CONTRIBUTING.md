@@ -7,7 +7,7 @@ Thanks for helping. Carrysheet is an early preview, so things move fast. A short
 All the rules are in [AGENTS.md](AGENTS.md). They apply to people and AI agents alike. The most important ones:
 
 - **Clean room.** Never copy or closely follow code from GPL, LGPL, AGPL or MPL projects (LibreOffice, Gnumeric and others). Use Microsoft's published specs and permissively licensed code instead.
-- **Checks.** Run `node scripts/check.mjs --quick` while you work. It checks the crates you changed.
+- **Checks.** Run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo test --workspace --locked` while you work, and the `lines` job's command from `.github/workflows/ci.yml` for the line cap.
 - **Commits.** One logical change per commit, with a message in English that says what changed and why.
 
 ## Pull requests

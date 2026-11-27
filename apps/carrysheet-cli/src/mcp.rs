@@ -20,12 +20,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use carrysheet_commands::engine::save::clean_from_file;
-use carrysheet_commands::paths::{display_path, home_dir, redact_home};
-use carrysheet_commands::root::Root;
-use carrysheet_commands::schema::tool_definition;
-use carrysheet_commands::table::{ArgType, Command, mcp_tools};
-use carrysheet_commands::{CommandError, ErrorCode, validate_args};
+use carrysheet::commands::engine::save::clean_from_file;
+use carrysheet::commands::paths::{display_path, home_dir, redact_home};
+use carrysheet::commands::root::Root;
+use carrysheet::commands::schema::tool_definition;
+use carrysheet::commands::table::{ArgType, Command, mcp_tools};
+use carrysheet::commands::{CommandError, ErrorCode, validate_args};
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, ListToolsResult,
     PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
@@ -62,7 +62,7 @@ impl Options {
 }
 
 /// Longest log line kept, in characters.
-const MAX_LOG_LINE: usize = 2_000;
+pub(crate) const MAX_LOG_LINE: usize = 2_000;
 
 /// Writes one line to stderr, never stdout: the home folder shown as `~`,
 /// and control and invisible characters escaped as for text from a file,
@@ -73,7 +73,7 @@ pub fn log(message: &str) {
         .write_all(log_line(message).as_bytes());
 }
 
-fn log_line(message: &str) -> String {
+pub(crate) fn log_line(message: &str) -> String {
     let line = clean_from_file(&redact_home(message), MAX_LOG_LINE);
     format!("carrysheet-cli: {line}\n")
 }
@@ -81,15 +81,15 @@ fn log_line(message: &str) -> String {
 /// The server: the tools it offers and the folder it may use.
 #[derive(Clone)]
 pub struct Server {
-    inner: Arc<Inner>,
+    pub(crate) inner: Arc<Inner>,
 }
 
-struct Inner {
+pub(crate) struct Inner {
     root: Root,
     read_only: bool,
     /// The offered commands, in table order, and their tool definitions.
-    commands: Vec<&'static Command>,
-    tools: Vec<Tool>,
+    pub(crate) commands: Vec<&'static Command>,
+    pub(crate) tools: Vec<Tool>,
 }
 
 /// The commands offered as tools: every MCP tool in the table; in read-only
@@ -168,7 +168,7 @@ impl Server {
         // MCP calls keep the default time limit (limits::MAX_CALL_SECONDS).
         let ctx = Context::default();
         // Writes stay inside the root even if a link changes meanwhile.
-        let _confined = carrysheet_commands::engine::save::confine_writes(&self.inner.root.dir());
+        let _confined = carrysheet::commands::engine::save::confine_writes(&self.inner.root.dir());
         run::run(command, &args, &ctx).map(|done| done.data)
     }
 
@@ -503,187 +503,5 @@ impl tracing::field::Visit for Fields {
             "message" => write!(self.0, " {value}"),
             name => write!(self.0, " {name}={value:?}"),
         };
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use carrysheet_commands::lint::lint_tools;
-    use serde_json::json;
-
-    /// The server for a root folder.
-    fn test_server(root: &Path, read_only: bool) -> Server {
-        Server::new(Root::new(root).unwrap(), read_only)
-    }
-
-    fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("carrysheet-mcp-unit-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("root")).unwrap();
-        std::fs::write(dir.join("root/book.xlsx"), b"x").unwrap();
-        std::fs::write(dir.join("outside.xlsx"), b"x").unwrap();
-        dir
-    }
-
-    fn tools_json(server: &Server) -> Vec<Value> {
-        server
-            .inner
-            .tools
-            .iter()
-            .map(|t| serde_json::to_value(t).unwrap())
-            .collect()
-    }
-
-    #[test]
-    fn tools_match_the_table_exactly() {
-        let dir = scratch("tools");
-        let server = test_server(&dir.join("root"), false);
-        let expected: Vec<Value> = mcp_tools().map(tool_definition).collect();
-        let tools = tools_json(&server);
-        assert_eq!(tools, expected);
-        assert!(lint_tools(&tools).is_empty());
-        let text = serde_json::to_string(&tools).unwrap();
-        assert!(!text.contains("session_id"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn read_only_hides_tools_that_change_files() {
-        let dir = scratch("readonly");
-        let server = test_server(&dir.join("root"), true);
-        let names: Vec<_> = server.inner.commands.iter().map(|c| c.name).collect();
-        assert_eq!(names, ["overview", "read", "eval"]);
-        for t in tools_json(&server) {
-            assert_eq!(t["annotations"]["readOnlyHint"], true, "{}", t["name"]);
-        }
-        let r = server.call("edit", Some(Map::new()));
-        assert_eq!(r.is_error, Some(true));
-        let e = &r.structured_content.unwrap()["error"];
-        assert!(e["what"].as_str().unwrap().contains("read-only"));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn results_carry_the_same_json_as_text_and_structured() {
-        let dir = scratch("results");
-        let server = test_server(&dir.join("root"), false);
-        std::fs::write(dir.join("root/a.csv"), b"Item,Price\nTea,3\n").unwrap();
-        let mut args = Map::new();
-        args.insert("path".into(), json!("a.csv"));
-        let r = server.call("overview", Some(args));
-        assert_eq!(r.is_error, Some(false));
-        let structured = r.structured_content.clone().unwrap();
-        assert_eq!(structured["ok"], true);
-        assert!(structured["sheets"].is_array(), "{structured}");
-        let text = &r.content[0].as_text().unwrap().text;
-        assert_eq!(text, &structured.to_string());
-        assert!(!text.contains('\n'));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn failures_put_the_fix_first() {
-        let dir = scratch("failures");
-        let server = test_server(&dir.join("root"), false);
-        for (name, args) in [
-            ("overview", json!({ "path": "book.xlsx" })),
-            ("overview", json!({ "path": "../outside.xlsx" })),
-            (
-                "overview",
-                json!({ "path": "book.xlsx", "session_id": "x" }),
-            ),
-            ("overview", json!({})),
-            (
-                "overview",
-                json!({ "path": format!("../{}", "x".repeat(5000)) }),
-            ),
-            ("overview", json!({ "path": "y".repeat(5000) })),
-            ("nope", json!({})),
-        ] {
-            let r = server.call(name, args.as_object().cloned());
-            assert_eq!(r.is_error, Some(true), "{name} {args}");
-            let text = &r.content[0].as_text().unwrap().text;
-            assert_eq!(text, &r.structured_content.unwrap().to_string());
-            // The command line's key order, with the fix early.
-            let code_at = text.find(r#""code":""#).unwrap();
-            let what_at = text.find(r#""what":""#).unwrap();
-            let fix_at = text.find(r#""fix":""#).unwrap();
-            let why_at = text.find(r#""why":""#).unwrap();
-            assert!(
-                code_at < what_at && what_at < fix_at && fix_at < why_at,
-                "{text}"
-            );
-            assert!(fix_at < 200, "{text}");
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn paths_are_confined_and_resolved() {
-        let dir = scratch("confine");
-        let server = test_server(&dir.join("root"), false);
-        let r = server.call(
-            "overview",
-            json!({ "path": "../outside.xlsx" }).as_object().cloned(),
-        );
-        assert_eq!(
-            r.structured_content.unwrap()["error"]["code"],
-            "outside_root"
-        );
-        // Inside the root, the call reaches the kernel, which finds no workbook.
-        let r = server.call(
-            "overview",
-            json!({ "path": "book.xlsx" }).as_object().cloned(),
-        );
-        assert_eq!(
-            r.structured_content.unwrap()["error"]["code"],
-            "damaged_file"
-        );
-        // A missing file inside the root is reported as missing, with ~.
-        let r = server.call("read", json!({ "path": "gone.xlsx" }).as_object().cloned());
-        assert_eq!(
-            r.structured_content.unwrap()["error"]["code"],
-            "file_not_found"
-        );
-        // Outputs are confined too.
-        let r = server.call(
-            "convert",
-            json!({ "path": "book.xlsx", "output": "../out.csv" })
-                .as_object()
-                .cloned(),
-        );
-        assert_eq!(
-            r.structured_content.unwrap()["error"]["code"],
-            "outside_root"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn log_lines_are_cleaned_like_file_text() {
-        let line = log_line("forged\r\n2026-01-01 carrysheet-cli: \u{1b}[31mred\u{202e}");
-        assert_eq!(line.matches('\n').count(), 1, "{line}");
-        assert!(!line.contains('\r') && !line.contains('\u{1b}') && !line.contains('\u{202e}'));
-        assert!(line.contains(r"forged\u{d}\u{a}2026"), "{line}");
-        if let Some(home) = home_dir() {
-            let line = log_line(&format!("opened {}", home.join("a.xlsx").display()));
-            assert!(!line.contains(&home.display().to_string()), "{line}");
-        }
-        assert!(log_line(&"x".repeat(5_000)).len() < MAX_LOG_LINE + 40);
-    }
-
-    #[test]
-    fn options_from_args() {
-        let mut args = Map::new();
-        args.insert("root".into(), json!("books"));
-        args.insert("read_only".into(), json!(true));
-        let o = Options::from_args(&args).unwrap();
-        assert_eq!(o.root.as_deref(), Some(Path::new("books")));
-        assert!(o.read_only);
-        let o = Options::from_args(&Map::new()).unwrap();
-        assert_eq!(o.root, None);
-        assert!(!o.read_only);
     }
 }

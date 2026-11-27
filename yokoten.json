@@ -6,6 +6,8 @@
       "docs/records",
       "crates",
       "crates/*/src",
+      "crates/*/src/commands",
+      "crates/*/src/tests",
       "crates/*/tests",
       "crates/*/tests/data",
       "crates/*/tests/data/**",

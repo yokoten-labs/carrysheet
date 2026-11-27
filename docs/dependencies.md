@@ -25,7 +25,7 @@ listed here with why.
 
 | Crate | Used by | Why |
 |---|---|---|
-| `flate2` 1.1.10 (MIT OR Apache-2.0) | `carrysheet-kernel` tests | Builds deflate streams for the hostile-file tests. The same version GridCraft ships, so it adds nothing to the graph. |
+| `flate2` 1.1.10 (MIT OR Apache-2.0) | `carrysheet` tests | Builds deflate streams for the hostile-file tests. The same version GridCraft ships, so it adds nothing to the graph. |
 
 ## Policy check: cargo-deny
 
@@ -35,11 +35,10 @@ Run `cargo deny check` before a release and after any `Cargo.lock` change
 
 ## Release build check
 
-`node scripts/release-check.mjs <target>` builds `carrysheet-cli` for that
-target with build-machine paths remapped (release builds only), then checks
-the binary for the home folder, user name, email addresses, `/home/` and
-`C:\Users\`, and prints its size. Findings show only kind and offset. Run it
-for every target before publishing a build.
+The `release-scan` job in `.github/workflows/ci.yml` builds `carrysheet-cli` in
+release mode with build-machine paths remapped (`--remap-path-prefix`), then
+searches the binary for the home folder, `/home/`, the user name and any email
+address outside `carrysheet.com`. Any hit fails the job. Run the same steps by hand before publishing a build.
 
 ## SBOM at release time
 

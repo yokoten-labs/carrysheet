@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
-use carrysheet_commands::schema::tool_definition;
-use carrysheet_commands::table::mcp_tools;
+use carrysheet::commands::schema::tool_definition;
+use carrysheet::commands::table::mcp_tools;
 use serde_json::{Value, json};
 
 const BIN: &str = env!("CARGO_BIN_EXE_carrysheet-cli");

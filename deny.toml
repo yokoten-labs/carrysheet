@@ -92,11 +92,11 @@ deny = [
     { crate = "rustls", reason = "No network code in the binary (record 0010, decision 4): MCP runs over stdio only." },
     { crate = "native-tls", reason = "No network code in the binary (record 0010, decision 4): MCP runs over stdio only." },
     { crate = "openssl", reason = "No network code in the binary (record 0010, decision 4): MCP runs over stdio only." },
-    # Fences (record 0010, decision 9): GridCraft only behind carrysheet-kernel,
+    # Fences (record 0010, decision 9): GridCraft only in carrysheet,
     # the MCP runtime only in the program. `wrappers` names the crates that may
     # depend on each directly; GridCraft's own crates may use each other.
-    { crate = "gridcraft-engine", wrappers = ["carrysheet-kernel"], reason = "GridCraft is used only through carrysheet-kernel." },
-    { crate = "gridcraft-xlsx", wrappers = ["carrysheet-kernel", "gridcraft-engine"], reason = "GridCraft is used only through carrysheet-kernel." },
+    { crate = "gridcraft-engine", wrappers = ["carrysheet"], reason = "GridCraft is used only in carrysheet." },
+    { crate = "gridcraft-xlsx", wrappers = ["carrysheet", "gridcraft-engine"], reason = "GridCraft is used only in carrysheet." },
     { crate = "gridcraft-calc", wrappers = ["gridcraft-chart", "gridcraft-engine"], reason = "Inside GridCraft only; Carrysheet uses gridcraft-engine and gridcraft-xlsx." },
     { crate = "gridcraft-chart", wrappers = ["gridcraft-engine"], reason = "Inside GridCraft only; Carrysheet uses gridcraft-engine and gridcraft-xlsx." },
     { crate = "gridcraft-core", wrappers = ["gridcraft-calc", "gridcraft-chart", "gridcraft-engine", "gridcraft-formula", "gridcraft-functions", "gridcraft-model", "gridcraft-numfmt", "gridcraft-xlsx"], reason = "Inside GridCraft only; Carrysheet uses gridcraft-engine and gridcraft-xlsx." },

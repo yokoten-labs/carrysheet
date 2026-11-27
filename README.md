@@ -11,9 +11,9 @@ The first release will be `carrysheet-cli`: a command-line tool with an MCP serv
 
 The libraries in `crates/` work and are tested. Each one treats every file as hostile: no crashes, limits on size and memory, and an error that says what went wrong.
 
-- **Workbooks** (`carrysheet-kernel`, on the vendored GridCraft kernel): open `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xlsb`, `.ods`, `.xls` (BIFF8) and `.csv`, calculate formulas, and save as `.xlsx` or `.csv`. csv opens in its own encoding (UTF-8, UTF-16, GBK, Big5, Shift_JIS and others), and a field becomes a number only when nothing changes, so `007` and `SEPT1` stay as written. A save that would lose content needs `confirm_loss`.
+- **Workbooks** (`carrysheet::kernel`, on the vendored GridCraft kernel): open `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xlsb`, `.ods`, `.xls` (BIFF8) and `.csv`, calculate formulas, and save as `.xlsx` or `.csv`. csv opens in its own encoding (UTF-8, UTF-16, GBK, Big5, Shift_JIS and others), and a field becomes a number only when nothing changes, so `007` and `SEPT1` stay as written. A save that would lose content needs `confirm_loss`.
 - **Macros**: `overview` says when an .xlsx, .xlsm or .xlsb file has macros (a VBA project or Excel 4 macro sheets), and says it did not check for .xls and .ods files. Carrysheet never runs them, and a save keeps them where the format can hold them; a save that would drop them needs `confirm_loss`.
-- **The workbook model and the command table** (`carrysheet-model`, `carrysheet-commands`): one list of commands that drives both the command line and the MCP tools, with JSON schemas that Claude, Gemini and OpenAI accept.
+- **The workbook model and the command table** (`carrysheet::model`, `carrysheet::commands`): one list of commands that drives both the command line and the MCP tools, with JSON schemas that Claude, Gemini and OpenAI accept.
 
 `carrysheet-cli` runs `overview`, `read`, `eval`, `edit`, `convert`, `commands` and `mcp serve` (MCP over stdio). It never asks a question: pass `--yes` to confirm deleting, overwriting or a lossy save.
 
@@ -25,7 +25,7 @@ Carrysheet 1.0 is ready when you can open a real `.xlsx` file, edit it, and save
 
 ## Build from source
 
-You need [Rust](https://rustup.rs) 1.90 or later and Node.js (for the check script).
+You need [Rust](https://rustup.rs) 1.90 or later (`rust-toolchain.toml` picks the exact version) and Node.js (for the line-cap check).
 
 ```sh
 cargo build -p carrysheet-cli
@@ -34,10 +34,15 @@ cargo build -p carrysheet-cli
 The program is then in `target/debug/`. While you work, check your change with:
 
 ```sh
-node scripts/check.mjs --quick
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+node scripts/lines.mjs --max <ceiling>
 ```
 
-It formats, lints and tests the crates you changed and the crates that use them, and checks the dependency policy. The full run, `node scripts/check.mjs` with no options, is what CI runs on every pull request. It needs Linux, cargo-deny, the wasm target and the mingw-w64 Windows targets, so you usually leave it to CI. `node scripts/check.mjs --list` shows the steps.
+The line-cap ceiling of the current step is the `--max` of the `lines` job in `.github/workflows/ci.yml`.
+
+CI runs the same commands on Linux, Windows and macOS, plus `cargo deny check`, the wasm and Windows builds, a build on the minimum Rust version, and a scan of the release binary for build-machine paths. The workflow is `.github/workflows/ci.yml`.
 
 ## Contributing and security
 

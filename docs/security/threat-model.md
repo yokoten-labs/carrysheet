@@ -4,7 +4,7 @@ Who could harm a Carrysheet user, through what, and what we do about it. To
 report a problem, see [SECURITY.md](../../SECURITY.md).
 
 **Where things stand (2026-11-27).** Workbook files are read by the vendored
-GridCraft kernel, through `carrysheet-kernel`; the save check lists package
+GridCraft kernel, through `carrysheet::kernel`; the save check lists package
 parts through carrysheet-zip. `carrysheet-cli` runs its MCP server over stdio
 only and holds no network code (record 0010). Every command in the table is
 built. Some defences below are not built yet; they are marked **planned**.
@@ -44,9 +44,9 @@ These apply to every crate and every command.
    `overview`, never run. Refreshing external data is not done
    ([issue 27][i27]).
 8. **Privacy in output.** The home folder is shown as `~` in messages and
-   logs (`carrysheet-commands::paths`). Release binaries are
-   checked for build-machine paths, user names and email addresses
-   (`scripts/release-check.mjs`).
+   logs (`carrysheet::commands::paths`). Release binaries are
+   checked for build-machine paths, the user name and email addresses
+   (the `release-scan` job in `.github/workflows/ci.yml`).
 
 ## Threats
 
@@ -65,7 +65,7 @@ sizes and counts; archive entry names with `..`, absolute paths or control
 characters; XML with a DOCTYPE and entities.
 
 **Now:**
-- Hostile-input tests under `tests/`: carrysheet-kernel and carrysheet-zip.
+- Hostile-input tests under `tests/`: carrysheet and carrysheet-zip.
 - Every call into GridCraft runs behind `catch_unwind`; record 0003 counts a
   caught panic as a failure, not a pass.
 - Zip archives: carrysheet-zip is a hardened opener (one end-record scan,
@@ -76,7 +76,7 @@ characters; XML with a DOCTYPE and entities.
 
 **Open:**
 - Use carrysheet-zip for every reader ([issue 40][i40], partly done).
-  carrysheet-kernel lists and unpacks package parts through carrysheet-zip,
+  carrysheet::kernel lists and unpacks package parts through carrysheet-zip,
   but the vendored GridCraft `.xlsx` and engine crates still use the `zip`
   crate.
 - On wasm32 a panic aborts (`docs/web-build.md`). The readers return errors
@@ -103,7 +103,7 @@ text from a person while a model still reads it ("ASCII smuggling").
 
 **Now:**
 - Text from files that crates show in messages is escaped and cut
-  (`clean_from_file` in carrysheet-commands); the MCP log goes through the
+  (`clean_from_file` in carrysheet::commands); the MCP log goes through the
   same helper.
 - Changes need `dry_run` or confirmation: overwriting and deleting need
   `confirm` (or `--yes` on the command line), and `--read-only` hides every
@@ -135,7 +135,7 @@ back, a new record decides it (decision 7), and this part returns with it.
 model behind it) sends arguments meant to reach files outside the user's
 folder, very large arguments, or a flood of calls.
 
-**Now** (`apps/carrysheet-cli/src/mcp.rs`, `crates/carrysheet-commands`):
+**Now** (`apps/carrysheet-cli/src/mcp.rs`, `crates/carrysheet/src/commands`):
 - Every path argument must resolve inside `--root`. Paths are checked as
   text first (device namespaces, other drives and network shares, `..` above
   the root, names Windows reserves) and then walked one name at a time,
@@ -180,13 +180,15 @@ carries a bug; a release binary leaks the build machine's paths.
   licenses only for libraries, yanked versions denied, unmaintained and
   unsound crates fail anywhere in the graph, no wildcard versions. Each
   ignored advisory has a reason. HTTP and TLS crates are banned; GridCraft
-  is fenced to carrysheet-kernel, rmcp and tokio to carrysheet-cli.
+  is fenced to the carrysheet crate, rmcp and tokio to carrysheet-cli.
+  cargo-deny fences whole crates, so inside carrysheet the commands and
+  model modules are not fenced from GridCraft.
 - A crate version must be at least 7 days old before we take it
   (`docs/dependencies.md`). Some dependencies are pinned exactly, such as
   `rmcp` and `zip`.
-- `scripts/release-check.mjs` builds with paths remapped and checks the
-  binary for the home folder, user name, email addresses and user-folder
-  paths, printing only the kind and offset of a finding.
+- The `release-scan` CI job builds with paths remapped and checks the
+  binary for the home folder, `/home/` paths, the user name and email
+  addresses other than `carrysheet.com` ones.
 - A CycloneDX SBOM is made for each release (`docs/dependencies.md`).
 - The clean-room rule keeps GPL, LGPL, AGPL and MPL code out
   (`AGENTS.md`, [issue 13][i13]).
@@ -196,7 +198,7 @@ carries a bug; a release binary leaks the build machine's paths.
   license (record 0003, [issue 45][i45]). We review and carry it ourselves.
 - Reproducible builds and audits such as `cargo vet` ([issue 10][i10]).
 - Signed release builds ([issue 11][i11], [issue 52][i52]).
-- Fuzzing in CI. CI already runs `scripts/check.mjs`, clippy, tests and
+- Fuzzing in CI. CI already runs clippy, tests and
   `cargo deny` (`.github/workflows/ci.yml`; [issue 52][i52]).
 
 **Not defended:** a compromise of crates.io, of the Rust toolchain, or of
@@ -224,7 +226,7 @@ modules and flagged risky code, left with record 0010. Running macros is
 undecided and lowest priority ([issue 21][i21]); so is refreshing external
 data ([issue 27][i27]).
 
-**CSV formula injection:** carrysheet-kernel's csv writer puts an apostrophe
+**CSV formula injection:** carrysheet::kernel's csv writer puts an apostrophe
 before text that starts with `=`, `+`, `-`, `@`, a tab or a carriage return
 (OWASP advice), on by default, so a CSV we write does not run formulas when
 opened elsewhere. Numbers are never changed. `csv_raw` (`--csv-raw`) turns

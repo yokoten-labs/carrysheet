@@ -1,5 +1,5 @@
 //! `carrysheet-cli`: Carrysheet on the command line, generated from the
-//! command table in `carrysheet-commands`.
+//! command table in `carrysheet::commands`.
 //!
 //! Exit codes: 0 done, 1 failed, 2 usage error, 3 nothing to do.
 
@@ -7,10 +7,12 @@ mod cli;
 mod mcp;
 mod output;
 mod run;
+#[cfg(test)]
+mod tests;
 
 use std::ffi::OsString;
 
-use carrysheet_commands::validate_args;
+use carrysheet::commands::validate_args;
 use serde_json::Value;
 
 /// True when `--json` appears before any `--`, so even a command line clap
@@ -36,9 +38,9 @@ fn real_main(args: Vec<OsString>) -> u8 {
         max_seconds: None,
     };
     if let Some(&seconds) = matches.get_one::<f64>("max-seconds") {
-        let max = carrysheet_commands::limits::MAX_CLI_SECONDS;
+        let max = carrysheet::commands::limits::MAX_CLI_SECONDS;
         if !(seconds > 0.0 && seconds <= max) {
-            let err = carrysheet_commands::CommandError::invalid_argument(
+            let err = carrysheet::commands::CommandError::invalid_argument(
                 "max-seconds",
                 format!("--max-seconds must be more than 0 and at most {max}"),
                 "Pass a number of seconds, like --max-seconds 60.",
@@ -51,8 +53,8 @@ fn real_main(args: Vec<OsString>) -> u8 {
 
     let Some((command, sub)) = cli::chosen(&matches) else {
         // clap requires a subcommand, so this is a bug if it happens.
-        let err = carrysheet_commands::CommandError::new(
-            carrysheet_commands::ErrorCode::Internal,
+        let err = carrysheet::commands::CommandError::new(
+            carrysheet::commands::ErrorCode::Internal,
             "no command was chosen",
             "the command line parsed but named no command",
             "Report this at https://github.com/yokoten-labs/carrysheet/issues.",
@@ -69,7 +71,7 @@ fn real_main(args: Vec<OsString>) -> u8 {
             .and_then(|args| mcp::Options::from_args(&args))
             .and_then(|o| mcp::serve(&o))
         {
-            Ok(()) => carrysheet_commands::ExitCode::Done.code(),
+            Ok(()) => carrysheet::commands::ExitCode::Done.code(),
             Err(err) => {
                 output::print_error(&err, json);
                 err.exit_code().code()
@@ -80,7 +82,7 @@ fn real_main(args: Vec<OsString>) -> u8 {
     match result.map_err(with_yes) {
         Ok(done) => {
             output::print_done(&done, json);
-            carrysheet_commands::ExitCode::Done.code()
+            carrysheet::commands::ExitCode::Done.code()
         }
         Err(err) => {
             output::print_error(&err, json);
@@ -91,8 +93,8 @@ fn real_main(args: Vec<OsString>) -> u8 {
 
 /// Nobody is asked to confirm: a refusal for want of a confirmation also
 /// names `--yes`, which gives every confirmation at once.
-fn with_yes(mut err: carrysheet_commands::CommandError) -> carrysheet_commands::CommandError {
-    if err.code == carrysheet_commands::ErrorCode::ConfirmationRequired {
+fn with_yes(mut err: carrysheet::commands::CommandError) -> carrysheet::commands::CommandError {
+    if err.code == carrysheet::commands::ErrorCode::ConfirmationRequired {
         err.fix
             .push_str(" Or add --yes, which confirms everything.");
     }
@@ -102,23 +104,4 @@ fn with_yes(mut err: carrysheet_commands::CommandError) -> carrysheet_commands::
 fn main() -> std::process::ExitCode {
     let args: Vec<OsString> = std::env::args_os().collect();
     std::process::ExitCode::from(real_main(args))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn os(args: &[&str]) -> Vec<OsString> {
-        args.iter().map(OsString::from).collect()
-    }
-
-    #[test]
-    fn json_is_detected_before_double_dash_only() {
-        assert!(wants_json(&os(&["x", "read", "--json"])));
-        assert!(!wants_json(&os(&["x", "read", "--", "--json"])));
-        assert!(!wants_json(&os(&["--json"])));
-        assert!(wants_json(&os(&["x", "--json=true", "read"])));
-        assert!(wants_json(&os(&["x", "read", "--json=false"])));
-        assert!(!wants_json(&os(&["x", "read", "--jsonx"])));
-    }
 }

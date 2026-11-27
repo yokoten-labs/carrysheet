@@ -1,0 +1,34 @@
+[package]
+name = "carrysheet"
+version = "0.1.0"
+description = "Carrysheet as a library: the command table and schemas, the workbook model, and the calculation kernel on GridCraft (vendored). Bytes in, JSON out."
+license = "MIT OR Apache-2.0"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+gridcraft-engine = { path = "../../vendor/gridcraft/crates/engine", version = "0.8.0" }
+gridcraft-xlsx = { path = "../../vendor/gridcraft/crates/xlsx", version = "0.8.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# Lists and unpacks package parts for the save report: the hardened zip
+# reader (issue 40).
+carrysheet-zip = { path = "../carrysheet-zip", version = "0.1.0" }
+# The csv front end: decodes legacy encodings (record 0010, decision 3);
+# the versions the old csv reader used.
+encoding_rs = "=0.8.42"
+chardetng = "=0.1.17"
+
+[dev-dependencies]
+# Builds deflate streams for the hostile-file tests, and checks CRC-32s in
+# the save check's unit tests; the version GridCraft uses.
+flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
+
+[features]
+# The in-memory engine, for tests of crates that use this one.
+test-engine = []
+
+[lints]
+workspace = true
