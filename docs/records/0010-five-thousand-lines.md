@@ -1,6 +1,6 @@
 # 0010 A 5,000-line cap: one library, one program, GridCraft reads the formats
 
-Status: accepted
+Status: accepted; decisions 2, 10 and 11 amended by record 0011
 Date: 2026-11-27 (UTC)
 
 The owner asked the lead to decide on his behalf ("auto dev", 2026-11-27); the lead took the recommended answer to each open question: the cap counts physical lines (`wc -l`, blank and comment lines included); removed code stays in `main`'s git history and the CHANGELOG names the last commit that had it; the `macros` command is removed now, and `overview` still reports that a file has macros, keeps them on save and never runs them; `tools/excel-ground-truth` leaves with the cut and may return under `tests/` when Excel comparisons start; v0.1.0 ships once the count is under 5,000 (after step 8).
