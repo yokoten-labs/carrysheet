@@ -24,16 +24,16 @@ schemars = "1.2"
 clap = { version = "4.5", default-features = false, features = ["std", "derive"], optional = true }
 # Lists package parts for the save-loss report and reads [Content_Types].xml:
 # the version GridCraft pins, so both list a package's parts the same way.
-zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "=9.8.1", default-features = false, features = ["deflate-flate2"] }
 # The csv front end: decodes legacy encodings (record 0010, decision 3);
 # the versions the old csv reader used.
-encoding_rs = "=0.8.42"
-chardetng = "=0.1.17"
+encoding_rs = "=0.8.44"
+chardetng = "=1.0.0"
 
 [dev-dependencies]
 # Builds deflate streams for the hostile-file tests, and checks CRC-32s in
 # the save check's unit tests; the version GridCraft uses.
-flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
+flate2 = { version = "=1.1.11", default-features = false, features = ["rust_backend"] }
 
 [lints]
 workspace = true

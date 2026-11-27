@@ -19,7 +19,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 # MCP server over stdio only. Exact pin: the Rust SDK is beta for the
 # 2026-07-28 spec.
-rmcp = { version = "=3.9.0", default-features = false, features = ["server", "transport-io"] }
+rmcp = { version = "=3.11.0", default-features = false, features = ["server", "transport-io"] }
 # Supply chain: Cargo.lock holds tokio 1.53.3, not 1.54.0 (released the day
 # before this was added); tokio-util 0.7.20, uuid 1.28.0 and schemars 1.2.3
 # were each at least a week old. Take new releases only once they have aged a
