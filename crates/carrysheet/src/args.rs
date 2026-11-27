@@ -1,9 +1,8 @@
-//! One struct per command: the source of its flags, MCP schema and help
-//! (record 0010, decisions 2 and 6). A struct's first doc line is the help
-//! summary, the rest the tool description; a field's doc line describes it.
-//! `schemars` writes the schema, `serde` checks a call, and `clap` (feature
-//! `cli`) makes the flags, read back as text and checked here like a call.
-//! An optional argument is an `Option`: absent and `null` mean the same.
+//! One struct per command: the source of its flags, MCP schema and help (record 0010,
+//! decisions 2 and 6). A struct's first doc line is the help summary, the rest the tool
+//! description; a field's doc line describes it. `schemars` writes the schema, `serde` checks
+//! a call, and `clap` (feature `cli`) makes the flags, read back as text and checked here like
+//! a call. An optional argument is an `Option`: absent and `null` mean the same.
 
 use std::path::{Path, PathBuf};
 
@@ -240,9 +239,6 @@ macro_rules! command {
     };
 }
 
-/// The names of the four MCP annotations.
-const HINTS: &str = "readOnlyHint destructiveHint idempotentHint openWorldHint";
-
 /// Never changes anything, and calling it again gives the same answer.
 const READS: [bool; 4] = [true, false, true, false];
 
@@ -284,7 +280,8 @@ impl Command {
     /// The names of the command's arguments, in order.
     pub fn arg_names(&self) -> Vec<String> {
         let schema = input_schema(self);
-        schema["properties"].as_object().into_iter().flat_map(Map::keys).cloned().collect()
+        let properties = schema["properties"].as_object().into_iter();
+        properties.flat_map(Map::keys).cloned().collect()
     }
 
     /// True when the command takes an argument of this name.
@@ -304,14 +301,16 @@ impl Command {
 
     /// The four MCP annotations under their protocol names.
     pub fn annotations(&self) -> Value {
-        HINTS.split(' ').zip(self.hints).collect()
+        const NAMES: &str = "readOnlyHint destructiveHint idempotentHint openWorldHint";
+        NAMES.split(' ').zip(self.hints).collect()
     }
 }
 
 /// What schemars writes for a struct, with nothing left as a `$ref`.
 fn schema_of<T: JsonSchema>() -> Value {
     let settings = SchemaSettings::draft2020_12().with(|s| s.inline_subschemas = true);
-    settings.into_generator().into_root_schema_for::<T>().to_value()
+    let generator = settings.into_generator();
+    generator.into_root_schema_for::<T>().to_value()
 }
 
 /// What serde says when `given` is not a `T`.
@@ -432,7 +431,8 @@ pub fn validate_args(command: &Command, args: &Value) -> Result<Checked, Command
         return Err(invalid(&name, why, fix));
     }
     let value_of = |name: &String| given.get(name).cloned().unwrap_or_default();
-    Ok(names.iter().map(|name| (name.clone(), value_of(name))).collect())
+    let all = names.iter().map(|name| (name.clone(), value_of(name)));
+    Ok(all.collect())
 }
 
 /// What to send instead of a value serde refused (`why`): the fields of a list
@@ -546,8 +546,9 @@ pub fn check_confirmation(command: &Command, args: &Checked) -> Result<(), Comma
         let kind = op.get("op")?.as_str()?.strip_prefix("delete_")?;
         Some(format!("delete {kind} (ops[{i}])"))
     };
-    let ops = args.get("ops").and_then(Value::as_array).into_iter().flatten();
-    let mut actions: Vec<String> = ops.enumerate().filter_map(deletes).collect();
+    let ops = args.get("ops").and_then(Value::as_array);
+    let ops = ops.into_iter().flatten().enumerate();
+    let mut actions: Vec<String> = ops.filter_map(deletes).collect();
     if flag(args, "overwrite") {
         actions.push("overwrite a file".to_owned());
     }
@@ -558,10 +559,9 @@ pub fn check_confirmation(command: &Command, args: &Checked) -> Result<(), Comma
         1 => String::new(),
         n => format!(" and {} more", n - 1),
     };
-    let cli = command.cli_name();
     Err(CommandError::new(
         ErrorCode::ConfirmationRequired,
-        format!("`{cli}` would {first}{more}; confirm is not true"),
+        format!("`{}` would {first}{more}; confirm is not true", command.cli_name()),
         "deleting sheets, rows or columns and overwriting files cannot be undone, so they need confirm: true. dry_run lists the changes without it.",
         "Call again with the same arguments and \"confirm\":true. On the command line, add --confirm.",
     ))
