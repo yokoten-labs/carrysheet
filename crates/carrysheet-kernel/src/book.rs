@@ -173,9 +173,9 @@ impl Book {
             .and_then(|e| e.to_str())
             .map(str::to_ascii_lowercase)
             .unwrap_or_default();
-        // GridCraft reads text named .xlsx as csv. An .xlsx that is not a
-        // zip package is damaged or not what it says, so refuse it.
-        if matches!(ext.as_str(), "xlsx" | "xlsm" | "xltx" | "xltm")
+        // GridCraft reads text named .xlsx as csv. An .xlsx or .xlsb that is
+        // not a zip package is damaged or not what it says, so refuse it.
+        if matches!(ext.as_str(), "xlsx" | "xlsm" | "xltx" | "xltm" | "xlsb")
             && sniffed == gridcraft_xlsx::Format::Csv
         {
             return Err(CommandError::new(
@@ -194,7 +194,7 @@ impl Book {
         };
         // Text goes through the csv front end, which keeps what was written.
         let (mut wb, warnings) = if kind == SourceKind::Csv {
-            (crate::csv::read(path, &name, &bytes)?, Vec::new())
+            crate::csv::read(path, &name, &bytes)?
         } else {
             gridcraft_engine::io::open_bytes(&name, &bytes).map_err(|e| open_error(path, &e))?
         };

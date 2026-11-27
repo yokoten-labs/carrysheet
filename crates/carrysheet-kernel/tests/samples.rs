@@ -341,7 +341,8 @@ fn read_csv(name: &str, bytes: &[u8]) -> Result<Vec<Vec<Value>>, CommandError> {
 fn csv_fields_become_numbers_only_when_nothing_changes() {
     let rows = read_csv(
         "values",
-        b"007,1E5,+1,12345678901234567890,SEPT1,2024-01-02,1.0,TRUE,inf\n3,4.5,-2,0.1,-0, 5\n",
+        b"007,1E5,+1,12345678901234567890,SEPT1,2024-01-02,TRUE,inf,-0,-0.00,+1.50,007.50,.50,1.50E2\n\
+          3,4.5,-2,0.1,1.0,12.50,-3.00,0.10,0.00, 5\n",
     )
     .unwrap();
     let text = [
@@ -351,22 +352,41 @@ fn csv_fields_become_numbers_only_when_nothing_changes() {
         "12345678901234567890",
         "SEPT1",
         "2024-01-02",
-        "1.0",
         "TRUE",
         "inf",
+        "-0",
+        "-0.00",
+        "+1.50",
+        "007.50",
+        ".50",
+        "1.50E2",
     ];
     assert_eq!(rows[0], text.map(|t| json!(t)));
-    assert_eq!(
-        rows[1][..6],
-        [
-            json!(3.0),
-            json!(4.5),
-            json!(-2.0),
-            json!(0.1),
-            json!(-0.0),
-            json!(" 5")
-        ]
-    );
+    let numbers = [3.0, 4.5, -2.0, 0.1, 1.0, 12.5, -3.0, 0.1, 0.0];
+    assert_eq!(rows[1][..9], numbers.map(|n| json!(n)));
+    assert_eq!(rows[1][9], json!(" 5"));
+}
+
+#[test]
+fn csv_decimals_with_trailing_zeros_sum_and_save_as_written() {
+    let dir = scratch("csv-money");
+    let text = "amount,cost\r\n12.50,-3.00\r\n0.10,1.0\r\n";
+    let src = dir.join("money.csv");
+    std::fs::write(&src, text).unwrap();
+    let sum = call("eval", json!({ "path": p(&src), "formula": "=SUM(A2:B3)" })).unwrap();
+    let total = sum["value"].as_f64().unwrap();
+    assert!((total - 10.6).abs() < 1e-9, "{sum:?}");
+    // csv to csv and csv to xlsx to csv, with the default (escaping) export.
+    let plain = dir.join("plain.csv");
+    call("convert", json!({ "path": p(&src), "output": p(&plain) })).unwrap();
+    assert_eq!(std::fs::read_to_string(&plain).unwrap(), text);
+    let book = dir.join("money.xlsx");
+    call("convert", json!({ "path": p(&src), "output": p(&book) })).unwrap();
+    let back = dir.join("back.csv");
+    let args = json!({ "path": p(&book), "output": p(&back), "confirm_loss": true });
+    call("convert", args).unwrap();
+    assert_eq!(std::fs::read_to_string(&back).unwrap(), text);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -375,6 +395,9 @@ fn csv_legacy_and_unicode_encodings_are_decoded() {
         ("legacy/gbk.csv", "张伟", "这个问题已经解决了"),
         ("legacy/big5.csv", "陳大文", "我們的產品價格是多少"),
         ("legacy/shift_jis.csv", "山田太郎", "ありがとうございます"),
+        ("legacy/euc-kr.csv", "김철수", "감사합니다"),
+        ("legacy/gb18030.csv", "张伟", "\u{20000}"),
+        ("legacy/windows-1252.csv", "René", "naïve façade"),
         ("unicode/utf16be-bom.csv", "Ada", "Zürich"),
         ("unicode/utf16le-bom-tab.txt", "Ada", "Zürich"),
         ("unicode/utf8-bom-semicolon.csv", "Ada", "Zürich"),
@@ -386,12 +409,42 @@ fn csv_legacy_and_unicode_encodings_are_decoded() {
         assert!(rows.iter().flatten().any(|v| v == last), "{file}: {rows:?}");
         let fields: Vec<_> = rows.iter().flatten().filter_map(|v| v.as_str()).collect();
         assert!(fields.iter().all(|f| !f.contains('\u{FFFD}')), "{file}");
+        // A guessed encoding is named in the overview's warnings.
+        let dir = scratch("csv-warning");
+        let path = dir.join("guess.csv");
+        std::fs::write(&path, &bytes).unwrap();
+        let overview = call("overview", json!({ "path": p(&path) })).unwrap();
+        let warnings = overview.get("warnings").map(Value::to_string);
+        let warnings = warnings.unwrap_or_default();
+        assert_eq!(
+            warnings.contains("by a guess"),
+            file.starts_with("legacy/"),
+            "{file}: {warnings}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
 #[test]
+fn csv_legacy_bytes_after_a_long_ascii_start_are_guessed() {
+    let mut bytes = "a,1\n".repeat(300_000).into_bytes();
+    bytes.extend(encoding_rs::GBK.encode("姓名,城市\n").0.as_ref());
+    let dir = scratch("csv-late");
+    let path = dir.join("late.csv");
+    std::fs::write(&path, &bytes).unwrap();
+    let args = json!({ "path": p(&path), "range": "A300001:B300001" });
+    let page = call("read", args).unwrap();
+    assert_eq!(
+        page["rows"][0]["cells"],
+        json!(["姓名", "城市"]),
+        "{page:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn csv_short_legacy_files_report_what_chardetng_guesses() {
-    use encoding_rs::{BIG5, GBK, SHIFT_JIS};
+    use encoding_rs::{BIG5, GBK, SHIFT_JIS, WINDOWS_1252};
     // Detection is weak on a few bytes. This pins what chardetng 0.1.17
     // gives: `false` marks a wrong guess, read as text in another encoding
     // (one GBK character, one or two Shift_JIS kanji, two katakana).
@@ -409,7 +462,12 @@ fn csv_short_legacy_files_report_what_chardetng_guesses() {
         (SHIFT_JIS, "山田", false),
         (SHIFT_JIS, "名前,都市", true),
         (SHIFT_JIS, "メモ", false),
+        (WINDOWS_1252, "café", true),
+        (WINDOWS_1252, "señor,año", true),
+        (WINDOWS_1252, "São Paulo", true),
+        (WINDOWS_1252, "René,Zoë", true),
     ];
+    let mut wrong = Vec::new();
     for (encoding, text, is_right) in cases {
         let (bytes, _, _) = encoding.encode(text);
         let mut detector = chardetng::EncodingDetector::new();
@@ -424,10 +482,13 @@ fn csv_short_legacy_files_report_what_chardetng_guesses() {
             "short {}: {text:?} -> guess {guess}, A1 {first}",
             encoding.name()
         );
-        assert_eq!(guess == encoding.name(), is_right, "{text}: {guess}");
         let field = text.split(',').next().unwrap();
-        assert_eq!(first == format!("{field:?}"), is_right, "{text}: {first}");
+        let read_right = first == format!("{field:?}");
+        if (guess == encoding.name()) != is_right || read_right != is_right {
+            wrong.push(format!("{text}: guess {guess}, A1 {first}"));
+        }
     }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 #[test]
@@ -454,7 +515,7 @@ fn csv_bytes_that_fit_no_encoding_are_an_error() {
 #[test]
 fn csv_to_xlsx_to_csv_keeps_every_field() {
     let dir = scratch("csv-trip");
-    let text = "id,code,amount,gene,note\r\n1,007,1E5,SEPT1,\"a, b\"\r\n2,+1,-2.5,MARCH1,12345678901234567890\r\n3,0.1,2024-01-02,TRUE,\"line one\nline two\"\r\n";
+    let text = "id,code,amount,gene,note\r\n1,007,1E5,SEPT1,\"a, b\"\r\n2,+1,-2.5,MARCH1,12345678901234567890\r\n4,12.50,-3.00,0.10,1.0\r\n3,0.1,2024-01-02,TRUE,\"line one\nline two\"\r\n";
     let src = dir.join("trip.csv");
     std::fs::write(&src, text).unwrap();
     let book = dir.join("trip.xlsx");
