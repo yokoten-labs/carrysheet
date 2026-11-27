@@ -5,7 +5,7 @@ WebAssembly (target `wasm32-unknown-unknown`).
 
 ## What builds
 
-Every library in `crates/` builds: carrysheet and carrysheet-zip.
+Every library in `crates/` builds: today that is carrysheet.
 carrysheet-cli does not, and does not need to: it is a terminal program with an MCP server.
 
     rustup target add wasm32-unknown-unknown   # once
@@ -24,7 +24,8 @@ of random numbers there. The libraries need no uuid.
 - **A panic stops the module.** On this target a panic aborts, so the
   kernel's `catch_unwind` around GridCraft does not help there. Run parsing
   in a Web Worker and treat a dead worker as a bug to report.
-- **No files.** `std::fs` calls return an error, so `Root::new` in
-  `carrysheet::commands` fails. Pass bytes in and get bytes out
-  (`Kernel::open_bytes`).
+- **No files.** `std::fs` calls return an error. The libraries do not use
+  them: `carrysheet::run` takes the file's bytes and gives back an `Answer`
+  with the bytes to save. File access is in the program
+  (`apps/carrysheet-cli/src/files.rs`).
 - **One thread.** Nothing in the libraries starts a thread.

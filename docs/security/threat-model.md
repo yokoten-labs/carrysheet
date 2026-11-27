@@ -65,7 +65,7 @@ sizes and counts; archive entry names with `..`, absolute paths or control
 characters; XML with a DOCTYPE and entities.
 
 **Now:**
-- Hostile-input tests under `tests/`: carrysheet and carrysheet-zip.
+- Hostile-input tests under `crates/carrysheet/tests/`.
 - Every call into GridCraft runs behind `catch_unwind`; record 0003 counts a
   caught panic as a failure, not a pass.
 - Zip archives: GridCraft's patched reader and the save check
@@ -73,14 +73,16 @@ characters; XML with a DOCTYPE and entities.
   Both cap the packed bytes a part may read for what it unpacks, so runs of
   empty deflate blocks are refused within the time limit (issue 80). The
   save check also caps one run without output at 16 KiB. carrysheet-zip,
-  the hardened opener, no longer has a user in the product.
+  the hardened opener that no code used any more, left in record 0010
+  step 5.
 - The VBA reader (carrysheet-vba, carrysheet-cfb) left with the `macros`
   command (record 0010): no code of ours parses VBA or compound files now.
 
 **Open:**
 - Issue 40 asked for carrysheet-zip in every reader ([issue 40][i40]).
-  Record 0010 keeps one zip reader, GridCraft's `zip` crate, so the crate
-  and its CI job can leave; that needs a lead change to CI.
+  Record 0010 keeps one zip reader, the `zip` crate, so carrysheet-zip
+  left instead; the zip limits now live in GridCraft's patch and the save
+  check.
 - On wasm32 a panic aborts (`docs/web-build.md`). The readers return errors
   instead of panicking, but a Web Worker should still run the parsing.
 - One shared work budget with a deadline ([issue 56][i56]).

@@ -84,13 +84,6 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace
-      # The shipped CLI links miniz_oxide; the workspace run unifies to
-      # zlib-rs. Test the zip reader on each.
-      - name: zip-inflaters
-        if: runner.os == 'Linux'
-        run: |
-          cargo test --locked -p carrysheet-zip --features test-miniz
-          cargo test --locked -p carrysheet-zip --features test-zlib-rs
 
   deny:
     name: cargo deny
