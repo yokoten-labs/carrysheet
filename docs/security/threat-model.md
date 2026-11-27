@@ -3,12 +3,14 @@
 Who could harm a Carrysheet user, through what, and what we do about it. To
 report a problem, see [SECURITY.md](../../SECURITY.md).
 
-**Where things stand (2026-11-27).** Workbook files are read by the vendored
-GridCraft kernel, through `carrysheet::Kernel`; the save check lists package
-parts with the same `zip` crate GridCraft uses. `carrysheet-cli` runs its MCP server over stdio
-only and holds no network code (record 0010). Every command in the table is
-built. Some defences below are not built yet; they are marked **planned**.
-This page must change when they land.
+**Where things stand (2026-11-28).** Two crates of ours, `carrysheet` and
+`carrysheet-cli`, on the vendored GridCraft kernel (record 0010). GridCraft
+is the only code that reads file formats, through `carrysheet::Kernel`; the
+save check lists package parts with the same `zip` crate GridCraft uses. No
+reader of our own is left. The binary holds no network code and has no HTTP
+mode: `carrysheet-cli mcp serve` speaks stdio only. Some defences below are
+not built yet; they are marked **planned** or **open**. This page must change
+when they land.
 
 ## What we protect
 
@@ -28,18 +30,19 @@ These apply to every crate and every command.
    a declared size alone, and return an error that says what is wrong
    (`AGENTS.md`).
 2. **No unsafe code.** `unsafe_code = "forbid"` is a workspace lint.
-3. **Limits on size, count, time and output.** Each reader has a `Limits`
-   type today; one shared work budget with a deadline is planned
-   ([issue 56][i56]). Answers are paged (by default 200 rows, 50 columns,
+3. **Limits on size, count, time and output.** GridCraft's `Limits`, set
+   to `carrysheet::LIMITS`, bound what a file may unpack and hold, and one
+   command may take 10 seconds by default. Answers are paged (by default 200 rows, 50 columns,
    10,000 cells per page).
 4. **Errors in three parts** (what happened, why, how to fix it) that do not
    echo cell contents. Names from a file (sheets, modules, parts) may appear
    in an error, escaped and cut to about 200 characters.
 5. **Secrets are allow-list output.** We show the fields we know to be safe
    and hide the rest, rather than trying to mask what looks secret
-   ([issue 26][i26], record 0006).
-6. **No network.** MCP runs over stdio only; `deny.toml` bans HTTP and TLS
-   crates. `--read-only` removes every tool that changes files.
+   ([issue 26][i26], record 0006). Today no connection or query text is
+   shown at all.
+6. **No network.** The binary holds no network code. MCP runs over stdio
+   only, with no HTTP mode; `deny.toml` bans HTTP and TLS crates. `--read-only` removes every tool that changes files.
 7. **Never run code from a file.** Macros are kept and reported by
    `overview`, never run. Refreshing external data is not done
    ([issue 27][i27]).
@@ -81,17 +84,12 @@ characters; XML with a DOCTYPE and entities.
   command (record 0010): no code of ours parses VBA or compound files now.
 
 **Open:**
-- Issue 40 asked for carrysheet-zip in every reader ([issue 40][i40]).
-  Record 0010 keeps one zip reader, the `zip` crate, so carrysheet-zip
-  left instead; the zip limits now live in GridCraft's patch and the save
-  check.
 - On wasm32 a panic aborts (`docs/web-build.md`). The readers return errors
   instead of panicking, but a Web Worker should still run the parsing.
-- One shared work budget with a deadline ([issue 56][i56]).
 - Continuous fuzzing of every reader ([issue 8][i8]).
 - Overflow checks in release builds ([issue 59][i59]).
-- `.xlsx` reading and writing through the vendored GridCraft kernel
-  ([issue 45][i45]); it must meet the same rules.
+- GridCraft's xls, xlsb and ods readers, which we have not reviewed
+  ([issue 71][i71]). They are the only readers of those formats now.
 - Spreadsheets inside `.zip`, `.gz` and `.tar`: read in memory, never
   extracted, names treated as data ([issue 49][i49], planned).
 
@@ -165,7 +163,6 @@ folder, very large arguments, or a flood of calls.
   allowed or throttled by client name.
 
 **Open:**
-- A per-call deadline from the shared budget ([issue 56][i56]).
 - Limits and cleanup for long-running servers, snapshots, temp files and
   logs ([issue 50][i50]).
 - Folder paths on every system ([issue 51][i51]).
@@ -191,8 +188,8 @@ carries a bug; a release binary leaks the build machine's paths.
   unsound crates fail anywhere in the graph, no wildcard versions. Each
   ignored advisory has a reason. HTTP and TLS crates are banned; GridCraft
   is fenced to the carrysheet crate, rmcp and tokio to carrysheet-cli.
-  cargo-deny fences whole crates, so inside carrysheet the commands and
-  model modules are not fenced from GridCraft.
+  cargo-deny fences whole crates, so every module of carrysheet may call
+  GridCraft; record 0010 intends that.
 - A crate version must be at least 7 days old before we take it
   (`docs/dependencies.md`). Some dependencies are pinned exactly, such as
   `rmcp` and `zip`.
@@ -203,9 +200,11 @@ carries a bug; a release binary leaks the build machine's paths.
 - The clean-room rule keeps GPL, LGPL, AGPL and MPL code out
   (`AGENTS.md`, [issue 13][i13]).
 
+- GridCraft is pinned to one upstream commit and copied into
+  `vendor/gridcraft/` with its license (record 0003); the `vendor` CI job
+  checks that the folder is upstream plus our patch files.
+
 **Open:**
-- GridCraft, pinned to one commit and copied into this repository with its
-  license (record 0003, [issue 45][i45]). We review and carry it ourselves.
 - Reproducible builds and audits such as `cargo vet` ([issue 10][i10]).
 - Signed release builds ([issue 11][i11], [issue 52][i52]).
 - Fuzzing in CI. CI already runs clippy, tests and
@@ -225,7 +224,7 @@ ones too), found by the standard part names and by the content types in
 `[Content_Types].xml`. Excel finds a VBA project by relationship and
 content type, so a hostile file can store it under any part name; the
 content types still give it away. The search is a plain byte search, so
-for .xls and .ods files, a zip the hardened reader will not list, and a
+for .xls and .ods files, a zip whose directory cannot be read, and a
 `[Content_Types].xml` it cannot read or that hides names from such a
 search (XML character references, UTF-16), it says macros were not
 checked. The relationship types are not searched. Silence means neither the part names nor
@@ -291,14 +290,12 @@ Please do not open a public issue. Follow [SECURITY.md](../../SECURITY.md).
 [i25]: https://github.com/yokoten-labs/carrysheet/issues/25
 [i26]: https://github.com/yokoten-labs/carrysheet/issues/26
 [i27]: https://github.com/yokoten-labs/carrysheet/issues/27
-[i40]: https://github.com/yokoten-labs/carrysheet/issues/40
 [i43]: https://github.com/yokoten-labs/carrysheet/issues/43
-[i45]: https://github.com/yokoten-labs/carrysheet/issues/45
 [i49]: https://github.com/yokoten-labs/carrysheet/issues/49
 [i50]: https://github.com/yokoten-labs/carrysheet/issues/50
 [i51]: https://github.com/yokoten-labs/carrysheet/issues/51
 [i52]: https://github.com/yokoten-labs/carrysheet/issues/52
-[i56]: https://github.com/yokoten-labs/carrysheet/issues/56
 [i59]: https://github.com/yokoten-labs/carrysheet/issues/59
 [i64]: https://github.com/yokoten-labs/carrysheet/issues/64
 [i67]: https://github.com/yokoten-labs/carrysheet/issues/67
+[i71]: https://github.com/yokoten-labs/carrysheet/issues/71

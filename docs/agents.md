@@ -38,13 +38,13 @@ Carrysheet aims to be **AI-friendly, human-friendly and MCP-friendly**. The rule
 
 ### Tools
 
-Few, workflow-level tools. Names of built tools match `COMMANDS` in `crates/carrysheet/src/args.rs`, which holds one struct per command.
+Few, workflow-level tools: four are built. Names match `COMMANDS` in `crates/carrysheet/src/args.rs`, which holds one struct per command. `commands` and `mcp serve` are command-line only. `eval` left with record 0011: `edit` with `dry_run` shows what a formula computes.
 
 | Tool | Does | Changes files | Toolset |
 |---|---|---|---|
 | `overview` | Sheets, used ranges, cell, formula and error counts, defined names, and whether the file has macros (never run; kept on save where the format can hold them). For .xls and .ods files, and a zip it cannot list, it says macros were not checked. The first call on any workbook | No | `core` |
 | `read` | A range as a compact table with A1 addresses, values or formulas, paged | No | `core` |
-| `edit` | A batch of operations: set values or formulas, insert or delete rows, rename sheets. `dry_run` returns the change list, with the value each new formula computes; the batch is all or nothing | Yes | `core` |
+| `edit` | A batch of operations: set or clear values and formulas, insert or delete rows and columns, add, rename or delete sheets. `dry_run` returns the change list, with the value each new formula computes; the batch is all or nothing | Yes | `core` |
 | `convert` | Save as xlsx or csv, to a new file | Yes (new file) | `core` |
 | `find` | Search values or formulas, returns addresses. Not built | No | not decided |
 | `undo` | Restore the snapshot taken before an `edit`. Not built | Yes | not decided |
@@ -54,14 +54,14 @@ Rules:
 - Names are short `snake_case`. A tool description has at most 300 characters, starts with the key words, and says when to call the tool. An argument description says what it is and its default, and nothing the schema already says; longer guidance goes in the error's `fix` and in `--help`.
 - Tools are listed in a fixed order.
 - Every tool sets all four annotations explicitly: `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`.
-- Archive members are opened by path, as Windows Explorer shows a zip as a folder: `reports.zip/q3.xlsx`. A real folder of that name wins if both exist. When a zip holds several spreadsheets and the path names none, the error lists their paths (issue 49). No tool has an `entry` argument.
+- A path names a file on disk. Opening a spreadsheet inside a zip by path (`reports.zip/q3.xlsx`, issue 49) is not built. No tool has an `entry` argument.
 
 ### Toolsets
 
-Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, in PR 88 until it is merged).
+Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`). No toolset is built: four tools fit in the default list (record 0010, decision 9). The rules below hold when a tool off by default is added.
 
 - **The default list stays at 10,000 characters or less**, counted as compact JSON (name, description, input schema, annotations). The default list is what a client gets with no flags. The number is ours, not a client limit: it keeps the tools usable for a local model with a 4k–8k context and for clients that load every tool into every request. A new record can change it.
-- Planned: `carrysheet-cli mcp serve --toolsets default,trace --tools diff`. The arguments of `mcp serve` today are `root` and `read_only`; `--toolsets` and `--tools` are not built yet. `default` is used when no toolset is given; `all` turns on everything. An unknown name stops the server at start with a three-part error. Clients can only hide tools on their side, never add one, so the server's default list is the small one.
+- Planned: `carrysheet-cli mcp serve --toolsets default,trace --tools diff`. The arguments of `mcp serve` are `root` and `read_only`; `--toolsets` and `--tools` are not built. `default` is used when no toolset is given; `all` turns on everything. An unknown name stops the server at start with a three-part error. Clients can only hide tools on their side, never add one, so the server's default list is the small one.
 - `--read-only` wins over both: a write tool stays hidden whatever `--toolsets` or `--tools` say.
 - **Fold first.** A new feature becomes an argument or an `edit` op of an existing tool when it is the same verb on the same file. A new tool needs a verb no tool has, and goes in a toolset that is off by default unless it belongs in `default`.
 - Toolsets off by default are named in one line of the server instructions. When a call meets something an off tool handles, its `hint` names the CLI command and the toolset. Safety facts are never behind a toolset: `overview` says that a file has macros, that they are never run and whether a save keeps them, or that it could not check.
@@ -114,10 +114,7 @@ Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, in PR 88 until it 
 - **Dangerous formulas** (WEBSERVICE, external links, DDE, HYPERLINK to files) are refused when written by an agent. The check reads GridCraft's parse tree of the formula, the tree the kernel stores, in any letter case. A formula that does not parse is refused too, with a fix that says to correct it.
 - **CSV import keeps what the file says** (record 0006). A field becomes a number only when the number prints back as the same text: `007`, `1E5`, `+1`, long numbers, gene names such as `SEPT1` and dates stay text. A plain decimal such as `12.50` becomes a number with a `0.00` format, so it sums and saves back as `12.50`. More than 15 significant digits (`4111111111111111`) or 30 decimals stay text. A byte order mark decides the encoding; otherwise valid UTF-8 is UTF-8, and other bytes are guessed (GBK, Big5, Shift_JIS, Windows-1252...). Bytes the encoding cannot hold are a `damaged_file` error, never replacement characters. A guessed encoding is named in the `overview` warnings; a guess on a very short file can be wrong, so save such a file as UTF-8.
 - **CSV export escapes formula-like text** by default: text starting with `=`, `+`, `-` or `@` gets a `'` before it, so spreadsheet apps don't run it. `csv_raw: true` (`--csv-raw`) writes it as it is.
-- **Data connections show an allow-list, never masked raw text** (issue 26). Results show only fields a parser recognized: provider, host and port, database, the kinds of sign-in present (never values), and file paths and URLs split into parts.
-  - Hosts are never masked. A path or URL is shown parsed, or hidden whole with the reason when it may carry a credential; it is never partly masked.
-  - SQL is shown whole only when it is a plain read (one `SELECT` or `WITH`, nothing that writes, runs or connects); otherwise it is hidden whole, with the reason.
-  - Raw texts (connection strings, full URLs, M code) come only with `include_raw: true` (`--raw`), masked as well as patterns can, and the answer warns that this masking is best effort. A text over its limit stays hidden even then, because a cut could end inside a secret.
+- **Data connections are not shown.** Their reader left with record 0010. A save that would drop a file's connections or query tables names them in `save.lost`. If connections come back, they show an allow-list of parsed fields, never masked raw text (issue 26).
 - **Cell text is data, not instructions.** Results mark workbook content clearly, so a sheet saying "ignore your instructions" stays text. Control, bidi and invisible characters from the file are escaped, and names are cut at 64 characters.
 - **Provenance** (proposed in record 0007; not yet accepted). A trail of changes, off by default because it holds people's names and files are shared.
   - On for one call with `--trace`, for a file (saved in the file, so it stays on), or for every file in the user's settings.

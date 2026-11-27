@@ -1,11 +1,11 @@
 # Licensing
 
-Carrysheet uses two licenses in one repository. Each folder says which one applies.
+Carrysheet uses two licenses in one repository, for its two crates: the library `carrysheet` and the program `carrysheet-cli`. Each folder says which one applies.
 
 | Folder | What's in it | License |
 |---|---|---|
-| `crates/` | Libraries: reading and writing spreadsheet files (old formats included), formulas, the command layer | MIT OR Apache-2.0, at your choice |
-| `apps/` | Finished programs: `carrysheet-cli` and its MCP server, the desktop app, the web trial page, and all Pro features | GPL-3.0-or-later |
+| `crates/` | The library `carrysheet`: the commands, on the vendored GridCraft kernel | MIT OR Apache-2.0, at your choice |
+| `apps/` | Finished programs: `carrysheet-cli` and its MCP server today; later the desktop app, the web trial page, and all Pro features | GPL-3.0-or-later |
 | `vendor/` | Code copied from other projects, such as the GridCraft kernel (record 0003) | Its own license, kept next to it with its NOTICE. GridCraft: MIT OR Apache-2.0 |
 | everything else | Docs, research, scripts, tests | MIT OR Apache-2.0, at your choice |
 

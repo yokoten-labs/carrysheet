@@ -1,5 +1,16 @@
 # Dependencies and release builds
 
+## What we build on
+
+Two crates of ours (record 0010, decision 6, says why each part is borrowed):
+
+| Crate | Depends on |
+|---|---|
+| `carrysheet` (MIT OR Apache-2.0) | the vendored GridCraft (`vendor/gridcraft/`), the only reader of file formats; `serde`, `serde_json`; `schemars` for each command's schema; `clap` derive, behind the `cli` feature; `zip`, pinned to GridCraft's version, for the save-loss report; `encoding_rs` and `chardetng` for csv encodings |
+| `carrysheet-cli` (GPL-3.0-or-later) | `carrysheet`, `clap`, `serde`, `serde_json`; `rmcp` with only its stdio transport; `tokio` |
+
+No network crate: `deny.toml` bans HTTP and TLS crates, and `rmcp` builds without its HTTP transports. `cap-std` is not used; `apps/carrysheet-cli/src/files.rs` walks paths below `--root` itself.
+
 ## Taking in a crate version: wait 7 days
 
 Don't take a crate version that is less than 7 days old, new or as an
