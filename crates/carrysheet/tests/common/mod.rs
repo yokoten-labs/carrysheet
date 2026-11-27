@@ -334,19 +334,19 @@ pub fn part_text(path: &Path, name: &str) -> String {
     String::from_utf8(part_bytes(path, name)).unwrap()
 }
 
-/// The bytes of a part of a package, read with the hardened zip reader.
+/// The bytes of a part of a package.
 pub fn part_bytes(path: &Path, name: &str) -> Vec<u8> {
-    let file = std::fs::File::open(path).unwrap();
-    let mut zip = carrysheet_zip::Archive::open(file, carrysheet_zip::Limits::default()).unwrap();
-    let index = zip.find(name).unwrap();
-    zip.read(index, u64::MAX).unwrap()
+    use std::io::Read as _;
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
+    let mut bytes = Vec::new();
+    zip.by_name(name).unwrap().read_to_end(&mut bytes).unwrap();
+    bytes
 }
 
 /// The part names of a package, as stored.
 pub fn part_names(path: &Path) -> Vec<String> {
-    let file = std::fs::File::open(path).unwrap();
-    let zip = carrysheet_zip::Archive::open(file, carrysheet_zip::Limits::default()).unwrap();
-    zip.entries().iter().map(|e| e.name.clone()).collect()
+    let zip = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
+    zip.file_names().map(|n| n.unwrap().into_owned()).collect()
 }
 
 pub fn lost(done: &Map<String, Value>) -> Vec<String> {

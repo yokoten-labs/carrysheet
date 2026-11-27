@@ -13,9 +13,9 @@ gridcraft-engine = { path = "../../vendor/gridcraft/crates/engine", version = "0
 gridcraft-xlsx = { path = "../../vendor/gridcraft/crates/xlsx", version = "0.8.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-# Lists and unpacks package parts for the save report: the hardened zip
-# reader (issue 40).
-carrysheet-zip = { path = "../carrysheet-zip", version = "0.1.0" }
+# Lists and unpacks package parts for the save-loss report: the version
+# GridCraft pins, so both list a package's parts the same way.
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2"] }
 # The csv front end: decodes legacy encodings (record 0010, decision 3);
 # the versions the old csv reader used.
 encoding_rs = "=0.8.42"

@@ -136,7 +136,6 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 name = "carrysheet"
 version = "0.1.0"
 dependencies = [
- "carrysheet-zip",
  "chardetng",
  "encoding_rs",
  "flate2",
@@ -144,6 +143,7 @@ dependencies = [
  "gridcraft-xlsx",
  "serde",
  "serde_json",
+ "zip",
 ]
 
 [[package]]

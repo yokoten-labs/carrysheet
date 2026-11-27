@@ -21,10 +21,6 @@ pub mod range;
 pub mod save;
 pub mod view;
 
-mod kernel {
-    pub(crate) mod package;
-}
-
 #[cfg(test)]
 mod tests;
 

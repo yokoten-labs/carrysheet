@@ -12,7 +12,7 @@ use serde_json::{Map, Value, json};
 use crate::args::{flag, input, shown, text};
 use crate::commands::Command;
 use crate::error::{CommandError, ErrorCode};
-use crate::kernel::package;
+pub(crate) mod loss;
 use crate::open::{Book, SourceKind};
 use crate::{Answer, Kernel, internal};
 
@@ -345,7 +345,7 @@ fn encode_xlsx(book: &Book, path: &Path, name: &str) -> Result<Encoded, CommandE
     }
     let mut report = SaveReport::new(FileFormat::Xlsx);
     match book.kind {
-        SourceKind::Package => package::compare(&book.source, &bytes, &mut report),
+        SourceKind::Package => loss::compare(&book.source, &bytes, &mut report),
         SourceKind::Csv => {}
         SourceKind::Imported(format) => report.lost.push(Loss {
             feature: format!("anything the .{format} import skips (Carrysheet cannot list it yet)"),
@@ -487,7 +487,7 @@ fn encode_csv(
         });
     }
     match book.kind {
-        SourceKind::Package => match package::source_features(&book.source) {
+        SourceKind::Package => match loss::source_features(&book.source) {
             Ok(features) => {
                 for (feature, n) in features {
                     report.lost.push(Loss {
@@ -497,7 +497,7 @@ fn encode_csv(
                     });
                 }
             }
-            Err(why) => report.lost.push(package::unchecked_loss(&why)),
+            Err(why) => report.lost.push(loss::unchecked_loss(&why)),
         },
         SourceKind::Csv => {}
         SourceKind::Imported(format) => report.lost.push(Loss {

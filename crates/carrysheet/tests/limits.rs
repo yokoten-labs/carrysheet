@@ -306,6 +306,65 @@ fn the_save_check_does_not_unpack_empty_blocks_either() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Raw deflate of `text` in stored blocks, with `filler` bytes of empty
+/// stored blocks (5 bytes each, no output) after the first `split` bytes.
+fn with_empty_run(text: &[u8], split: usize, filler: usize) -> Vec<u8> {
+    fn stored(out: &mut Vec<u8>, data: &[u8], last: bool) {
+        let chunks: Vec<&[u8]> = data.chunks(65_535).collect();
+        for (i, chunk) in chunks.iter().enumerate() {
+            out.push(u8::from(last && i + 1 == chunks.len()));
+            let n = chunk.len() as u16;
+            out.extend(n.to_le_bytes());
+            out.extend((!n).to_le_bytes());
+            out.extend(*chunk);
+        }
+    }
+    let mut out = Vec::new();
+    stored(&mut out, &text[..split], false);
+    for _ in 0..filler / 5 {
+        out.extend(b"\x00\x00\x00\xff\xff");
+    }
+    stored(&mut out, &text[split..], true);
+    out
+}
+
+#[test]
+fn the_save_check_refuses_a_long_run_without_output_and_names_why() {
+    // Issue 80 (PR 106): a sheet part no relationship names gives 192 KiB
+    // of output, then 40 KiB of empty blocks, then the rest. In all it
+    // reads less than a quarter more than it gives, so only the cap on a
+    // run without output refuses it. The report says so, not "too large".
+    let mut sheet = sheet_xml("", "", "<!--").into_bytes();
+    sheet.resize(256 << 10, b'x');
+    sheet.extend(b"--></worksheet>");
+    let run = |filler: usize| {
+        let mut book = Book::new(r#"<row r="1"><c r="A1"><v>1</v></c></row>"#);
+        book.extra = vec![Entry {
+            name: "xl/worksheets/sheet9.xml".into(),
+            deflated: Some(with_empty_run(&sheet, 192 << 10, filler)),
+            data: sheet.clone(),
+        }];
+        let dir = scratch(&format!("idle-run-{filler}"));
+        let path = dir.join("idle.xlsx");
+        std::fs::write(&path, book.bytes()).unwrap();
+        let out = dir.join("out.xlsx");
+        let started = Instant::now();
+        let args = json!({ "path": p(&path), "output": p(&out), "dry_run": true });
+        let done = call("convert", args).unwrap();
+        assert!(started.elapsed() < QUICK, "{:?}", started.elapsed());
+        let _ = std::fs::remove_dir_all(&dir);
+        lost(&done)
+    };
+    let lost = run(40 << 10);
+    let checks: Vec<&String> = lost.iter().filter(|l| l.contains("not checked")).collect();
+    assert_eq!(checks.len(), 1, "{lost:?}");
+    assert!(checks[0].contains("unpacks far more slowly"), "{lost:?}");
+    assert!(!checks[0].contains("too large"), "{lost:?}");
+    // The same part without the run is searched.
+    let lost = run(0);
+    assert!(lost.iter().all(|l| !l.contains("not checked")), "{lost:?}");
+}
+
 #[test]
 fn lambda_loops_and_built_arrays_count_work() {
     // Round 2, N2: REDUCE over a million items, each building an array,

@@ -4,7 +4,7 @@ mod commands_table;
 mod edit;
 mod error;
 mod kernel;
-mod kernel_package;
 mod range;
 mod save;
+mod save_loss;
 mod view;

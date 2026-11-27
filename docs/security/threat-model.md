@@ -5,7 +5,7 @@ report a problem, see [SECURITY.md](../../SECURITY.md).
 
 **Where things stand (2026-11-27).** Workbook files are read by the vendored
 GridCraft kernel, through `carrysheet::Kernel`; the save check lists package
-parts through carrysheet-zip. `carrysheet-cli` runs its MCP server over stdio
+parts with the same `zip` crate GridCraft uses. `carrysheet-cli` runs its MCP server over stdio
 only and holds no network code (record 0010). Every command in the table is
 built. Some defences below are not built yet; they are marked **planned**.
 This page must change when they land.
@@ -68,17 +68,19 @@ characters; XML with a DOCTYPE and entities.
 - Hostile-input tests under `tests/`: carrysheet and carrysheet-zip.
 - Every call into GridCraft runs behind `catch_unwind`; record 0003 counts a
   caught panic as a failure, not a pass.
-- Zip archives: carrysheet-zip is a hardened opener (one end-record scan,
-  size and entry limits checked against bytes really read, only Stored and
-  Deflate, `..` clamped at the root). The kernel's save check uses it.
+- Zip archives: GridCraft's patched reader and the save check
+  (`crates/carrysheet/src/save/loss.rs`) both read with the `zip` crate.
+  Both cap the packed bytes a part may read for what it unpacks, so runs of
+  empty deflate blocks are refused within the time limit (issue 80). The
+  save check also caps one run without output at 16 KiB. carrysheet-zip,
+  the hardened opener, no longer has a user in the product.
 - The VBA reader (carrysheet-vba, carrysheet-cfb) left with the `macros`
   command (record 0010): no code of ours parses VBA or compound files now.
 
 **Open:**
-- Use carrysheet-zip for every reader ([issue 40][i40], partly done).
-  The save check (`crates/carrysheet/src/kernel/package.rs`) lists and
-  unpacks package parts through carrysheet-zip, but the vendored GridCraft
-  `.xlsx` and engine crates still use the `zip` crate.
+- Issue 40 asked for carrysheet-zip in every reader ([issue 40][i40]).
+  Record 0010 keeps one zip reader, GridCraft's `zip` crate, so the crate
+  and its CI job can leave; that needs a lead change to CI.
 - On wasm32 a panic aborts (`docs/web-build.md`). The readers return errors
   instead of panicking, but a Web Worker should still run the parsing.
 - One shared work budget with a deadline ([issue 56][i56]).
