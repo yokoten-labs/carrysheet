@@ -115,7 +115,7 @@ pub fn render(data: &Map<String, Value>) -> String {
 }
 
 /// Prints an error: JSON on stdout with `--json`, and always text on stderr.
-/// Both forms show the home folder as `~` .
+/// Both forms show the home folder as `~`.
 pub fn print_error(err: &CommandError, json: bool) {
     if json {
         stdout_line(&err.to_envelope().to_string());
@@ -187,6 +187,11 @@ pub fn handle_clap_error(err: &clap::Error, json: bool) -> u8 {
                 let _ = err.print();
             }
             0
+        }
+        ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand if !json => {
+            // No command given: clap's own help on stderr is the clearest answer.
+            let _ = err.print();
+            2
         }
         _ => {
             let usage = usage_error(err);

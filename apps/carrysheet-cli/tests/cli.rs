@@ -113,7 +113,9 @@ fn no_arguments_is_a_usage_error() {
     let o = run(&[]);
     assert_eq!(code(&o), 2);
     assert!(stdout(&o).is_empty());
-    assert!(stderr(&o).contains("Usage:"));
+    let err = stderr(&o);
+    assert!(err.contains("Usage:") && err.contains("Commands:"), "{err}");
+    assert!(!err.contains("error:"), "{err}");
     no_escape_codes(&o);
 }
 
