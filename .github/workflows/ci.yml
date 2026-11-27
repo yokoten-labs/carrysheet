@@ -1,7 +1,7 @@
 # CI for every pull request and every push to main: the full check.mjs run on
 # Linux, clippy and tests on Windows and macOS, a build on the minimum
-# supported Rust, and the self-tests of check.mjs. A pull request is merged
-# only when every job here is green.
+# supported Rust, the self-tests of check.mjs, and the line cap. A pull
+# request is merged only when every job here is green.
 #
 # Every action is pinned to a full commit SHA; the comment says which tag.
 # To update one, look up the new tag's commit (gh api
@@ -142,3 +142,25 @@ jobs:
 
       - name: node --test scripts/check.test.mjs
         run: node --test scripts/check.test.mjs
+
+  # Record 0010 decision 8: the 5,000-line cap. No Rust, so it answers in
+  # seconds. During the cut, --max is the ceiling of the current step
+  # (decision 10); the pull request that reaches 5,000 deletes the option.
+  lines:
+    name: lines (the 5,000-line cap)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: node --test scripts/tests/lines.test.mjs
+        run: node --test scripts/tests/lines.test.mjs
+
+      - name: node scripts/lines.mjs
+        run: node scripts/lines.mjs --max 74000

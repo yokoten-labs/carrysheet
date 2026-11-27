@@ -114,6 +114,18 @@ You must never copy, translate or closely paraphrase code from GPL, LGPL, AGPL o
 - Errors for people and agents have three parts: what happened, why, and how to fix it.
 - Tests use small files committed under the crate's `tests/data/` (made by us or from Apache POI's test data with its license noted). Never commit large corpora.
 
+### The 5,000-line cap
+
+Our own source is at most 5,000 lines; the planning target is 4,500. [Record 0010](docs/records/0010-five-thousand-lines.md) says what counts and why. Why: set by the owner, so one person or agent can read the whole product. Check: the `lines` CI job (`node scripts/lines.mjs`, tests in `scripts/tests/`).
+
+- Every line of a tracked code file counts, blank and comment lines too. `vendor/`, paths with a `tests` or `benches` folder, and `*.test.mjs` do not count.
+- A tracked file that is neither code nor on the data list in `scripts/lines.mjs` fails the check.
+- Unit tests go in `src/tests/` behind `#[cfg(test)] mod tests;`. A counted Rust file with `#[path`, `include!(` or an unguarded `mod tests;` fails.
+- Above 4,500 the check prints a note. The pull request then says why.
+- During the cut, CI passes `--max` with the ceiling of the current step. A pull request never raises the ceiling or the cap; a new cap needs a new record.
+- Before you push, run the command of the `lines` job in `.github/workflows/ci.yml`. It needs no Rust and takes under a second.
+- A reason that needs more than a few lines goes into a record or `docs/`, not into a code comment.
+
 ### Command line and MCP
 
 The CLI and MCP server follow `docs/agents.md`. In short: `--json` everywhere with JSON-only stdout; exit codes 0 done, 1 failed, 2 usage, 3 nothing to do; never prompt without a terminal; `--dry-run` on every command that changes a file; MCP schemas that Claude, Gemini and OpenAI strict mode all accept.

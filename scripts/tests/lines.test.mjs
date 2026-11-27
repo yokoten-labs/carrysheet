@@ -1,5 +1,5 @@
 // Self-test for scripts/lines.mjs, the cap check of record 0010.
-// Run: node --test scripts/lines.test.mjs
+// Run: node --test scripts/tests/lines.test.mjs
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -8,9 +8,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { CAP, PATCH_MAX, checkTree, findRustHits } from "./lines.mjs";
+import { CAP, PATCH_MAX, checkTree, findRustHits } from "../lines.mjs";
 
-const scriptPath = join(dirname(fileURLToPath(import.meta.url)), "lines.mjs");
+const scriptPath = join(dirname(fileURLToPath(import.meta.url)), "..", "lines.mjs");
 const lineText = (n) => "x\n".repeat(n);
 
 // Runs checkTree on an in-memory tree: { path: text }.
@@ -79,14 +79,13 @@ test("Rust rules: #[path, include!( and an unguarded mod tests;", () => {
   assert.equal(findRustHits("a.rs", "pub mod tests;\n").length, 1);
 });
 
-test("Rust rules fail without --max and are a note with it", () => {
+test("Rust rules fail with and without --max", () => {
   const tree = { "src/lib.rs": "mod tests;\n" };
-  const strict = checkFiles(tree);
-  assert.equal(strict.code, 1);
-  assert.match(strict.out.find((line) => line.startsWith("error:")), /src\/lib\.rs:1: mod tests;\n {2}Why: .*\n {2}Fix: /);
-  const loose = checkFiles(tree, 100);
-  assert.equal(loose.code, 0);
-  assert.ok(loose.out.some((line) => line.startsWith("note: 1 test-path escape")));
+  for (const max of [undefined, 100]) {
+    const result = checkFiles(tree, max);
+    assert.equal(result.code, 1, `--max ${max}`);
+    assert.match(result.out.find((line) => line.startsWith("error:")), /src\/lib\.rs:1: mod tests;\n {2}Why: .*\n {2}Fix: /);
+  }
 });
 
 test("patch files: counts added lines and prints the number", () => {

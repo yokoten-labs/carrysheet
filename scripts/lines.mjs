@@ -1,6 +1,6 @@
 // The 5,000-line cap of record 0010 (docs/records/0010-five-thousand-lines.md).
 // Counts physical lines of our code; tests and vendor/ are not counted.
-// Run: node scripts/lines.mjs [--max N]. Tests: node --test scripts/lines.test.mjs
+// Run: node scripts/lines.mjs [--max N]. Tests: node --test scripts/tests/lines.test.mjs
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -46,11 +46,8 @@ export function checkTree(files, read, maxGiven) {
   if (total > TARGET) out.push(`note: above the ${group(TARGET)}-line target; the pull request says why.`);
   if (files.some(isPatch)) out.push(`patches: ${group(patchAdded)} added lines in vendor/gridcraft/patches`);
   if (PATCH_MAX > 0 && patchAdded > PATCH_MAX) errors.push(`patches add ${group(patchAdded)} lines, above PATCH_MAX ${group(PATCH_MAX)}.\n  Why: a patch changes GridCraft's behaviour and must not carry a Carrysheet feature.\n  Fix: move the code into our crates, or raise PATCH_MAX with a new record.`);
-  if (rustHits.length > 0) {
-    const what = `${rustHits.length} test-path escape(s) in counted Rust files:\n  ${rustHits.join("\n  ")}`;
-    if (maxGiven === undefined) errors.push(`${what}\n  Why: #[path], include!( and an unguarded mod tests; can pull test code past the count.\n  Fix: put unit tests in src/tests/ behind #[cfg(test)] mod tests;.`);
-    else out.push(`note: ${what}`);
-  }
+  // Record 0010 decision 8: these fail with or without --max.
+  if (rustHits.length > 0) errors.push(`${rustHits.length} test-path escape(s) in counted Rust files:\n  ${rustHits.join("\n  ")}\n  Why: #[path], include!( and an unguarded mod tests; can pull test code past the count.\n  Fix: put unit tests in src/tests/ behind #[cfg(test)] mod tests;.`);
   if (total > max) {
     const table = [...folders].sort((a, b) => b[1] - a[1]).map(([name, n]) => `  ${group(n).padStart(8)}  ${name}`);
     errors.push(`${group(total)} lines of code, above the cap of ${group(max)} by ${group(total - max)}.\n  Why: record 0010 caps our own source at ${group(CAP)} lines.\n  Fix: remove or simplify code; the cap does not rise.\n  Lines per folder:\n${table.join("\n")}`);
