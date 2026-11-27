@@ -12,8 +12,8 @@ import { fileURLToPath } from "node:url";
 // An error in three parts: what happened, why, and how to fix it.
 export const vendorError = (what, why, fix) => Object.assign(new Error(`vendor: ${what}\n  Why: ${why}\n  Fix: ${fix}`), { isVendor: true });
 
-function git(args, cwd, failure) { // The ceiling keeps git from using a repository above cwd.
-  const env = { ...process.env, GIT_CEILING_DIRECTORIES: dirname(cwd), GIT_TERMINAL_PROMPT: "0" };
+function git(args, cwd, failure) { // The ceiling and no GIT_DIR (hooks set it) keep git off the caller's repository.
+  const env = { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined, GIT_CEILING_DIRECTORIES: dirname(cwd), GIT_TERMINAL_PROMPT: "0" };
   try {
     return execFileSync("git", ["-c", "core.autocrlf=false", ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
   } catch (error) {
@@ -83,7 +83,7 @@ export function verify(vendor, upstream) {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (import.meta.main) {
   const vendor = join(dirname(fileURLToPath(import.meta.url)), "..", "vendor", "gridcraft");
   if (process.argv.slice(2).join(" ") !== "verify") {
     console.error(vendorError("no such command.", "verify is the only command.", "run: node scripts/vendor.mjs verify").message);

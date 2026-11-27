@@ -107,6 +107,14 @@ test("a symlink in the folder fails even when its target matches", { skip: proce
   assert.throws(() => verify(vendor, upstream), (error) => /NOTICE \(a symlink\)/.test(error.message));
 });
 
+test("GIT_DIR from the caller (as in a hook) does not reach git", (t) => {
+  const { upstream, vendor } = setUp(t);
+  t.after(() => { delete process.env.GIT_DIR; delete process.env.GIT_WORK_TREE; });
+  process.env.GIT_DIR = join(vendor, "README.md"); // Not a repository: git stops if it reads this.
+  process.env.GIT_WORK_TREE = upstream;
+  assert.match(verify(vendor, upstream), /4 files match\.$/);
+});
+
 test("listFiles skips our own paths and lists files only", (t) => {
   const { vendor } = setUp(t);
   assert.deepEqual(listFiles(vendor, ["patches", "README.md", "upstream.json"]),
@@ -117,4 +125,11 @@ test("any command but verify is a usage error", () => {
   const result = spawnSync(process.execPath, [script, "diff"], { encoding: "utf8" });
   assert.equal(result.status, 2);
   assert.match(result.stderr, /no such command\.\n {2}Why: .*\n {2}Fix: /);
+});
+
+test("the script runs when reached through a symlinked folder", { skip: process.platform === "win32" }, (t) => {
+  const root = mkdtempSync(join(tmpdir(), "carrysheet-vendor-link-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  symlinkSync(dirname(script), join(root, "scripts"));
+  assert.equal(spawnSync(process.execPath, [join(root, "scripts", "vendor.mjs"), "bogus"]).status, 2);
 });
