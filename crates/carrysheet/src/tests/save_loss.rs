@@ -104,10 +104,9 @@ fn parts_are_compared_from_the_zip_directory_only() {
     assert_eq!(counts, (2, 1, 2, 1), "{parts:?}");
     assert_eq!(r.dropped_parts, vec!["\"xl/charts/chart2.xml\"".to_owned()]);
     assert_eq!(r.lost.len(), 1, "{:?}", r.lost);
-    assert_eq!(
-        (r.lost[0].feature.as_str(), r.lost[0].before, r.lost[0].after),
-        ("charts", 2, 1)
-    );
+    let l = &r.lost[0];
+    let lost = (l.feature.as_str(), l.before, l.after);
+    assert_eq!(lost, ("charts", 2, 1));
     let notes = r.notes.join("; ");
     assert!(notes.contains("Excel rebuilds it"), "{notes}");
     assert!(notes.contains("digital signature"), "{notes}");
