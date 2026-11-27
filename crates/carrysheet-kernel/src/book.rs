@@ -271,6 +271,15 @@ impl Book {
                 .iter()
                 .map(|w| clean_from_file(w, 200))
                 .collect(),
+            macros: match self.kind {
+                SourceKind::Package => crate::package::macros(&self.source, true),
+                // An .xlsb is a zip with the same part names.
+                SourceKind::Imported("xlsb") => crate::package::macros(&self.source, false),
+                SourceKind::Imported(format) => Some(format!(
+                    "not checked: Carrysheet cannot see macros in .{format} files; it never runs them"
+                )),
+                SourceKind::Csv => None,
+            },
         })
     }
 

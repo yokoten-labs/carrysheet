@@ -44,7 +44,7 @@ fn save_failed(e: &gridcraft_engine::EngineError) -> CommandError {
         ErrorCode::Io,
         "the workbook could not be encoded",
         clean_from_file(&e.to_string(), 200),
-        "Try another output format; if it keeps failing, report it with `carrysheet-cli feedback file`.",
+        "Try another output format; if it keeps failing, report it at https://github.com/yokoten-labs/carrysheet/issues.",
     )
 }
 

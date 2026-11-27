@@ -273,8 +273,8 @@ mod tests {
             e.fix
         );
         assert!(e.fix.contains("Usage: carrysheet-cli edit"), "{}", e.fix);
-        let e = usage_of(&[BIN, "mcp", "install"]);
-        assert!(e.what.contains("<CLIENT>"), "{}", e.what);
+        let e = usage_of(&[BIN, "eval", "a.xlsx"]);
+        assert!(e.what.contains("<FORMULA>"), "{}", e.what);
     }
 
     #[test]
@@ -286,8 +286,8 @@ mod tests {
             "{}",
             e.fix
         );
-        let e = usage_of(&[BIN, "mcp", "install", "notepad"]);
-        assert!(e.fix.contains("claude-code, claude-desktop"), "{}", e.fix);
+        let e = usage_of(&[BIN, "convert", "a.xlsx", "b.x", "--format", "ods"]);
+        assert!(e.fix.contains("xlsx, xls, csv"), "{}", e.fix);
         let e = usage_of(&[BIN, "read", "a.xlsx", "--mode", "bo"]);
         assert!(e.fix.contains("'both'"), "{}", e.fix);
     }

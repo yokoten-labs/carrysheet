@@ -66,6 +66,117 @@ fn lost(done: &Map<String, Value>) -> Vec<String> {
         .collect()
 }
 
+/// `overview` says a file has macros, that they are never run and that a
+/// save keeps them; a package without macros gets no such field.
+#[test]
+fn overview_says_macros_are_kept_and_never_run() {
+    let done = call("overview", json!({ "path": p(&data("SimpleMacro.xlsm")) })).unwrap();
+    let macros = done["macros"].as_str().unwrap();
+    assert!(macros.contains("VBA project"), "{macros}");
+    assert!(
+        macros.contains("never runs") && macros.contains("keeps them"),
+        "{macros}"
+    );
+
+    let done = call(
+        "overview",
+        json!({ "path": p(&data("WithTwoCharts.xlsx")) }),
+    )
+    .unwrap();
+    assert!(done.get("macros").is_none(), "{done:?}");
+}
+
+/// A stored zip of `parts`, for a package rewritten by a test.
+fn stored_zip(parts: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for (name, body) in parts {
+        let mut crc = flate2::Crc::new();
+        crc.update(body);
+        let (crc, size, at) = (crc.sum(), body.len() as u32, out.len() as u32);
+        let fixed = |sig: u32| {
+            let mut h = sig.to_le_bytes().to_vec();
+            h.extend_from_slice(&[20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            h.extend_from_slice(&crc.to_le_bytes());
+            h.extend_from_slice(&size.to_le_bytes());
+            h.extend_from_slice(&size.to_le_bytes());
+            h.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            h.extend_from_slice(&[0, 0]);
+            h
+        };
+        out.extend(fixed(0x0403_4b50));
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(body);
+        // The central header has "version made by" before the local fields.
+        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        central.extend_from_slice(&[20, 0]);
+        central.extend_from_slice(&fixed(0)[4..]);
+        central.extend_from_slice(&[0; 10]);
+        central.extend_from_slice(&at.to_le_bytes());
+        central.extend_from_slice(name.as_bytes());
+    }
+    let (start, len, n) = (out.len() as u32, central.len() as u32, parts.len() as u16);
+    out.extend(central);
+    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    out.extend_from_slice(&[0, 0, 0, 0]);
+    out.extend_from_slice(&n.to_le_bytes());
+    out.extend_from_slice(&n.to_le_bytes());
+    out.extend_from_slice(&len.to_le_bytes());
+    out.extend_from_slice(&start.to_le_bytes());
+    out.extend_from_slice(&[0, 0]);
+    out
+}
+
+/// Excel finds the VBA project by relationship and content type, so a
+/// hostile file can store it under any part name: `overview` still says so.
+#[test]
+fn overview_finds_a_renamed_vba_project() {
+    let src = data("SimpleMacro.xlsm");
+    let mut zip = open_zip(&src);
+    let names: Vec<String> = zip.entries().iter().map(|e| e.name.clone()).collect();
+    let mut rewritten = Vec::new();
+    for (i, name) in names.iter().enumerate() {
+        let body = zip.read(i, u64::MAX).unwrap();
+        let (name, body) = match name.as_str() {
+            "xl/vbaProject.bin" => ("xl/project1.bin".to_owned(), body),
+            "[Content_Types].xml" | "xl/_rels/workbook.xml.rels" => {
+                let text = String::from_utf8(body)
+                    .unwrap()
+                    .replace("vbaProject.bin", "project1.bin");
+                (name.clone(), text.into_bytes())
+            }
+            _ => (name.clone(), body),
+        };
+        rewritten.push((name, body));
+    }
+    let dir = scratch("renamed");
+    let path = dir.join("renamed.xlsm");
+    std::fs::write(&path, stored_zip(&rewritten)).unwrap();
+    assert!(!parts(&path).contains(&"xl/vbaproject.bin".to_owned()));
+
+    let done = call("overview", json!({ "path": p(&path) })).unwrap();
+    let macros = done["macros"].as_str().unwrap_or_default();
+    assert!(macros.contains("VBA project"), "{done:?}");
+}
+
+/// Carrysheet cannot see macros in an .xls file: `overview` says they were
+/// not checked rather than staying silent.
+#[test]
+fn overview_says_macros_in_xls_were_not_checked() {
+    let done = call(
+        "overview",
+        json!({ "path": p(&data("formats/biff/SimpleWithFormula.xls")) }),
+    )
+    .unwrap();
+    let macros = done["macros"].as_str().unwrap();
+    assert!(
+        macros.starts_with("not checked:")
+            && macros.contains(".xls")
+            && macros.contains("never runs"),
+        "{macros}"
+    );
+}
+
 #[test]
 fn macros_are_kept_in_xlsm_and_reported_before_xlsx() {
     let dir = scratch("macro");

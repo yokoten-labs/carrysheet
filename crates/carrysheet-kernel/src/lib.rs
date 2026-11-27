@@ -192,7 +192,7 @@ pub(crate) fn internal(doing: &str, detail: &str) -> CommandError {
             "a bug in the calculation kernel ({GRIDCRAFT_VERSION}) stopped the work: {}",
             clean_from_file(detail, 160)
         ),
-        "Please report it: run `carrysheet-cli feedback file \"<what you did>\"` and attach the file (sanitize it first). Do not trust other results for this file until then.",
+        "Please report it at https://github.com/yokoten-labs/carrysheet/issues, with the file if you can share it. Do not trust other results for this file until then.",
     )
 }
 
@@ -207,7 +207,7 @@ mod tests {
         assert_eq!(e.code, ErrorCode::Internal);
         assert_eq!(e.code.as_str(), "internal_error");
         assert!(e.why.contains("boom at A1"), "{}", e.why);
-        assert!(e.fix.contains("feedback"), "{}", e.fix);
+        assert!(e.fix.contains("/issues"), "{}", e.fix);
         let r: Result<u8, CommandError> = guard("testing", || panic!("{}", String::from("x")));
         assert!(r.unwrap_err().why.contains('x'));
     }

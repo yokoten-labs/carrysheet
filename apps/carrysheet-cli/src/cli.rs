@@ -15,8 +15,7 @@ pub const BIN: &str = "carrysheet-cli";
 /// The largest `@file` an argument may be read from.
 const MAX_ARG_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
-/// The flag name without `--`: `max_rows` is `max-rows`, and
-/// `include_source` is `source` (see [`Arg::flag`]).
+/// The flag name without `--`: `max_rows` is `max-rows` (see [`Arg::flag`]).
 pub fn flag_name(arg: &Arg) -> String {
     arg.flag().split_off(2)
 }
@@ -63,7 +62,7 @@ fn clap_command(name: &'static str, command: &'static Command) -> clap::Command 
 pub fn build() -> clap::Command {
     let mut root = clap::Command::new(BIN)
         .version(env!("CARGO_PKG_VERSION"))
-        .about("Carrysheet: read, check, convert and edit spreadsheets, for people and AI agents")
+        .about("Carrysheet: read, convert and edit spreadsheets, for people and AI agents")
         .after_help(
             "Agents: run `carrysheet-cli commands --json` for every command and its schema.",
         )
@@ -83,7 +82,7 @@ pub fn build() -> clap::Command {
                 .short('y')
                 .global(true)
                 .action(ArgAction::SetTrue)
-                .help("Answer yes to confirmations; without a terminal the answer is no"),
+                .help("Confirm deleting, overwriting and saves that lose content (--confirm and --confirm-loss)"),
         )
         .arg(
             clap::Arg::new("max-seconds")
@@ -330,8 +329,8 @@ mod tests {
         for argv in [
             vec![BIN, "--json", "commands"],
             vec![BIN, "commands", "--json"],
-            vec![BIN, "mcp", "--json", "doctor"],
-            vec![BIN, "-y", "mcp", "install", "codex"],
+            vec![BIN, "mcp", "--json", "serve"],
+            vec![BIN, "-y", "mcp", "serve", "--read-only"],
         ] {
             assert!(build().try_get_matches_from(&argv).is_ok(), "{argv:?}");
         }

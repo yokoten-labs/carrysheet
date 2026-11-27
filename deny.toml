@@ -83,7 +83,31 @@ multiple-versions = "warn"
 # and the 7-day cooldown. Path dependencies also need a version.
 wildcards = "deny"
 highlight = "all"
-deny = []
+deny = [
+    # No HTTP or TLS anywhere in the graph.
+    { crate = "hyper", reason = "No network code in the binary (record 0010, decision 4): MCP runs over stdio only." },
+    { crate = "h2", reason = "No network code in the binary (record 0010, decision 4): MCP runs over stdio only." },
+    { crate = "reqwest", reason = "No network code in the binary (record 0010, decision 4): MCP runs over stdio only." },
+    { crate = "ureq", reason = "No network code in the binary (record 0010, decision 4): MCP runs over stdio only." },
+    { crate = "rustls", reason = "No network code in the binary (record 0010, decision 4): MCP runs over stdio only." },
+    { crate = "native-tls", reason = "No network code in the binary (record 0010, decision 4): MCP runs over stdio only." },
+    { crate = "openssl", reason = "No network code in the binary (record 0010, decision 4): MCP runs over stdio only." },
+    # Fences (record 0010, decision 9): GridCraft only behind carrysheet-kernel,
+    # the MCP runtime only in the program. `wrappers` names the crates that may
+    # depend on each directly; GridCraft's own crates may use each other.
+    { crate = "gridcraft-engine", wrappers = ["carrysheet-kernel"], reason = "GridCraft is used only through carrysheet-kernel." },
+    { crate = "gridcraft-xlsx", wrappers = ["carrysheet-kernel", "gridcraft-engine"], reason = "GridCraft is used only through carrysheet-kernel." },
+    { crate = "gridcraft-calc", wrappers = ["gridcraft-chart", "gridcraft-engine"], reason = "Inside GridCraft only; Carrysheet uses gridcraft-engine and gridcraft-xlsx." },
+    { crate = "gridcraft-chart", wrappers = ["gridcraft-engine"], reason = "Inside GridCraft only; Carrysheet uses gridcraft-engine and gridcraft-xlsx." },
+    { crate = "gridcraft-core", wrappers = ["gridcraft-calc", "gridcraft-chart", "gridcraft-engine", "gridcraft-formula", "gridcraft-functions", "gridcraft-model", "gridcraft-numfmt", "gridcraft-xlsx"], reason = "Inside GridCraft only; Carrysheet uses gridcraft-engine and gridcraft-xlsx." },
+    { crate = "gridcraft-formula", wrappers = ["gridcraft-calc", "gridcraft-engine", "gridcraft-model", "gridcraft-xlsx"], reason = "Inside GridCraft only; Carrysheet uses gridcraft-engine and gridcraft-xlsx." },
+    { crate = "gridcraft-functions", wrappers = ["gridcraft-calc", "gridcraft-engine"], reason = "Inside GridCraft only; Carrysheet uses gridcraft-engine and gridcraft-xlsx." },
+    { crate = "gridcraft-model", wrappers = ["gridcraft-calc", "gridcraft-chart", "gridcraft-engine", "gridcraft-xlsx"], reason = "Inside GridCraft only; Carrysheet uses gridcraft-engine and gridcraft-xlsx." },
+    { crate = "gridcraft-numfmt", wrappers = ["gridcraft-calc", "gridcraft-chart", "gridcraft-engine"], reason = "Inside GridCraft only; Carrysheet uses gridcraft-engine and gridcraft-xlsx." },
+    { crate = "gridcraft-pdf", wrappers = ["gridcraft-engine"], reason = "Inside GridCraft only; Carrysheet uses gridcraft-engine and gridcraft-xlsx." },
+    { crate = "rmcp", wrappers = ["carrysheet-cli"], reason = "The MCP server belongs to the program; libraries stay bytes in, JSON out." },
+    { crate = "tokio", wrappers = ["carrysheet-cli", "rmcp", "tokio-util"], reason = "The async runtime serves MCP in the program only." },
+]
 skip = []
 
 [sources]

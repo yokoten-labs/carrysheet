@@ -16,45 +16,19 @@ path = "src/main.rs"
 carrysheet-commands = { path = "../../crates/carrysheet-commands", version = "0.1.0" }
 carrysheet-kernel = { path = "../../crates/carrysheet-kernel", version = "0.1.0" }
 carrysheet-model = { path = "../../crates/carrysheet-model", version = "0.1.0" }
-carrysheet-vba = { path = "../../crates/carrysheet-vba", version = "0.1.0" }
-# `macros` opens .xlsm/.xlsb packages: our hardened zip reader.
-carrysheet-zip = { path = "../../crates/carrysheet-zip", version = "0.1.0" }
 clap = { version = "4.5", default-features = false, features = ["std", "help", "usage", "error-context", "suggestions", "color", "string", "wrap_help"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-# MCP server over stdio and streamable HTTP. Exact pin: the Rust SDK is beta
-# for the 2026-07-28 spec.
-rmcp = { version = "=3.9.0", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
-# `mcp serve --http`: a plain HTTP/1.1 server on loopback in front of rmcp's
-# streamable-HTTP service. Only the server half of hyper, no TLS, no HTTP/2.
-hyper = { version = "1", default-features = false, features = ["server", "http1"] }
-hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
-# Already dependencies of rmcp's HTTP server; named here for the body types.
-bytes = { version = "1", default-features = false }
-http-body-util = { version = "0.1", default-features = false }
-# The HTTP token: 256 bits from the operating system's random source, compared
-# in constant time. Both were already in Cargo.lock.
-getrandom = "0.4.3"
-subtle = "2.6.1"
+# MCP server over stdio only. Exact pin: the Rust SDK is beta for the
+# 2026-07-28 spec.
+rmcp = { version = "=3.9.0", default-features = false, features = ["server", "transport-io"] }
 # Supply chain: Cargo.lock holds tokio 1.53.3, not 1.54.0 (released the day
 # before this was added); tokio-util 0.7.20, uuid 1.28.0 and schemars 1.2.3
 # were each at least a week old. Take new releases only once they have aged a
 # week: `cargo update -p <crate> --precise <version>`.
-tokio = { version = "1", default-features = false, features = ["rt", "io-std", "net", "time", "sync", "signal"] }
-# Only to forward rmcp's warnings to our log; already a dependency of rmcp.
+tokio = { version = "1", default-features = false, features = ["rt", "io-std", "time", "sync"] }
+# Only to forward rmcp's warnings to stderr; already a dependency of rmcp.
 tracing = { version = "0.1", default-features = false, features = ["std"] }
-
-# `mcp serve --http` raises the soft open-file limit (macOS starts programs
-# with 256). Already in Cargo.lock through clap's terminal_size; 1.1.6 was
-# published 2026-10-27, floor raised for RUSTSEC-2026-0486. Its getrlimit
-# and setrlimit are safe functions.
-[target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1.6", default-features = false, features = ["std", "process"] }
-
-[dev-dependencies]
-# The tests build zip packages byte by byte with carrysheet-zip's test
-# builder (included by path), which deflates with flate2.
-flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
 
 [lints]
 workspace = true

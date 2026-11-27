@@ -25,7 +25,7 @@ listed here with why.
 
 | Crate | Used by | Why |
 |---|---|---|
-| `cfb` 0.15.0 (MIT) | `carrysheet-vba` tests (`tests/keep.rs`) | An independent compound file reader, to check that what `carrysheet-cfb` writes opens in someone else's reader. Issue 42 replaced `cfb` with `carrysheet-cfb` in every library; this is the one place it stays, on purpose. |
+| `flate2` 1.1.10 (MIT OR Apache-2.0) | `carrysheet-kernel` tests | Builds deflate streams for the hostile-file tests. The same version GridCraft ships, so it adds nothing to the graph. |
 
 ## Policy check: cargo-deny
 

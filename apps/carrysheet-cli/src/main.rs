@@ -4,11 +4,8 @@
 //! Exit codes: 0 done, 1 failed, 2 usage error, 3 nothing to do.
 
 mod cli;
-mod http;
-mod log;
 mod mcp;
 mod output;
-mod prompt;
 mod run;
 
 use std::ffi::OsString;
@@ -34,7 +31,10 @@ fn real_main(args: Vec<OsString>) -> u8 {
         Err(e) => return output::handle_clap_error(&e, json_requested),
     };
     let json = matches.get_flag("json");
-    let mut ctx = prompt::Context::detect(json, matches.get_flag("yes"));
+    let mut ctx = run::Context {
+        yes: matches.get_flag("yes"),
+        max_seconds: None,
+    };
     if let Some(&seconds) = matches.get_one::<f64>("max-seconds") {
         let max = carrysheet_commands::limits::MAX_CLI_SECONDS;
         if !(seconds > 0.0 && seconds <= max) {
@@ -55,7 +55,7 @@ fn real_main(args: Vec<OsString>) -> u8 {
             carrysheet_commands::ErrorCode::Internal,
             "no command was chosen",
             "the command line parsed but named no command",
-            "Report this with `carrysheet-cli feedback bug`.",
+            "Report this at https://github.com/yokoten-labs/carrysheet/issues.",
         );
         output::print_error(&err, json);
         return err.exit_code().code();
@@ -77,7 +77,7 @@ fn real_main(args: Vec<OsString>) -> u8 {
         };
     }
     let result = args.and_then(|args| run::run(command, &args, &ctx));
-    match result {
+    match result.map_err(with_yes) {
         Ok(done) => {
             output::print_done(&done, json);
             carrysheet_commands::ExitCode::Done.code()
@@ -87,6 +87,16 @@ fn real_main(args: Vec<OsString>) -> u8 {
             err.exit_code().code()
         }
     }
+}
+
+/// Nobody is asked to confirm: a refusal for want of a confirmation also
+/// names `--yes`, which gives every confirmation at once.
+fn with_yes(mut err: carrysheet_commands::CommandError) -> carrysheet_commands::CommandError {
+    if err.code == carrysheet_commands::ErrorCode::ConfirmationRequired {
+        err.fix
+            .push_str(" Or add --yes, which confirms everything.");
+    }
+    err
 }
 
 fn main() -> std::process::ExitCode {
