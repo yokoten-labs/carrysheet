@@ -24,10 +24,9 @@ pub const MAX_FILE_BYTES: u64 = if cfg!(target_pointer_width = "64") {
 /// Extensions [`check_opens`] accepts.
 const OPENS: &[&str] = &["xlsx", "xlsm", "xltx", "xltm", "xls", "xlsb", "csv"];
 
-/// What the opened file was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SourceKind {
-    /// An OOXML zip package (xlsx, xlsm, ...): parts can be compared on save.
+    /// An OOXML zip package: parts can be compared on save.
     Package,
     Csv,
     /// A format GridCraft imports with losses it does not list (xls, xlsb).
@@ -114,12 +113,7 @@ impl ReadFailure {
 /// Refuses a file whose extension is not one Carrysheet opens, before the
 /// program reads it.
 pub fn check_opens(path: &Path) -> Result<(), CommandError> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .unwrap_or_default();
-    if OPENS.contains(&ext.as_str()) {
+    if OPENS.contains(&extension(path).as_str()) {
         return Ok(());
     }
     Err(CommandError::new(
@@ -128,6 +122,12 @@ pub fn check_opens(path: &Path) -> Result<(), CommandError> {
         "the extension is not one of .xlsx, .xlsm, .xltx, .xltm, .xls, .xlsb or .csv",
         "Give a spreadsheet file with one of those extensions.",
     ))
+}
+
+/// The file's extension in lower case, or `""`.
+fn extension(path: &Path) -> String {
+    let ext = path.extension().and_then(|e| e.to_str());
+    ext.map(str::to_ascii_lowercase).unwrap_or_default()
 }
 
 /// Turns GridCraft's open error (plain text) into one with a code. The
@@ -155,39 +155,34 @@ fn open_error(path: &Path, e: &EngineError) -> CommandError {
             "Split the workbook into smaller files.",
         );
     }
+    damaged(path, why)
+}
+
+fn damaged(path: &Path, why: String) -> CommandError {
     CommandError::new(
         ErrorCode::DamagedFile,
-        format!("{shown} could not be opened as a workbook"),
+        format!("{} could not be opened as a workbook", path.display()),
         why,
         "Check that this is the right file and that it was copied completely; a damaged file is not repaired.",
     )
 }
 
 impl Book {
-    /// Parses and recalculates a file's bytes. `path` names it in messages
-    /// and picks the format when the bytes do not say.
+    /// Parses and recalculates a file's bytes; see [`crate::Kernel::open_bytes`].
     pub(crate) fn from_bytes(path: &Path, bytes: Vec<u8>) -> Result<Book, CommandError> {
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "book.xlsx".to_owned());
         let sniffed = gridcraft_xlsx::sniff(&bytes);
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(str::to_ascii_lowercase)
-            .unwrap_or_default();
+        let ext = extension(path);
         // GridCraft reads text named .xlsx as csv. An .xlsx or .xlsb that is
         // not a zip package is damaged or not what it says, so refuse it.
         if matches!(ext.as_str(), "xlsx" | "xlsm" | "xltx" | "xltm" | "xlsb")
             && sniffed == gridcraft_xlsx::Format::Csv
         {
-            return Err(CommandError::new(
-                ErrorCode::DamagedFile,
-                format!("{} could not be opened as a workbook", path.display()),
-                format!("an .{ext} file is a zip package, and this one is not"),
-                "Check that this is the right file and that it was copied completely; a damaged file is not repaired.",
-            ));
+            let why = format!("an .{ext} file is a zip package, and this one is not");
+            return Err(damaged(path, why));
         }
         let kind = match sniffed {
             gridcraft_xlsx::Format::Xlsx => SourceKind::Package,
@@ -202,8 +197,7 @@ impl Book {
         } else {
             gridcraft_engine::io::open_bytes(&name, &bytes).map_err(|e| open_error(path, &e))?
         };
-        // Relative links to other workbooks are rewritten when saving to
-        // another folder.
+        // So relative links to other workbooks follow a save to another folder.
         wb.source_dir = std::path::absolute(path)
             .ok()
             .and_then(|p| p.parent().map(Path::to_path_buf));
@@ -249,16 +243,11 @@ pub(crate) fn no_such_sheet(name: &str) -> CommandError {
     )
 }
 
-/// The csv front end. The bytes are decoded by their encoding, GridCraft
-/// splits the fields as text, and a field becomes a number only when the
-/// number prints back as the same text. So `007`, `1E5` and `SEPT1` stay as
-/// they were written (record 0006). Gives a workbook with one sheet, named
-/// after the file, and a warning when the encoding was guessed.
-fn read_csv(
-    path: &Path,
-    name: &str,
-    bytes: &[u8],
-) -> Result<(Workbook, Vec<String>), CommandError> {
+/// The csv front end: decodes the bytes, lets GridCraft split the fields as
+/// text, and makes a field a number only when it prints back the same, so
+/// `007`, `1E5` and `SEPT1` stay as written (record 0006). One sheet, named
+/// after the file; a warning when the encoding was guessed.
+fn read_csv(path: &Path, name: &str, bytes: &[u8]) -> Result<Opened, CommandError> {
     let (text, warnings) = decode_text(path, bytes)?;
     let options = gridcraft_xlsx::CsvOptions {
         delimiter: 0,
@@ -303,6 +292,9 @@ fn read_csv(
     gridcraft_engine::core::limits::check_time();
     Ok((wb, warnings))
 }
+
+/// A workbook and what GridCraft skipped or repaired while reading it.
+type Opened = (Workbook, Vec<String>);
 
 /// Excel shows at most 30 decimals and 15 significant digits, so a field
 /// with more stays text, before any format code is built.
