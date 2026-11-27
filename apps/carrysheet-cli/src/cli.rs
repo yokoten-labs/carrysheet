@@ -41,12 +41,12 @@ pub(crate) fn clap_command(name: &'static str, command: &Command) -> clap::Comma
         .after_long_help(Resettable::from(example.map(StyledStr::from)))
 }
 
-/// A line of `--help --long` that shows how to call a command, if it has one.
+/// The example `--help` ends with, if the command has one. A line stays under 80 columns.
 fn example(name: &str) -> Option<String> {
     Some(match name {
         "read" => "read book.xlsx 'Sheet1!A1:D20'".to_owned(),
         "convert" => "convert book.xlsx book.csv --dry-run".to_owned(),
-        "edit" => format!("edit book.xlsx --ops '[{OPERATION_EXAMPLE}]' --dry-run"),
+        "edit" => format!("edit book.xlsx --dry-run \\\n    --ops '[{OPERATION_EXAMPLE}]'"),
         _ => return None,
     })
 }

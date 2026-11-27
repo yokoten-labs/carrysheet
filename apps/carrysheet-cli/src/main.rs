@@ -27,7 +27,7 @@ fn wants_json(args: &[OsString]) -> bool {
 
 fn main() -> std::process::ExitCode {
     // A panic (a damaged file can make a dependency panic) is logged with control characters escaped.
-    std::panic::set_hook(Box::new(|info| mcp::log(&format!("panic: {info}"))));
+    std::panic::set_hook(Box::new(|info| mcp::log(&format!("panic (caught): {info}"))));
     let args: Vec<OsString> = std::env::args_os().collect();
     let matches = match cli::build().try_get_matches_from(&args) {
         Ok(m) => m,

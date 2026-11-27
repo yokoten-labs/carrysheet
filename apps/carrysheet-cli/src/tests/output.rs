@@ -64,7 +64,7 @@ fn usage_errors_join_clap_lists() {
     let raw = |text: &str| clap::Error::raw(clap::error::ErrorKind::InvalidValue, text);
     let e = usage_error(&raw("a list:\n  <A>\n  --b <B>\n\nUsage: x\n"));
     assert_eq!(e.what, "a list: <A>, --b <B>");
-    assert_eq!(e.fix, "Usage: x Run `carrysheet-cli --help` to list commands.");
+    assert_eq!(e.fix, "Usage: x");
     let e = usage_error(&raw("bad 'x'\n  [possible values: a, b]\n\n  tip: hm\n"));
     assert_eq!(e.what, "bad 'x'");
     assert_eq!(e.fix, "[possible values: a, b] tip: hm");
@@ -80,7 +80,11 @@ fn unknown_commands_get_a_suggestion() {
 #[test]
 fn an_error_with_no_tip_points_to_the_help() {
     let e = usage_of(&[BIN, "nothing-like-it"]);
-    assert!(e.fix.ends_with("Run `carrysheet-cli --help` to list commands."), "{}", e.fix);
+    let list = "Run `carrysheet-cli commands` to list commands, or add --help.";
+    assert_eq!(e.fix, format!("Usage: carrysheet-cli [OPTIONS] <COMMAND>. {list}"));
+    // A wrong argument to a known command keeps clap's usage line of that command only.
+    let e = usage_of(&[BIN, "read"]);
+    assert!(!e.fix.contains("list commands"), "{}", e.fix);
 }
 
 #[test]

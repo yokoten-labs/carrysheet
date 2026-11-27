@@ -11,6 +11,8 @@ The first release will be `carrysheet-cli`: a command-line tool with an MCP serv
 
 Download `carrysheet-cli-<version>-<target>` from the [GitHub Releases](https://github.com/yokoten-labs/carrysheet/releases) page: a `.zip` for Windows, a `.tar.gz` for Linux and macOS. Check it against `SHA256SUMS` from the same release, unpack it, and put `carrysheet-cli` on your `PATH`.
 
+The program is not signed yet. On macOS, run `xattr -d com.apple.quarantine carrysheet-cli` once, or macOS refuses to start it. On Windows, run the examples below in PowerShell: `cmd.exe` does not read the single quotes.
+
 ## Quick start
 
 ```sh

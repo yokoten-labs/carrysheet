@@ -262,6 +262,10 @@ fn help_shows_an_example_and_the_global_options() {
     }
     let text = stdout(&run(&["edit", "--help"]));
     assert!(text.contains(carrysheet::args::OPERATION_EXAMPLE), "{text}");
+    // clap wraps at 80 columns; a wrapped example breaks when it is pasted.
+    let example = text.split("Example:").nth(1).unwrap();
+    assert!(example.lines().all(|line| line.len() <= 80), "{example}");
+    assert!(example.contains("--dry-run \\\n    --ops '[{"), "{example}");
     let root = stderr(&run(&[]));
     assert!(root.contains("github.com/yokoten-labs/carrysheet/issues"), "{root}");
 }
