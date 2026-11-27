@@ -37,8 +37,8 @@ Run `cargo deny check` before a release and after any `Cargo.lock` change
 
 The `release-scan` job in `.github/workflows/ci.yml` builds `carrysheet-cli` in
 release mode with build-machine paths remapped (`--remap-path-prefix`), then
-searches the binary for the home folder, `/home/` and the user name. Any hit
-fails the job. Run the same steps by hand before publishing a build.
+searches the binary for the home folder, `/home/`, the user name and any email
+address outside `carrysheet.com`. Any hit fails the job. Run the same steps by hand before publishing a build.
 
 ## SBOM at release time
 

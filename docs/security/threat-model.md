@@ -45,8 +45,8 @@ These apply to every crate and every command.
    ([issue 27][i27]).
 8. **Privacy in output.** The home folder is shown as `~` in messages and
    logs (`carrysheet::commands::paths`). Release binaries are
-   checked for build-machine paths and the user name (the `release-scan`
-   job in `.github/workflows/ci.yml`).
+   checked for build-machine paths, the user name and email addresses
+   (the `release-scan` job in `.github/workflows/ci.yml`).
 
 ## Threats
 
@@ -187,7 +187,8 @@ carries a bug; a release binary leaks the build machine's paths.
   (`docs/dependencies.md`). Some dependencies are pinned exactly, such as
   `rmcp` and `zip`.
 - The `release-scan` CI job builds with paths remapped and checks the
-  binary for the home folder, `/home/` paths and the user name.
+  binary for the home folder, `/home/` paths, the user name and email
+  addresses other than `carrysheet.com` ones.
 - A CycloneDX SBOM is made for each release (`docs/dependencies.md`).
 - The clean-room rule keeps GPL, LGPL, AGPL and MPL code out
   (`AGENTS.md`, [issue 13][i13]).

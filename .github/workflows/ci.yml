@@ -161,7 +161,8 @@ jobs:
       - run: cargo check --workspace --locked --all-targets
 
   # Build a release binary with build-machine paths remapped, then search it
-  # for the home folder, any /home/ path and the user name. Any hit fails.
+  # for the home folder, any /home/ path, the user name and email addresses.
+  # Any hit fails.
   # Why: build-machine data in a release binary identifies who built it.
   # Fix: find the source and add a --remap-path-prefix rule here, or remove
   # the string. grep prints nothing about the match, so the log stays safe.
@@ -183,5 +184,18 @@ jobs:
           ls -l "$bin"
           if grep -a -F -e "$HOME" -e /home/ "$bin" >/dev/null || grep -a -w -F "$(id -un)" "$bin" >/dev/null; then
             echo "build-machine data found in the release binary" >&2; exit 1
+          fi
+          echo "release scan: no build-machine paths or user name"
+      # Any email address except the project's own (carrysheet.com), case
+      # ignored. At least two characters before the @: a float constant
+      # ending in 0x40 (`@`) can put one letter-like byte before it, which
+      # looked like an address. Strings sit back to back, so a match can run
+      # on into the next one; the domain is compared by prefix. Only a count
+      # is printed.
+      - name: Scan the binary for email addresses
+        run: |
+          hits=$(LC_ALL=C grep -a -o -i -E '[a-z0-9._%+-]{2,}@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}' target/release/carrysheet-cli | LC_ALL=C grep -c -v -i -F '@carrysheet.com' || true)
+          if [ "$hits" -ne 0 ]; then
+            echo "$hits email address(es) found in the release binary" >&2; exit 1
           fi
           echo "release scan: clean"
