@@ -82,7 +82,13 @@ pub fn quote(text: &str, max: usize) -> String {
 pub fn terminal(text: &str) -> String {
     let keep = |c: char| !is_hidden(c) || matches!(c, '\t' | '\n');
     text.chars()
-        .map(|c| if keep(c) { c } else { char::REPLACEMENT_CHARACTER })
+        .map(|c| {
+            if keep(c) {
+                c
+            } else {
+                char::REPLACEMENT_CHARACTER
+            }
+        })
         .collect()
 }
 

@@ -652,11 +652,7 @@ impl Book {
             }
             .to_owned(),
             defined_names: wb.names.len(),
-            warnings: self
-                .warnings
-                .iter()
-                .map(|w| escape(w, 200))
-                .collect(),
+            warnings: self.warnings.iter().map(|w| escape(w, 200)).collect(),
             macros: match self.kind {
                 SourceKind::Package => crate::save::loss::macros(&self.source, true),
                 // An .xlsb is a zip with the same part names.
