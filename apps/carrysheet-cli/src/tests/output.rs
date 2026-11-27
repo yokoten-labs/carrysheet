@@ -37,7 +37,7 @@ fn missing_arguments_are_named() {
 #[test]
 fn bad_values_list_the_possible_ones() {
     let e = usage_of(&[BIN, "read", "a.xlsx", "--mode", "x"]);
-    assert_eq!(e.what, "invalid value 'x' for '--mode <mode>'");
+    assert_eq!(e.what, "invalid value 'x' for '--mode <MODE>'");
     assert!(
         e.fix.contains("[possible values: values, formulas, both]"),
         "{}",
