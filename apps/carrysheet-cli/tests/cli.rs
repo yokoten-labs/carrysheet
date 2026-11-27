@@ -485,3 +485,11 @@ fn max_seconds_must_be_a_sensible_number() {
     // The flag is accepted; the file is what fails.
     assert_eq!(error_json(&o)["code"], "file_not_found", "{}", stdout(&o));
 }
+
+#[test]
+fn argument_errors_name_the_flag_as_typed() {
+    let err = error_json(&run(&["read", "a.xlsx", "--max-rows", "0", "--json"]));
+    assert_eq!(err["code"], "invalid_argument");
+    let text = err.to_string();
+    assert!(text.contains("`--max-rows`") && !text.contains("max_rows"), "{text}");
+}
