@@ -1,0 +1,6 @@
+# The toolchain for every developer build and for CI (one place for the
+# version). The MSRV job in CI names 1.90.0 itself.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

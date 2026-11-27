@@ -39,8 +39,8 @@ opt-level = 3
 #   lto fat,  cgu 1, strip, opt 3, abort       819,864 bytes, 22 s
 # Fat LTO builds as fast as thin here and is 8% smaller. Opt-level 3 over "s":
 # parsing and recalculating big files is where people feel speed, and 190 KB
-# is not. Path remapping for releases lives in scripts/release-check.mjs, not
-# here, so dev builds keep real paths for debugging.
+# is not. Path remapping for releases lives in the release-scan job of
+# .github/workflows/ci.yml, not here, so dev builds keep real paths for debugging.
 [profile.release]
 lto = "fat"
 codegen-units = 1

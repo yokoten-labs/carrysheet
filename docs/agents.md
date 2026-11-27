@@ -83,7 +83,7 @@ Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, in PR 88 until it 
 - Modes are enums. Everything is validated again on our side.
 - `anyOf` is only for nullable values: single-type branches, then exactly `{"type":"null"}` last. Values keep their JSON type: `3` is a number, `"3"` is text.
 - Compatible with OpenAI strict mode: every property listed in `required`, optional ones nullable, `additionalProperties: false`.
-- A lint (`crates/carrysheet-commands/src/schema/lint.rs`) checks the Claude, Gemini and OpenAI rules on every change; it runs as a test in `node scripts/check.mjs`.
+- A lint (`crates/carrysheet-commands/src/schema/lint.rs`) checks the Claude, Gemini and OpenAI rules on every change; it runs as a test in `cargo test --workspace`.
 
 ### Output size
 
@@ -170,7 +170,7 @@ Planned, not built. The `mcp install` and `mcp doctor` placeholders left the com
 
 ## Testing
 
-CI runs `node scripts/check.mjs` on every pull request (fmt, clippy, tests, cargo-deny, wasm, Windows builds, release privacy check). You can run the same command locally; see `AGENTS.md`.
+CI runs plain cargo commands on every pull request (fmt, clippy, tests, cargo-deny, wasm, Windows builds, release privacy scan); see `.github/workflows/ci.yml`. You can run the same commands locally.
 
 - The schema lint and the tool-list size tests above run as part of it.
 - Tests use a temporary home folder and `TZ=UTC`, and never read the developer's real client configs.

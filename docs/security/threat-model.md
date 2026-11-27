@@ -45,8 +45,8 @@ These apply to every crate and every command.
    ([issue 27][i27]).
 8. **Privacy in output.** The home folder is shown as `~` in messages and
    logs (`carrysheet-commands::paths`). Release binaries are
-   checked for build-machine paths, user names and email addresses
-   (`scripts/release-check.mjs`).
+   checked for build-machine paths and the user name (the `release-scan`
+   job in `.github/workflows/ci.yml`).
 
 ## Threats
 
@@ -184,9 +184,8 @@ carries a bug; a release binary leaks the build machine's paths.
 - A crate version must be at least 7 days old before we take it
   (`docs/dependencies.md`). Some dependencies are pinned exactly, such as
   `rmcp` and `zip`.
-- `scripts/release-check.mjs` builds with paths remapped and checks the
-  binary for the home folder, user name, email addresses and user-folder
-  paths, printing only the kind and offset of a finding.
+- The `release-scan` CI job builds with paths remapped and checks the
+  binary for the home folder, `/home/` paths and the user name.
 - A CycloneDX SBOM is made for each release (`docs/dependencies.md`).
 - The clean-room rule keeps GPL, LGPL, AGPL and MPL code out
   (`AGENTS.md`, [issue 13][i13]).
@@ -196,7 +195,7 @@ carries a bug; a release binary leaks the build machine's paths.
   license (record 0003, [issue 45][i45]). We review and carry it ourselves.
 - Reproducible builds and audits such as `cargo vet` ([issue 10][i10]).
 - Signed release builds ([issue 11][i11], [issue 52][i52]).
-- Fuzzing in CI. CI already runs `scripts/check.mjs`, clippy, tests and
+- Fuzzing in CI. CI already runs clippy, tests and
   `cargo deny` (`.github/workflows/ci.yml`; [issue 52][i52]).
 
 **Not defended:** a compromise of crates.io, of the Rust toolchain, or of

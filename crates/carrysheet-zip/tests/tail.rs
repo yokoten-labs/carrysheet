@@ -13,8 +13,7 @@
 //!   cargo test -p carrysheet-zip --features test-miniz
 //!   cargo test -p carrysheet-zip --features test-zlib-rs
 //!
-//! (`scripts/check.mjs` runs both, as its `zip-miniz` and `zip-zlib-rs`
-//! steps.)
+//! (CI runs both, in the `zip-inflaters` step of the `checks` job.)
 
 mod common;
 

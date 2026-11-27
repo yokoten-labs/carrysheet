@@ -25,7 +25,7 @@ Carrysheet 1.0 is ready when you can open a real `.xlsx` file, edit it, and save
 
 ## Build from source
 
-You need [Rust](https://rustup.rs) 1.90 or later and Node.js (for the check script).
+You need [Rust](https://rustup.rs) 1.90 or later (the repository pins 1.99.1 in `rust-toolchain.toml`) and Node.js (for the line-cap check).
 
 ```sh
 cargo build -p carrysheet-cli
@@ -34,10 +34,13 @@ cargo build -p carrysheet-cli
 The program is then in `target/debug/`. While you work, check your change with:
 
 ```sh
-node scripts/check.mjs --quick
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+node scripts/lines.mjs
 ```
 
-It formats, lints and tests the crates you changed and the crates that use them, and checks the dependency policy. The full run, `node scripts/check.mjs` with no options, is what CI runs on every pull request. It needs Linux, cargo-deny, the wasm target and the mingw-w64 Windows targets, so you usually leave it to CI. `node scripts/check.mjs --list` shows the steps.
+CI runs the same commands on Linux, Windows and macOS, plus `cargo deny check`, the wasm and Windows builds, a build on the minimum Rust version, and a scan of the release binary for build-machine paths. The workflow is `.github/workflows/ci.yml`.
 
 ## Contributing and security
 
