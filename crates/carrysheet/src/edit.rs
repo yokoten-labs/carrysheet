@@ -2,7 +2,7 @@
 //! GridCraft's command layer, which checks protection, tables and array
 //! formulas, and recalculates only what depends on the changed cells.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -350,10 +350,6 @@ pub struct EditResult {
     pub changes: Vec<CellChange>,
     /// All cells the operations wrote.
     pub changes_total: u64,
-    /// Formula cells whose result changed because of the edit, up to
-    /// [`MAX_LISTED_CHANGES`] (not counted when rows, columns or sheets moved).
-    pub recalculated: Vec<CellChange>,
-    pub recalculated_total: u64,
     /// Kept content the edit dropped, by feature, for the save report.
     #[serde(skip)]
     pub(crate) dropped: BTreeMap<&'static str, u64>,
@@ -364,11 +360,8 @@ pub(crate) fn apply(book: &mut Book, ops: &[EditOp]) -> Result<EditResult, Comma
     let start = book.doc()?.wb.clone();
     let active = start.active().map(|s| s.name.clone());
     let mut result = EditResult::default();
-    let mut written: HashSet<(usize, u32, u32)> = HashSet::new();
-    let outcome = ops
-        .iter()
-        .enumerate()
-        .try_for_each(|(i, op)| apply_one(book, i, op, &mut result, &mut written));
+    let outcome =
+        ops.iter().enumerate().try_for_each(|(i, op)| apply_one(book, i, op, &mut result));
     if let Err(e) = outcome {
         if let Some(d) = book.session.active_mut() {
             d.wb = start;
@@ -379,12 +372,6 @@ pub(crate) fn apply(book: &mut Book, ops: &[EditOp]) -> Result<EditResult, Comma
     // Filling a range moves the active sheet; the file keeps its own.
     if let Some(name) = active {
         let _ = book.session.execute_headless("sheet.activate", json!({ "sheet": name }));
-    }
-    // After rows, columns or sheets move, cells cannot be compared by address.
-    let fills = [EditKind::SetValue, EditKind::SetFormula, EditKind::Clear];
-    if ops.iter().all(|op| fills.contains(&op.kind)) {
-        let after = book.doc()?.wb.clone();
-        recalculated(&start, &after, &written, &mut result);
     }
     // One-shot calls keep no undo history (record 0003, point 4).
     if let Some(d) = book.session.active_mut() {
@@ -440,7 +427,6 @@ fn apply_one(
     i: usize,
     op: &EditOp,
     result: &mut EditResult,
-    written: &mut HashSet<(usize, u32, u32)>,
 ) -> Result<(), CommandError> {
     let done = match (&op.target, op.kind) {
         (EditTarget::Sheet(name), EditKind::AddSheet) => {
@@ -466,7 +452,7 @@ fn apply_one(
             EditKind::SetValue | EditKind::SetFormula | EditKind::Clear,
         ) => {
             let si = sheet(book, i, target.sheet.as_deref())?;
-            write_cells(book, i, op, si, target, result, written)?
+            write_cells(book, i, op, si, target, result)?
         }
         (
             EditTarget::Range(target),
@@ -529,7 +515,6 @@ fn write_cells(
     si: usize,
     target: &SheetRange,
     result: &mut EditResult,
-    written: &mut HashSet<(usize, u32, u32)>,
 ) -> Result<String, CommandError> {
     let r = target.range;
     let before = book.doc()?.wb.clone();
@@ -577,7 +562,6 @@ fn write_cells(
             continue;
         }
         count += 1;
-        written.insert((si, at.row, at.col));
         result.changes_total += 1;
         if result.changes.len() < MAX_LISTED_CHANGES {
             result.changes.push(CellChange {
@@ -680,39 +664,6 @@ fn forget_kept(
     }
 }
 
-/// Formula cells whose result changed, outside the cells written.
-fn recalculated(
-    before: &Workbook,
-    after: &Workbook,
-    written: &HashSet<(usize, u32, u32)>,
-    result: &mut EditResult,
-) {
-    for (si, (b, a)) in before.sheets.iter().zip(after.sheets.iter()).enumerate() {
-        if Arc::ptr_eq(b, a) {
-            continue;
-        }
-        for (at, cell) in a.cells.iter() {
-            if cell.formula.is_none() || written.contains(&(si, at.row, at.col)) {
-                continue;
-            }
-            // Both sides as shown: NaN and NaN are the same, as text.
-            let (old, new) = (value_json(&b.value(at)), value_json(&cell.value));
-            if old == new {
-                continue;
-            }
-            result.recalculated_total += 1;
-            if result.recalculated.len() < MAX_LISTED_CHANGES {
-                result.recalculated.push(CellChange {
-                    sheet: a.name.clone(),
-                    cell: at.a1(),
-                    before: old,
-                    after: new,
-                });
-            }
-        }
-    }
-}
-
 /// Applies a batch of operations and saves the result.
 /// The caller fills in `output` ([`crate::save::prepare_output`]).
 pub(crate) fn edit(
@@ -732,7 +683,7 @@ pub(crate) fn edit(
     let mut data = Map::new();
     data.insert("file".into(), shown(&path));
     data.insert("output".into(), shown(&output));
-    // ops, changes, changes_total, recalculated, recalculated_total.
+    // ops, changes, changes_total.
     if let Value::Object(fields) = json!(result) {
         data.extend(fields);
     }

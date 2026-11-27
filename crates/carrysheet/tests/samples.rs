@@ -241,10 +241,8 @@ fn charts_are_kept_or_reported() {
             .unwrap()
         }
     };
-    assert_eq!(
-        saved["recalculated"][0],
-        json!({ "sheet": "Sheet1", "cell": "E1", "before": 25.0, "after": 49.0 })
-    );
+    let after = call("read", json!({ "path": p(&out), "range": "E1" })).unwrap();
+    assert_eq!(after["rows"][0]["cells"][0], json!(49.0), "{saved:?}");
     let charts = parts(&out)
         .iter()
         .filter(|n| n.starts_with("xl/charts/chart") && n.ends_with(".xml"))
