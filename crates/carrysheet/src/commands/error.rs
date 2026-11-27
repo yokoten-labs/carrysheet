@@ -1,0 +1,236 @@
+//! Errors for people and agents: a code, what happened, why, and how to fix it.
+
+use std::fmt;
+
+use crate::model::RefError;
+use serde::Serialize;
+
+use crate::commands::paths::redact_home;
+
+/// How a command ended, as a process exit code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExitCode {
+    /// 0: the command did what was asked.
+    Done = 0,
+    /// 1: the command failed.
+    Failed = 1,
+    /// 2: the command was called wrongly (unknown flag, bad argument).
+    Usage = 2,
+    /// 3: there was nothing to do (for example, already installed).
+    NothingToDo = 3,
+}
+
+impl ExitCode {
+    /// The number the process exits with.
+    pub fn code(self) -> u8 {
+        self as u8
+    }
+}
+
+/// A stable, machine-readable error code. Agents may match on these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    /// The command line could not be parsed (unknown flag, missing argument).
+    Usage,
+    /// An argument has the wrong type or value.
+    InvalidArgument,
+    /// A cell or range reference is not valid A1 text.
+    InvalidReference,
+    /// The command exists but is not built yet.
+    NotImplemented,
+    /// The work was already done; nothing changed.
+    NothingToDo,
+    /// A file or folder does not exist.
+    FileNotFound,
+    /// The output file exists and overwriting was not confirmed.
+    FileExists,
+    /// The operating system refused access.
+    PermissionDenied,
+    /// The path is outside the folder this program may use (`--root`).
+    OutsideRoot,
+    /// The file format is not one Carrysheet reads or writes.
+    UnsupportedFormat,
+    /// The file is damaged or not what its name says; treated as hostile.
+    DamagedFile,
+    /// The file is larger, or holds more, than Carrysheet accepts.
+    LimitExceeded,
+    /// The workbook has no sheet with that name.
+    NoSuchSheet,
+    /// A confirmation was needed and the answer was no (or nobody could answer).
+    Declined,
+    /// Deleting or overwriting needs `confirm: true`, and it was not given.
+    ConfirmationRequired,
+    /// A formula could not be computed.
+    Formula,
+    /// Reading or writing failed.
+    Io,
+    /// A bug in Carrysheet (including a caught panic in the kernel).
+    #[serde(rename = "internal_error")]
+    Internal,
+}
+
+impl ErrorCode {
+    /// The code as written in JSON, such as `not_implemented`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ErrorCode::Usage => "usage",
+            ErrorCode::InvalidArgument => "invalid_argument",
+            ErrorCode::InvalidReference => "invalid_reference",
+            ErrorCode::NotImplemented => "not_implemented",
+            ErrorCode::NothingToDo => "nothing_to_do",
+            ErrorCode::FileNotFound => "file_not_found",
+            ErrorCode::FileExists => "file_exists",
+            ErrorCode::PermissionDenied => "permission_denied",
+            ErrorCode::OutsideRoot => "outside_root",
+            ErrorCode::UnsupportedFormat => "unsupported_format",
+            ErrorCode::DamagedFile => "damaged_file",
+            ErrorCode::LimitExceeded => "limit_exceeded",
+            ErrorCode::NoSuchSheet => "no_such_sheet",
+            ErrorCode::Declined => "declined",
+            ErrorCode::ConfirmationRequired => "confirmation_required",
+            ErrorCode::Formula => "formula",
+            ErrorCode::Io => "io",
+            ErrorCode::Internal => "internal_error",
+        }
+    }
+
+    /// The exit code this error ends the process with.
+    pub fn exit_code(self) -> ExitCode {
+        match self {
+            ErrorCode::Usage | ErrorCode::InvalidArgument | ErrorCode::InvalidReference => {
+                ExitCode::Usage
+            }
+            ErrorCode::NothingToDo => ExitCode::NothingToDo,
+            _ => ExitCode::Failed,
+        }
+    }
+}
+
+impl fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// An error with the three parts people and agents need, plus a code.
+///
+/// Keep `fix` short. It is shown right after `what`, before `why`, because
+/// some clients keep only the start of an error.
+///
+/// The parts often repeat what the user typed (a path, a reference), so
+/// every way of showing an error (`to_json`, `to_text`, `Display` and
+/// `Serialize`) replaces the home folder with `~`. The fields themselves
+/// keep the text as it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandError {
+    pub code: ErrorCode,
+    /// What happened.
+    pub what: String,
+    /// How to fix it, ideally with an example.
+    pub fix: String,
+    /// Why it happened.
+    pub why: String,
+}
+
+impl CommandError {
+    pub fn new(
+        code: ErrorCode,
+        what: impl Into<String>,
+        why: impl Into<String>,
+        fix: impl Into<String>,
+    ) -> Self {
+        CommandError {
+            code,
+            what: what.into(),
+            why: why.into(),
+            fix: fix.into(),
+        }
+    }
+
+    /// A command that is in the table but not built yet. `cli_name` is how it
+    /// is typed, such as `mcp install`.
+    pub fn not_implemented(cli_name: &str) -> Self {
+        CommandError::new(
+            ErrorCode::NotImplemented,
+            format!("`{cli_name}` is not implemented yet"),
+            "Carrysheet is in early development; this command is planned for the first release but not built.",
+            "Run `carrysheet-cli commands` to see which commands work today.",
+        )
+    }
+
+    /// An argument with a wrong value.
+    pub fn invalid_argument(name: &str, why: impl Into<String>, fix: impl Into<String>) -> Self {
+        CommandError::new(
+            ErrorCode::InvalidArgument,
+            format!("the argument `{name}` is not valid"),
+            why,
+            fix,
+        )
+    }
+
+    /// The exit code for this error.
+    pub fn exit_code(&self) -> ExitCode {
+        self.code.exit_code()
+    }
+
+    /// The same error with the home folder shown as `~` in every part.
+    pub fn redacted(&self) -> CommandError {
+        CommandError {
+            code: self.code,
+            what: redact_home(&self.what),
+            fix: redact_home(&self.fix),
+            why: redact_home(&self.why),
+        }
+    }
+
+    /// `{"code","what","fix","why"}` as JSON, the fix before the reason.
+    pub fn to_json(&self) -> serde_json::Value {
+        let shown = self.redacted();
+        serde_json::json!({
+            "code": shown.code.as_str(),
+            "what": shown.what,
+            "fix": shown.fix,
+            "why": shown.why,
+        })
+    }
+
+    /// The full error envelope: `{"ok": false, "error": {...}}`.
+    pub fn to_envelope(&self) -> serde_json::Value {
+        serde_json::json!({ "ok": false, "error": self.to_json() })
+    }
+
+    /// Plain text for a terminal: three lines, no colour, the fix second.
+    pub fn to_text(&self) -> String {
+        let shown = self.redacted();
+        format!(
+            "error: {}\n  fix: {}\n  why: {}",
+            shown.what, shown.fix, shown.why
+        )
+    }
+}
+
+impl fmt::Display for CommandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&redact_home(&self.what))
+    }
+}
+
+impl std::error::Error for CommandError {}
+
+impl Serialize for CommandError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.to_json().serialize(serializer)
+    }
+}
+
+impl From<RefError> for CommandError {
+    fn from(e: RefError) -> Self {
+        CommandError::new(
+            ErrorCode::InvalidReference,
+            e.to_string(),
+            "references are written in A1 style, with an optional sheet name before '!'",
+            "Write a cell or range like B7, A1:C10, Sheet1!A1:C10 or 'My sheet'!A:A.",
+        )
+    }
+}

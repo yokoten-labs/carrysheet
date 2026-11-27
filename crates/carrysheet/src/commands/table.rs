@@ -1,0 +1,470 @@
+//! The command table: the single source of truth for the CLI, the MCP tools
+//! and their JSON schemas. Add a command here and every surface gets it.
+
+/// The type of an argument. Every type maps to a JSON Schema that all MCP
+/// clients accept (see [`crate::commands::schema`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ArgType {
+    /// Free text.
+    Text,
+    /// A file or folder path. Shown with `~` for the home folder.
+    Path,
+    /// An A1 cell or range, optionally with a sheet name: `Sheet1!A1:C10`.
+    Range,
+    /// A whole number between `min` and `max` (checked on our side; the
+    /// schema does not carry limits because not every client accepts them).
+    Integer { min: i64, max: i64 },
+    /// True or false. On the command line, a flag.
+    Boolean,
+    /// A cell value: text, a number, or true or false, kept with the type it
+    /// was sent with (`"3"` is text, `3` a number). Only as an optional field
+    /// of an [`ArgType::ObjectList`], so the command line never has to guess.
+    Scalar,
+    /// One of a fixed list of values.
+    Enum(&'static [&'static str]),
+    /// A list of text values. On the command line, the flag is repeated.
+    TextList,
+    /// A list of objects with the given fields. On the command line, JSON text.
+    ObjectList(&'static [Arg]),
+}
+
+/// One argument of a command.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Arg {
+    /// `snake_case`, at most 64 characters. On the command line it becomes
+    /// `--kebab-case` unless the argument is positional.
+    pub name: &'static str,
+    pub ty: ArgType,
+    pub required: bool,
+    /// Given by position on the command line rather than as a flag.
+    pub positional: bool,
+    /// One or two sentences; say the default for optional arguments.
+    pub description: &'static str,
+}
+
+/// The four MCP tool annotations. Every command sets all four explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Annotations {
+    /// Never changes anything.
+    pub read_only: bool,
+    /// May replace or delete existing data (only meaningful if not read-only).
+    pub destructive: bool,
+    /// Calling it again with the same arguments has no further effect.
+    pub idempotent: bool,
+    /// Talks to the world outside the files it is given (network, other programs).
+    pub open_world: bool,
+}
+
+/// One command.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Command {
+    /// Unique `snake_case` name; the MCP tool name, such as `mcp_serve`.
+    pub name: &'static str,
+    /// How it is typed on the command line, such as `["mcp", "serve"]`.
+    pub cli_path: &'static [&'static str],
+    /// One line, under 80 characters, for help lists.
+    pub summary: &'static str,
+    /// Key words first, then when to use it. Shown to agents as the tool description.
+    pub description: &'static str,
+    /// Declared arguments. `dry_run` is added automatically when `changes_files` is set.
+    pub args: &'static [Arg],
+    /// Writes or replaces files. Such commands get `--dry-run`.
+    pub changes_files: bool,
+    pub annotations: Annotations,
+    /// Offered as a tool by the MCP server.
+    pub mcp_tool: bool,
+}
+
+/// The `dry_run` argument every command that changes files gets.
+pub const DRY_RUN: Arg = Arg {
+    name: "dry_run",
+    ty: ArgType::Boolean,
+    required: false,
+    positional: false,
+    description: "List the changes, write nothing. Default: false.",
+};
+
+impl Arg {
+    /// The command-line flag, such as `--max-rows`. Positional arguments
+    /// have one too, for messages.
+    pub fn flag(&self) -> String {
+        format!("--{}", self.name.replace('_', "-"))
+    }
+}
+
+impl Command {
+    /// How the command is typed, such as `mcp serve`.
+    pub fn cli_name(&self) -> String {
+        self.cli_path.join(" ")
+    }
+
+    /// Every argument in order, with `dry_run` last for commands that change files.
+    pub fn all_args(&self) -> Vec<&'static Arg> {
+        let mut args: Vec<&'static Arg> = self.args.iter().collect();
+        if self.changes_files {
+            args.push(&DRY_RUN);
+        }
+        args
+    }
+
+    /// An argument by name, including `dry_run`.
+    pub fn arg(&self, name: &str) -> Option<&'static Arg> {
+        self.all_args().into_iter().find(|a| a.name == name)
+    }
+}
+
+/// A word that groups commands on the command line, such as `mcp`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Group {
+    pub name: &'static str,
+    pub summary: &'static str,
+}
+
+/// Command groups, by the first word of `cli_path`.
+pub const GROUPS: &[Group] = &[Group {
+    name: "mcp",
+    summary: "Run the MCP server for AI agents",
+}];
+
+/// A group by name.
+pub fn group(name: &str) -> Option<&'static Group> {
+    GROUPS.iter().find(|g| g.name == name)
+}
+
+const READ_ONLY: Annotations = Annotations {
+    read_only: true,
+    destructive: false,
+    idempotent: true,
+    open_world: false,
+};
+
+const RESPONSE_FORMAT: Arg = Arg {
+    name: "response_format",
+    ty: ArgType::Enum(&["concise", "detailed"]),
+    required: false,
+    positional: false,
+    description: "concise (default), or detailed: adds types, formats and formulas.",
+};
+
+const fn path_arg(description: &'static str) -> Arg {
+    Arg {
+        name: "path",
+        ty: ArgType::Path,
+        required: true,
+        positional: true,
+        description,
+    }
+}
+
+const WORKBOOK: Arg = path_arg("The workbook: xlsx, xlsm, xlsb, xls or csv.");
+
+const OUTPUT: Arg = Arg {
+    name: "output",
+    ty: ArgType::Path,
+    required: false,
+    positional: false,
+    description: "Default: a new file beside the original.",
+};
+
+const OVERWRITE: Arg = Arg {
+    name: "overwrite",
+    ty: ArgType::Boolean,
+    required: false,
+    positional: false,
+    description: "Replace an existing file. Default: false.",
+};
+
+/// The `confirm` argument of commands that can delete or overwrite.
+pub const CONFIRM: Arg = Arg {
+    name: "confirm",
+    ty: ArgType::Boolean,
+    required: false,
+    positional: false,
+    description: "Must be true to delete sheets, rows or columns or overwrite a file (not with dry_run). Default: false.",
+};
+
+/// The `confirm_loss` argument of commands that save: separate from
+/// `confirm`, so agreeing to delete rows never also agrees to drop macros.
+pub const CONFIRM_LOSS: Arg = Arg {
+    name: "confirm_loss",
+    ty: ArgType::Boolean,
+    required: false,
+    positional: false,
+    description: "Must be true to save a file that loses content (macros, charts...), listed by dry_run in save.lost. Default: false.",
+};
+
+/// Operations `edit` accepts, in the `op` field.
+pub const EDIT_OPS: &[&str] = &[
+    "set_value",
+    "set_formula",
+    "clear",
+    "insert_rows",
+    "delete_rows",
+    "insert_columns",
+    "delete_columns",
+    "add_sheet",
+    "rename_sheet",
+    "delete_sheet",
+];
+
+/// Edit operations that delete data, so they need `confirm: true`.
+pub const DESTRUCTIVE_EDIT_OPS: &[&str] = &["delete_rows", "delete_columns", "delete_sheet"];
+
+const EDIT_OP_FIELDS: &[Arg] = &[
+    Arg {
+        name: "op",
+        ty: ArgType::Enum(EDIT_OPS),
+        required: true,
+        positional: false,
+        description: "What to do.",
+    },
+    Arg {
+        name: "target",
+        ty: ArgType::Text,
+        required: true,
+        positional: false,
+        description: "A range like Sheet1!B2:B9, or a sheet name for sheet ops.",
+    },
+    Arg {
+        name: "value",
+        ty: ArgType::Scalar,
+        required: false,
+        positional: false,
+        description: "Text, a number or true/false, kept as typed (\"3\" is text, 3 a number). For set_formula, the formula without =; for sheet ops, the new name.",
+    },
+    Arg {
+        name: "count",
+        ty: ArgType::Integer {
+            min: 1,
+            max: 1_048_576,
+        },
+        required: false,
+        positional: false,
+        description: "Rows or columns to insert or delete, from the start of target. Default: as many as target spans.",
+    },
+];
+
+/// Every command, in the fixed order the CLI help and the MCP tool list use.
+pub const COMMANDS: &[Command] = &[
+    Command {
+        name: "overview",
+        cli_path: &["overview"],
+        summary: "Show sheets, used ranges, headers and formula counts of a workbook",
+        description: "Workbook overview: sheets, used ranges, header rows, formula and error counts, and whether it has macros (or that they could not be checked). Call first on any workbook.",
+        args: &[WORKBOOK, RESPONSE_FORMAT],
+        changes_files: false,
+        annotations: READ_ONLY,
+        mcp_tool: true,
+    },
+    Command {
+        name: "read",
+        cli_path: &["read"],
+        summary: "Read a range as a table of values or formulas, a page at a time",
+        description: "Read a range as a compact table with A1 addresses, values or formulas, paged. Use after overview. Returns next_cursor when more remains.",
+        args: &[
+            WORKBOOK,
+            Arg {
+                name: "range",
+                ty: ArgType::Range,
+                required: false,
+                positional: true,
+                description: "Like Sheet1!A1:D50 or 'My sheet'!A:C. Default: the used range of the first sheet.",
+            },
+            Arg {
+                name: "mode",
+                ty: ArgType::Enum(&["values", "formulas", "both"]),
+                required: false,
+                positional: false,
+                description: "values (default), formulas, or both.",
+            },
+            Arg {
+                name: "max_rows",
+                ty: ArgType::Integer {
+                    min: 1,
+                    max: 10_000,
+                },
+                required: false,
+                positional: false,
+                description: "Rows per page, 1 to 10000. Default: 200.",
+            },
+            Arg {
+                name: "max_columns",
+                ty: ArgType::Integer {
+                    min: 1,
+                    max: 16_384,
+                },
+                required: false,
+                positional: false,
+                description: "Columns per page, 1 to 16384. Default: 50. A page also stops at about 10000 cells.",
+            },
+            Arg {
+                name: "cursor",
+                ty: ArgType::Text,
+                required: false,
+                positional: false,
+                description: "next_cursor from the previous page; range is then ignored. Keep max_rows the same.",
+            },
+            RESPONSE_FORMAT,
+        ],
+        changes_files: false,
+        annotations: READ_ONLY,
+        mcp_tool: true,
+    },
+    Command {
+        name: "eval",
+        cli_path: &["eval"],
+        summary: "Compute a formula against a workbook without saving",
+        description: "Evaluate a formula against the workbook without changing it. Use to test a formula before writing it with edit.",
+        args: &[
+            WORKBOOK,
+            Arg {
+                name: "formula",
+                ty: ArgType::Text,
+                required: true,
+                positional: true,
+                description: "An en-US formula, with or without =, like SUM(Sheet1!B2:B9).",
+            },
+            Arg {
+                name: "sheet",
+                ty: ArgType::Text,
+                required: false,
+                positional: false,
+                description: "Where unqualified references point. Default: the first sheet.",
+            },
+        ],
+        changes_files: false,
+        annotations: READ_ONLY,
+        mcp_tool: true,
+    },
+    Command {
+        name: "convert",
+        cli_path: &["convert"],
+        summary: "Save a workbook as xlsx, xls or csv, to a new file",
+        description: "Convert a workbook to xlsx, xls or csv as a new file. Use dry_run first to see what the format cannot hold.",
+        args: &[
+            WORKBOOK,
+            Arg {
+                name: "output",
+                ty: ArgType::Path,
+                required: true,
+                positional: true,
+                description: "The file to write.",
+            },
+            Arg {
+                name: "format",
+                ty: ArgType::Enum(&["xlsx", "xls", "csv"]),
+                required: false,
+                positional: false,
+                description: "Default: taken from the output file's extension.",
+            },
+            Arg {
+                name: "sheet",
+                ty: ArgType::Text,
+                required: false,
+                positional: false,
+                description: "For csv, the sheet to write. Default: the first sheet.",
+            },
+            Arg {
+                name: "csv_raw",
+                ty: ArgType::Boolean,
+                required: false,
+                positional: false,
+                description: "For csv, write text starting with = + - @ as is. Default: false: a ' before it stops apps running it as a formula.",
+            },
+            OVERWRITE,
+            CONFIRM,
+            CONFIRM_LOSS,
+        ],
+        changes_files: true,
+        annotations: Annotations {
+            read_only: false,
+            destructive: true,
+            idempotent: true,
+            open_world: false,
+        },
+        mcp_tool: true,
+    },
+    Command {
+        name: "edit",
+        cli_path: &["edit"],
+        summary: "Change cells, rows and sheets in one all-or-nothing batch",
+        description: "Edit a workbook: a batch of operations on values, formulas, rows, columns and sheets, applied all or nothing. Writes a new file unless overwrite is true. Dropping content (macros, charts) needs confirm_loss. Use dry_run first.",
+        args: &[
+            WORKBOOK,
+            Arg {
+                name: "ops",
+                ty: ArgType::ObjectList(EDIT_OP_FIELDS),
+                required: true,
+                positional: false,
+                description: "The operations, applied in order.",
+            },
+            OUTPUT,
+            OVERWRITE,
+            CONFIRM,
+            CONFIRM_LOSS,
+        ],
+        changes_files: true,
+        annotations: Annotations {
+            read_only: false,
+            destructive: true,
+            idempotent: false,
+            open_world: false,
+        },
+        mcp_tool: true,
+    },
+    Command {
+        name: "mcp_serve",
+        cli_path: &["mcp", "serve"],
+        summary: "Run the MCP server for AI agents, over stdio",
+        description: "MCP server: serves Carrysheet's tools to an AI client over stdio. Clients start it; people rarely run it by hand.",
+        args: &[
+            Arg {
+                name: "root",
+                ty: ArgType::Path,
+                required: false,
+                positional: false,
+                description: "Only files inside this folder can be used. Default: the current folder.",
+            },
+            Arg {
+                name: "read_only",
+                ty: ArgType::Boolean,
+                required: false,
+                positional: false,
+                description: "Offer only tools that never change files. Default: false.",
+            },
+        ],
+        changes_files: false,
+        annotations: Annotations {
+            read_only: false,
+            destructive: true,
+            idempotent: false,
+            open_world: false,
+        },
+        mcp_tool: false,
+    },
+    Command {
+        name: "commands",
+        cli_path: &["commands"],
+        summary: "List every command; with --json, with its argument schema",
+        description: "Commands list: every command with its summary, arguments, annotations and JSON schema. Agents read this to learn the CLI.",
+        args: &[],
+        changes_files: false,
+        annotations: READ_ONLY,
+        mcp_tool: false,
+    },
+];
+
+/// A command by its `snake_case` name.
+pub fn command(name: &str) -> Option<&'static Command> {
+    COMMANDS.iter().find(|c| c.name == name)
+}
+
+/// A command by how it is typed, such as `["mcp", "serve"]`.
+pub fn command_by_path(path: &[&str]) -> Option<&'static Command> {
+    COMMANDS.iter().find(|c| c.cli_path == path)
+}
+
+/// The commands the MCP server offers, in order.
+pub fn mcp_tools() -> impl Iterator<Item = &'static Command> {
+    COMMANDS.iter().filter(|c| c.mcp_tool)
+}
