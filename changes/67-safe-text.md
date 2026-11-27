@@ -1,0 +1,3 @@
+Security
+
+Text from a file is escaped by one helper, `carrysheet::text`, in messages, in the sheet names and warnings of `overview`, in the text form and in the MCP log (issue 67). Cell values, headers and cursors in JSON stay as stored. Tag characters (U+E0000 to U+E007F), every other invisible or format character from a Unicode 18.0.0 table, and private use characters now show as `\u{…}`, and a backslash shows as `\\`, so file text cannot hide instructions or fake an escape. Plain text, CJK text and single emoji do not change; the joiner U+200D and the emoji selector U+FE0F in emoji sequences show as escapes. A cut text now ends in `…[cut: N more characters]` instead of `...`, and in a quoted part name the mark follows the closing quote.

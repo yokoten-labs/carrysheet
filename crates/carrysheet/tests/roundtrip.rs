@@ -1,9 +1,12 @@
 //! The core path end to end: open, read, edit, calculate, save, reopen.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
+use carrysheet::Kernel;
 use carrysheet::commands::{COMMANDS, CommandError, ErrorCode, validate_args};
-use carrysheet::{Kernel, run};
+use common::run;
 use serde_json::{Map, Value, json};
 
 fn scratch(name: &str) -> PathBuf {

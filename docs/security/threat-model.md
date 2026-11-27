@@ -5,7 +5,7 @@ report a problem, see [SECURITY.md](../../SECURITY.md).
 
 **Where things stand (2026-11-27).** Workbook files are read by the vendored
 GridCraft kernel, through `carrysheet::Kernel`; the save check lists package
-parts through carrysheet-zip. `carrysheet-cli` runs its MCP server over stdio
+parts with the same `zip` crate GridCraft uses. `carrysheet-cli` runs its MCP server over stdio
 only and holds no network code (record 0010). Every command in the table is
 built. Some defences below are not built yet; they are marked **planned**.
 This page must change when they land.
@@ -44,7 +44,7 @@ These apply to every crate and every command.
    `overview`, never run. Refreshing external data is not done
    ([issue 27][i27]).
 8. **Privacy in output.** The home folder is shown as `~` in messages and
-   logs (`carrysheet::commands::paths`). Release binaries are
+   logs (`apps/carrysheet-cli/src/files.rs`). Release binaries are
    checked for build-machine paths, the user name and email addresses
    (the `release-scan` job in `.github/workflows/ci.yml`).
 
@@ -65,20 +65,24 @@ sizes and counts; archive entry names with `..`, absolute paths or control
 characters; XML with a DOCTYPE and entities.
 
 **Now:**
-- Hostile-input tests under `tests/`: carrysheet and carrysheet-zip.
+- Hostile-input tests under `crates/carrysheet/tests/`.
 - Every call into GridCraft runs behind `catch_unwind`; record 0003 counts a
   caught panic as a failure, not a pass.
-- Zip archives: carrysheet-zip is a hardened opener (one end-record scan,
-  size and entry limits checked against bytes really read, only Stored and
-  Deflate, `..` clamped at the root). The kernel's save check uses it.
+- Zip archives: GridCraft's patched reader and the save check
+  (`crates/carrysheet/src/save/loss.rs`) both read with the `zip` crate.
+  Both cap the packed bytes a part may read for what it unpacks, so runs of
+  empty deflate blocks are refused within the time limit (issue 80). The
+  save check also caps one run without output at 16 KiB. carrysheet-zip,
+  the hardened opener that no code used any more, left in record 0010
+  step 5.
 - The VBA reader (carrysheet-vba, carrysheet-cfb) left with the `macros`
   command (record 0010): no code of ours parses VBA or compound files now.
 
 **Open:**
-- Use carrysheet-zip for every reader ([issue 40][i40], partly done).
-  The save check (`crates/carrysheet/src/kernel/package.rs`) lists and
-  unpacks package parts through carrysheet-zip, but the vendored GridCraft
-  `.xlsx` and engine crates still use the `zip` crate.
+- Issue 40 asked for carrysheet-zip in every reader ([issue 40][i40]).
+  Record 0010 keeps one zip reader, the `zip` crate, so carrysheet-zip
+  left instead; the zip limits now live in GridCraft's patch and the save
+  check.
 - On wasm32 a panic aborts (`docs/web-build.md`). The readers return errors
   instead of panicking, but a Web Worker should still run the parsing.
 - One shared work budget with a deadline ([issue 56][i56]).
@@ -102,9 +106,10 @@ characters such as Unicode tag characters (U+E0000 to U+E007F) can hide such
 text from a person while a model still reads it ("ASCII smuggling").
 
 **Now:**
-- Text from files that crates show in messages is escaped and cut
-  (`clean_from_file` in carrysheet::commands); the MCP log goes through the
-  same helper.
+- One helper, `carrysheet::text`, with a Unicode range table, escapes and
+  cuts text from files in messages, in the sheet names and warnings of
+  `overview`, in the text form for people and in the MCP log
+  ([issue 67][i67]). Cell values, headers and cursors in JSON stay as stored.
 - Changes need `dry_run` or confirmation: overwriting and deleting need
   `confirm` (or `--yes` on the command line), and `--read-only` hides every
   tool that changes files.
@@ -112,8 +117,8 @@ text from a person while a model still reads it ("ASCII smuggling").
   what a steered agent can reach through us.
 
 **Open:**
-- One shared escape function for all file text, generated from Unicode data
-  ([issue 67][i67]).
+- Cell values, headers and cursors in JSON still carry hidden characters
+  raw; a flag or an escape is to be decided ([issue 67][i67]).
 - Comments returned in a clearly marked data field, never as instructions
   ([issue 64][i64]).
 - The review view, where a person keeps or undoes each change an agent made
@@ -135,12 +140,15 @@ back, a new record decides it (decision 7), and this part returns with it.
 model behind it) sends arguments meant to reach files outside the user's
 folder, very large arguments, or a flood of calls.
 
-**Now** (`apps/carrysheet-cli/src/mcp.rs`, `crates/carrysheet/src/commands`):
+**Now** (`apps/carrysheet-cli/src/mcp.rs`, `apps/carrysheet-cli/src/files.rs`):
 - Every path argument must resolve inside `--root`. Paths are checked as
   text first (device namespaces, other drives and network shares, `..` above
   the root, names Windows reserves) and then walked one name at a time,
   following links and junctions and checking each target, with at most 40
   links.
+- A read opens the resolved path; nothing checks it again after the walk.
+  A process that swaps a folder for a link in that moment can make one read
+  land outside the root. Writes are checked again just before and after.
 - Without `--root`, the server refuses to serve a whole drive or the home
   folder. With `--root` set to one of them, it logs a warning.
 - Arguments are validated against the tool schema: lists of at most 10,000

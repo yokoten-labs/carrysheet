@@ -2,10 +2,13 @@
 //! before saving that they would be lost (record 0003, point 3). Then the
 //! csv samples in `tests/data/formats/csv`.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
+use carrysheet::Kernel;
 use carrysheet::commands::{COMMANDS, CommandError, ErrorCode, validate_args};
-use carrysheet::{Kernel, run, run_within};
+use common::{run, run_within};
 use serde_json::{Map, Value, json};
 
 fn data(name: &str) -> PathBuf {
@@ -32,25 +35,31 @@ fn p(path: &Path) -> String {
     path.display().to_string()
 }
 
-/// A saved package, opened with the hardened zip reader.
-fn open_zip(path: &Path) -> carrysheet_zip::Archive<std::fs::File> {
-    let file = std::fs::File::open(path).unwrap();
-    carrysheet_zip::Archive::open(file, carrysheet_zip::Limits::default()).unwrap()
+/// A saved package.
+fn open_zip(path: &Path) -> zip::ZipArchive<std::fs::File> {
+    zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap()
 }
 
 /// The part names of a saved package, lower case.
 fn parts(path: &Path) -> Vec<String> {
-    open_zip(path)
-        .entries()
-        .iter()
-        .map(|e| e.name.to_ascii_lowercase())
+    let zip = open_zip(path);
+    zip.file_names()
+        .map(|n| n.unwrap().to_ascii_lowercase())
         .collect()
 }
 
+/// The part names of a package, as stored.
+fn parts_as_stored(path: &Path) -> Vec<String> {
+    let zip = open_zip(path);
+    zip.file_names().map(|n| n.unwrap().into_owned()).collect()
+}
+
 fn part_bytes(path: &Path, name: &str) -> Vec<u8> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
     let mut zip = open_zip(path);
-    let index = zip.find(name).unwrap();
-    zip.read(index, u64::MAX).unwrap()
+    zip.by_name(name).unwrap().read_to_end(&mut bytes).unwrap();
+    bytes
 }
 
 fn part_text(path: &Path, name: &str) -> String {
@@ -132,11 +141,10 @@ fn stored_zip(parts: &[(String, Vec<u8>)]) -> Vec<u8> {
 #[test]
 fn overview_finds_a_renamed_vba_project() {
     let src = data("SimpleMacro.xlsm");
-    let mut zip = open_zip(&src);
-    let names: Vec<String> = zip.entries().iter().map(|e| e.name.clone()).collect();
+    let names: Vec<String> = parts_as_stored(&src);
     let mut rewritten = Vec::new();
-    for (i, name) in names.iter().enumerate() {
-        let body = zip.read(i, u64::MAX).unwrap();
+    for name in &names {
+        let body = part_bytes(&src, name);
         let (name, body) = match name.as_str() {
             "xl/vbaProject.bin" => ("xl/project1.bin".to_owned(), body),
             "[Content_Types].xml" | "xl/_rels/workbook.xml.rels" => {

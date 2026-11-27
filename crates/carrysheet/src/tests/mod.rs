@@ -1,12 +1,11 @@
-mod commands_paths;
-mod commands_root;
 mod commands_schema;
 mod commands_schema_validate;
 mod commands_table;
 mod edit;
 mod error;
 mod kernel;
-mod kernel_package;
 mod range;
 mod save;
+mod save_loss;
+mod text;
 mod view;

@@ -6,8 +6,10 @@
 
 use std::path::{Path, PathBuf};
 
-use carrysheet::commands::{COMMANDS, CommandError, validate_args};
-use carrysheet::{Kernel, Limits, run};
+use carrysheet::commands::{COMMANDS, Command, CommandError, validate_args};
+use carrysheet::open::{ReadFailure, check_opens};
+use carrysheet::save::prepare_output;
+use carrysheet::{Kernel, Limits};
 use serde_json::{Map, Value};
 
 pub const NS: &str = r#"xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#;
@@ -290,6 +292,37 @@ pub fn call_with(
     run(kernel, command, &args)
 }
 
+/// Runs a command the way the program does: reads `path`, writes `output`.
+pub fn run(
+    kernel: &Kernel,
+    command: &Command,
+    args: &Map<String, Value>,
+) -> Result<Map<String, Value>, CommandError> {
+    run_within(kernel, command, args, None)
+}
+
+/// [`run`] with a time limit in seconds.
+pub fn run_within(
+    kernel: &Kernel,
+    command: &Command,
+    args: &Map<String, Value>,
+    seconds: Option<f64>,
+) -> Result<Map<String, Value>, CommandError> {
+    let mut args = args.clone();
+    let output = prepare_output(command, &mut args, &|p: &Path| p.exists())?;
+    let path = PathBuf::from(args["path"].as_str().unwrap_or(""));
+    check_opens(&path)?;
+    let input = std::fs::read(&path).map_err(|e| ReadFailure::Io(e).error(&path))?;
+    let answer = carrysheet::run_within(kernel, command, &args, input, seconds)?;
+    let mut data = answer.data;
+    if let (Some(bytes), Some(output)) = (answer.save, output) {
+        std::fs::write(&output, &bytes).map_err(|e| carrysheet::save::write_error(&output, &e))?;
+        data.insert("written".into(), Value::Bool(true));
+        data.insert("bytes".into(), bytes.len().into());
+    }
+    Ok(data)
+}
+
 pub fn lowered(f: impl FnOnce(&mut Limits)) -> Kernel {
     let mut limits = Limits::default();
     f(&mut limits);
@@ -301,19 +334,19 @@ pub fn part_text(path: &Path, name: &str) -> String {
     String::from_utf8(part_bytes(path, name)).unwrap()
 }
 
-/// The bytes of a part of a package, read with the hardened zip reader.
+/// The bytes of a part of a package.
 pub fn part_bytes(path: &Path, name: &str) -> Vec<u8> {
-    let file = std::fs::File::open(path).unwrap();
-    let mut zip = carrysheet_zip::Archive::open(file, carrysheet_zip::Limits::default()).unwrap();
-    let index = zip.find(name).unwrap();
-    zip.read(index, u64::MAX).unwrap()
+    use std::io::Read as _;
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
+    let mut bytes = Vec::new();
+    zip.by_name(name).unwrap().read_to_end(&mut bytes).unwrap();
+    bytes
 }
 
 /// The part names of a package, as stored.
 pub fn part_names(path: &Path) -> Vec<String> {
-    let file = std::fs::File::open(path).unwrap();
-    let zip = carrysheet_zip::Archive::open(file, carrysheet_zip::Limits::default()).unwrap();
-    zip.entries().iter().map(|e| e.name.clone()).collect()
+    let zip = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
+    zip.file_names().map(|n| n.unwrap().into_owned()).collect()
 }
 
 pub fn lost(done: &Map<String, Value>) -> Vec<String> {

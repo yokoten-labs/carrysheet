@@ -1,6 +1,5 @@
+use crate::files::{Root, home_dir};
 use crate::mcp::*;
-use carrysheet::commands::paths::home_dir;
-use carrysheet::commands::root::Root;
 use carrysheet::commands::schema::tool_definition;
 use carrysheet::commands::table::mcp_tools;
 use serde_json::{Map, Value};
@@ -161,6 +160,15 @@ fn paths_are_confined_and_resolved() {
 }
 
 #[test]
+fn log_lines_escape_tag_characters_and_backslashes() {
+    let line = log_line("x\u{E0041}\u{202E}\u{1b}[31m\\u{41}");
+    assert_eq!(
+        line,
+        "carrysheet-cli: x\\u{e0041}\\u{202e}\\u{1b}[31m\\\\u{41}\n"
+    );
+}
+
+#[test]
 fn log_lines_are_cleaned_like_file_text() {
     let line = log_line("forged\r\n2026-01-01 carrysheet-cli: \u{1b}[31mred\u{202e}");
     assert_eq!(line.matches('\n').count(), 1, "{line}");
@@ -170,7 +178,7 @@ fn log_lines_are_cleaned_like_file_text() {
         let line = log_line(&format!("opened {}", home.join("a.xlsx").display()));
         assert!(!line.contains(&home.display().to_string()), "{line}");
     }
-    assert!(log_line(&"x".repeat(5_000)).len() < MAX_LOG_LINE + 40);
+    assert!(log_line(&"x".repeat(5_000)).len() < MAX_LOG_LINE + 60);
 }
 
 #[test]

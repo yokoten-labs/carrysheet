@@ -57,7 +57,8 @@ fn non_finite_numbers_become_text() {
 
 #[test]
 fn open_missing_file_is_a_clear_error() {
-    let e = Kernel::new().open(Path::new("nope.xlsx")).unwrap_err();
+    let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+    let e = crate::open::ReadFailure::Io(missing).error(Path::new("nope.xlsx"));
     assert_eq!(e.code, ErrorCode::FileNotFound);
     assert!(e.what.contains("nope.xlsx"));
 }

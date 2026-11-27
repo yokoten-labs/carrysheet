@@ -16,7 +16,7 @@ use crate::commands::limits::{MAX_CELL_TEXT_CHARS, MAX_LISTED_SHEETS, MAX_RESPON
 use crate::error::{CommandError, ErrorCode};
 use crate::open::{Book, SourceKind};
 use crate::range::{Shape, SheetRange, cells_text, format_sheet_name};
-use crate::save::clean_from_file;
+use crate::text::escape;
 use crate::{Kernel, internal};
 
 /// One sheet in an [`Overview`].
@@ -652,15 +652,11 @@ impl Book {
             }
             .to_owned(),
             defined_names: wb.names.len(),
-            warnings: self
-                .warnings
-                .iter()
-                .map(|w| clean_from_file(w, 200))
-                .collect(),
+            warnings: self.warnings.iter().map(|w| escape(w, 200)).collect(),
             macros: match self.kind {
-                SourceKind::Package => crate::kernel::package::macros(&self.source, true),
+                SourceKind::Package => crate::save::loss::macros(&self.source, true),
                 // An .xlsb is a zip with the same part names.
-                SourceKind::Imported("xlsb") => crate::kernel::package::macros(&self.source, false),
+                SourceKind::Imported("xlsb") => crate::save::loss::macros(&self.source, false),
                 SourceKind::Imported(format) => Some(format!(
                     "not checked: Carrysheet cannot see macros in .{format} files; it never runs them"
                 )),
@@ -750,9 +746,10 @@ const HEADER_CELLS_DETAILED: u32 = DEFAULT_PAGE_COLUMNS;
 pub(crate) fn overview(
     kernel: &Kernel,
     args: &Map<String, Value>,
+    bytes: Vec<u8>,
 ) -> Result<Map<String, Value>, CommandError> {
     let path = input(args)?;
-    let book = kernel.open(&path)?;
+    let book = kernel.open_bytes(&path, bytes)?;
     let overview = kernel.overview(&book)?;
     let width = if detailed(args) {
         HEADER_CELLS_DETAILED
@@ -765,7 +762,7 @@ pub(crate) fn overview(
     let mut headers_cut = 0usize;
     for s in overview.sheets.iter().take(MAX_LISTED_SHEETS) {
         let mut v = serde_json::to_value(s).unwrap_or(Value::Null);
-        v["name"] = json!(clean_from_file(&s.name, 64));
+        v["name"] = json!(escape(&s.name, 64));
         // The first row of the used range: usually the headers.
         let header = match &s.used_range {
             Some(_) if text_left == 0 => {
@@ -833,6 +830,7 @@ pub(crate) fn overview(
 pub(crate) fn read(
     kernel: &Kernel,
     args: &Map<String, Value>,
+    bytes: Vec<u8>,
 ) -> Result<Map<String, Value>, CommandError> {
     let path = input(args)?;
     let mut request = ReadRequest {
@@ -852,7 +850,7 @@ pub(crate) fn read(
     }
     request.max_rows = number(args, "max_rows").unwrap_or(DEFAULT_PAGE_ROWS);
     request.max_columns = number(args, "max_columns").unwrap_or(DEFAULT_PAGE_COLUMNS);
-    let book = kernel.open(&path)?;
+    let book = kernel.open_bytes(&path, bytes)?;
     let page = kernel.read_range(&book, &request)?;
     let more = page.next_cursor.is_some();
     let mut data = match serde_json::to_value(&page) {
@@ -873,6 +871,7 @@ pub(crate) fn read(
 pub(crate) fn eval(
     kernel: &Kernel,
     args: &Map<String, Value>,
+    bytes: Vec<u8>,
 ) -> Result<Map<String, Value>, CommandError> {
     let path = input(args)?;
     let formula = text(args, "formula").unwrap_or("");
@@ -883,7 +882,7 @@ pub(crate) fn eval(
             "Give a formula like SUM(Sheet1!B2:B9).",
         ));
     }
-    let book = kernel.open(&path)?;
+    let book = kernel.open_bytes(&path, bytes)?;
     let result = kernel.evaluate(&book, text(args, "sheet"), formula)?;
     let mut data = match serde_json::to_value(&result) {
         Ok(Value::Object(map)) => map,

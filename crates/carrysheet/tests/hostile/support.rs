@@ -274,7 +274,12 @@ impl Outcome {
 
 fn exercise(kernel: &Kernel, input: Input<'_>, depth: Depth) -> Result<(), CommandError> {
     let book = match input {
-        Input::File(path) => kernel.open(path)?,
+        Input::File(path) => {
+            carrysheet::open::check_opens(path)?;
+            let read = std::fs::read(path);
+            let bytes = read.map_err(|e| carrysheet::open::ReadFailure::Io(e).error(path))?;
+            kernel.open_bytes(path, bytes)?
+        }
         Input::Bytes(name, bytes) => kernel.open_bytes(Path::new(name), bytes)?,
     };
     let overview = kernel.overview(&book)?;
@@ -483,15 +488,14 @@ pub fn mentions(text: &str, words: &[&str]) -> bool {
 /// The parts of a zip package, in their order, or `None` when it is not a
 /// zip (an encrypted package is a compound file).
 pub fn unpack(package: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
-    let mut zip = carrysheet_zip::Archive::open(
-        std::io::Cursor::new(package),
-        carrysheet_zip::Limits::default(),
-    )
-    .ok()?;
-    let names: Vec<String> = zip.entries().iter().map(|e| e.name.clone()).collect();
+    use std::io::Read as _;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(package)).ok()?;
     let mut parts = Vec::new();
-    for (i, name) in names.into_iter().enumerate() {
-        parts.push((name, zip.read(i, u64::MAX).ok()?));
+    for i in 0..zip.len() {
+        let mut part = zip.by_index(i).ok()?;
+        let mut bytes = Vec::new();
+        part.read_to_end(&mut bytes).ok()?;
+        parts.push((part.name().ok()?.into_owned(), bytes));
     }
     Some(parts)
 }

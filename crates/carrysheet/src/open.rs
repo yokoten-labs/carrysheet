@@ -2,7 +2,6 @@
 //! so every value read is computed, not cached. Text goes through the csv
 //! front end (record 0010, decision 3), which keeps what was written.
 
-use std::io::Read as _;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -11,10 +10,9 @@ use gridcraft_engine::core::Value;
 use gridcraft_engine::model::{NumFmt, StyleId, StyleTable, Workbook};
 use gridcraft_engine::{DocState, EngineError, Session};
 
-use crate::commands::paths::display_path;
 use crate::error::{CommandError, ErrorCode};
 use crate::internal;
-use crate::save::clean_from_file;
+use crate::text::escape;
 
 /// The largest file opened. 32-bit programs get less (record 0003, point 4).
 pub const MAX_FILE_BYTES: u64 = if cfg!(target_pointer_width = "64") {
@@ -23,7 +21,7 @@ pub const MAX_FILE_BYTES: u64 = if cfg!(target_pointer_width = "64") {
     256 << 20
 };
 
-/// Extensions [`read_file`] accepts.
+/// Extensions [`check_opens`] accepts.
 const OPENS: &[&str] = &["xlsx", "xlsm", "xltx", "xltm", "xls", "xlsb", "csv"];
 
 /// What the opened file was.
@@ -55,76 +53,81 @@ impl std::fmt::Debug for Book {
     }
 }
 
-fn io_error(path: &Path, e: &std::io::Error) -> CommandError {
-    let (code, why, fix) = match e.kind() {
-        std::io::ErrorKind::NotFound => (
-            ErrorCode::FileNotFound,
-            "there is no file at that path".to_owned(),
-            "Check the path, or give the full path to the workbook.",
-        ),
-        std::io::ErrorKind::PermissionDenied => (
-            ErrorCode::PermissionDenied,
-            "the system refused access".to_owned(),
-            "Check the file's permissions, or close the program that has it locked.",
-        ),
-        _ => (
-            ErrorCode::Io,
-            e.to_string(),
-            "Check that the path names a readable file.",
-        ),
-    };
-    CommandError::new(
-        code,
-        format!("{} could not be read", display_path(path)),
-        why,
-        fix,
-    )
+/// Why the program could not read a workbook it was given.
+#[derive(Debug)]
+pub enum ReadFailure {
+    Io(std::io::Error),
+    /// A folder, device, pipe or socket: it may never end, or block.
+    NotAFile,
+    TooLarge,
 }
 
-/// Reads a workbook file, refusing formats and sizes the kernel does not take.
-pub(crate) fn read_file(path: &Path) -> Result<Vec<u8>, CommandError> {
+impl From<std::io::Error> for ReadFailure {
+    fn from(e: std::io::Error) -> Self {
+        ReadFailure::Io(e)
+    }
+}
+
+impl ReadFailure {
+    /// The error for a workbook at `path` that could not be read.
+    pub fn error(&self, path: &Path) -> CommandError {
+        let shown = path.display();
+        let (code, why, fix) = match self {
+            ReadFailure::NotAFile => {
+                return CommandError::new(
+                    ErrorCode::InvalidArgument,
+                    format!("{shown} is not a file"),
+                    "the path names a folder or a device",
+                    "Give the path of a workbook file.",
+                );
+            }
+            ReadFailure::TooLarge => {
+                return CommandError::new(
+                    ErrorCode::LimitExceeded,
+                    format!("{shown} is too large to open"),
+                    format!("Carrysheet opens files up to {} MB", MAX_FILE_BYTES >> 20),
+                    "Split the workbook, or save a copy with fewer sheets or rows.",
+                );
+            }
+            ReadFailure::Io(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => (
+                    ErrorCode::FileNotFound,
+                    "there is no file at that path".to_owned(),
+                    "Check the path, or give the full path to the workbook.",
+                ),
+                std::io::ErrorKind::PermissionDenied => (
+                    ErrorCode::PermissionDenied,
+                    "the system refused access".to_owned(),
+                    "Check the file's permissions, or close the program that has it locked.",
+                ),
+                _ => (
+                    ErrorCode::Io,
+                    e.to_string(),
+                    "Check that the path names a readable file.",
+                ),
+            },
+        };
+        CommandError::new(code, format!("{shown} could not be read"), why, fix)
+    }
+}
+
+/// Refuses a file whose extension is not one Carrysheet opens, before the
+/// program reads it.
+pub fn check_opens(path: &Path) -> Result<(), CommandError> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
-    if !OPENS.contains(&ext.as_str()) {
-        return Err(CommandError::new(
-            ErrorCode::UnsupportedFormat,
-            format!("{} is not a workbook Carrysheet opens", display_path(path)),
-            "the extension is not one of .xlsx, .xlsm, .xltx, .xltm, .xls, .xlsb or .csv",
-            "Give a spreadsheet file with one of those extensions.",
-        ));
+    if OPENS.contains(&ext.as_str()) {
+        return Ok(());
     }
-    let meta = std::fs::metadata(path).map_err(|e| io_error(path, &e))?;
-    if !meta.is_file() {
-        return Err(CommandError::new(
-            ErrorCode::InvalidArgument,
-            format!("{} is not a file", display_path(path)),
-            "the path names a folder or a device",
-            "Give the path of a workbook file.",
-        ));
-    }
-    let too_big = || {
-        CommandError::new(
-            ErrorCode::LimitExceeded,
-            format!("{} is too large to open", display_path(path)),
-            format!("Carrysheet opens files up to {} MB", MAX_FILE_BYTES >> 20),
-            "Split the workbook, or save a copy with fewer sheets or rows.",
-        )
-    };
-    if meta.len() > MAX_FILE_BYTES {
-        return Err(too_big());
-    }
-    let file = std::fs::File::open(path).map_err(|e| io_error(path, &e))?;
-    let mut bytes = Vec::new();
-    file.take(MAX_FILE_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| io_error(path, &e))?;
-    if bytes.len() as u64 > MAX_FILE_BYTES {
-        return Err(too_big());
-    }
-    Ok(bytes)
+    Err(CommandError::new(
+        ErrorCode::UnsupportedFormat,
+        format!("{} is not a workbook Carrysheet opens", path.display()),
+        "the extension is not one of .xlsx, .xlsm, .xltx, .xltm, .xls, .xlsb or .csv",
+        "Give a spreadsheet file with one of those extensions.",
+    ))
 }
 
 /// Turns GridCraft's open error (plain text) into one with a code. The
@@ -134,8 +137,8 @@ fn open_error(path: &Path, e: &EngineError) -> CommandError {
     if let EngineError::Internal(_, detail) = e {
         return internal("opening the file", detail);
     }
-    let shown = display_path(path);
-    let why = clean_from_file(&text, 200);
+    let shown = path.display();
+    let why = escape(&text, 200);
     if text.contains(gridcraft_engine::io::PASSWORD_REQUIRED) {
         return CommandError::new(
             ErrorCode::UnsupportedFormat,
@@ -181,7 +184,7 @@ impl Book {
         {
             return Err(CommandError::new(
                 ErrorCode::DamagedFile,
-                format!("{} could not be opened as a workbook", display_path(path)),
+                format!("{} could not be opened as a workbook", path.display()),
                 format!("an .{ext} file is a zip package, and this one is not"),
                 "Check that this is the right file and that it was copied completely; a damaged file is not repaired.",
             ));
@@ -368,7 +371,7 @@ fn decode_text(path: &Path, bytes: &[u8]) -> Result<(String, Vec<String>), Comma
     text.map(|t| (t.into_owned(), warnings)).ok_or_else(|| {
         CommandError::new(
             ErrorCode::DamagedFile,
-            format!("{} could not be read as text", display_path(path)),
+            format!("{} could not be read as text", path.display()),
             format!("some bytes are not valid {name}, the encoding {how}"),
             "Save the file again as UTF-8 in the program that made it, then open that copy.",
         )

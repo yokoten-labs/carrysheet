@@ -1,6 +1,8 @@
 use crate::cli::*;
+use crate::files::read_bounded;
 use carrysheet::commands::table::{ArgType, COMMANDS};
 use carrysheet::commands::{CommandError, ErrorCode};
+use carrysheet::open::ReadFailure;
 use serde_json::{Map, Value};
 
 #[test]
@@ -150,12 +152,9 @@ fn ops_files_are_read_with_a_limit() {
     assert_eq!(read_bounded(&file, len).unwrap().len() as u64, len);
     assert!(matches!(
         read_bounded(&file, len - 1),
-        Err(BoundedReadError::TooLarge)
+        Err(ReadFailure::TooLarge)
     ));
-    assert!(matches!(
-        read_bounded(&file, 0),
-        Err(BoundedReadError::TooLarge)
-    ));
+    assert!(matches!(read_bounded(&file, 0), Err(ReadFailure::TooLarge)));
 
     // A folder is not a file.
     let e = ops_from(&format!("@{}", dir.0.display())).unwrap_err();

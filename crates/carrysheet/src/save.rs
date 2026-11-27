@@ -1,9 +1,7 @@
 //! Saving: `convert`, what a save keeps and loses (record 0003, point 3),
-//! csv escaping, and writing files so a failure never leaves half a workbook
-//! behind.
+//! csv escaping, and where a save goes. The program writes the bytes.
 
 use std::borrow::Cow;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use gridcraft_engine::io::FileKind;
@@ -12,11 +10,12 @@ use serde::Serialize;
 use serde_json::{Map, Value, json};
 
 use crate::args::{flag, input, shown, text};
-use crate::commands::paths::display_path;
+use crate::commands::Command;
 use crate::error::{CommandError, ErrorCode};
-use crate::kernel::package;
+pub(crate) mod loss;
 use crate::open::{Book, SourceKind};
-use crate::{Kernel, internal};
+use crate::text::escape;
+use crate::{Answer, Kernel, internal};
 
 /// File formats Carrysheet writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -152,42 +151,13 @@ pub struct Encoded {
     pub report: SaveReport,
 }
 
-/// Text from a file, made safe to show: control, bidi and invisible
-/// characters escaped, cut at `max` characters.
-pub fn clean_from_file(text: &str, max: usize) -> String {
-    escape(text, max, false)
-}
-
-/// [`clean_from_file`] in double quotes, with quotes and backslashes escaped,
-/// for naming something from a file inside a message.
-pub fn quote_from_file(text: &str, max: usize) -> String {
-    format!("\"{}\"", escape(text, max, true))
-}
-
-fn escape(text: &str, max: usize, quotes: bool) -> String {
-    let mut out = String::new();
-    for (shown, ch) in text.chars().enumerate() {
-        if shown == max {
-            out.push_str("...");
-            break;
-        }
-        let invisible = ch.is_control()
-            || matches!(ch, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}');
-        if invisible {
-            out.push_str(&format!("\\u{{{:x}}}", ch as u32));
-        } else if quotes && (ch == '"' || ch == '\\') {
-            out.push('\\');
-            out.push(ch);
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
 /// Where `edit` writes when no output is given: beside the original, as
 /// `name-edited.xlsx`, or `name-edited-2.xlsx` and so on when taken.
-pub fn default_output(input: &Path) -> Result<PathBuf, CommandError> {
+/// `exists` says whether a path is taken.
+pub fn default_output(
+    input: &Path,
+    exists: &dyn Fn(&Path) -> bool,
+) -> Result<PathBuf, CommandError> {
     let stem = input
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -204,32 +174,61 @@ pub fn default_output(input: &Path) -> Result<PathBuf, CommandError> {
             format!("{stem}-edited-{n}{ext}")
         };
         let candidate = dir.join(name);
-        if std::fs::symlink_metadata(&candidate).is_err() {
+        if !exists(&candidate) {
             return Ok(candidate);
         }
     }
     Err(CommandError::new(
         ErrorCode::FileExists,
-        format!("no free name beside {}", display_path(input)),
+        format!("no free name beside {}", input.display()),
         "the names name-edited.xlsx to name-edited-99.xlsx are all taken",
         "Pass output with the file to write.",
     ))
 }
 
 /// Refuses to replace an existing file unless `overwrite` is set.
-pub fn check_output(path: &Path, overwrite: bool) -> Result<(), CommandError> {
-    if overwrite || std::fs::symlink_metadata(path).is_err() {
+pub fn check_output(
+    path: &Path,
+    overwrite: bool,
+    exists: &dyn Fn(&Path) -> bool,
+) -> Result<(), CommandError> {
+    if overwrite || !exists(path) {
         return Ok(());
     }
     Err(CommandError::new(
         ErrorCode::FileExists,
-        format!("{} already exists", display_path(path)),
+        format!("{} already exists", path.display()),
         "Carrysheet never replaces a file unless asked",
         "Pass a different output, or set overwrite and confirm to true to replace it.",
     ))
 }
 
-fn io_error(path: &Path, e: &std::io::Error) -> CommandError {
+/// Fills in and checks where a command writes, before its file is read:
+/// `edit` without output writes beside the input, or over it with
+/// overwrite. `None` for a command that writes nothing.
+pub fn prepare_output(
+    command: &Command,
+    args: &mut Map<String, Value>,
+    exists: &dyn Fn(&Path) -> bool,
+) -> Result<Option<PathBuf>, CommandError> {
+    if command.arg("output").is_none() {
+        return Ok(None);
+    }
+    let path = input(args)?;
+    let overwrite = flag(args, "overwrite");
+    let output = match text(args, "output") {
+        Some(o) => PathBuf::from(o),
+        None if overwrite => path,
+        None => default_output(&path, exists)?,
+    };
+    output_format(&output, text(args, "format"))?;
+    check_output(&output, overwrite, exists)?;
+    args.insert("output".into(), json!(output.to_string_lossy()));
+    Ok(Some(output))
+}
+
+/// A write that failed, with a code for the reason.
+pub fn write_error(path: &Path, e: &std::io::Error) -> CommandError {
     let code = match e.kind() {
         std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
         std::io::ErrorKind::NotFound => ErrorCode::FileNotFound,
@@ -237,124 +236,10 @@ fn io_error(path: &Path, e: &std::io::Error) -> CommandError {
     };
     CommandError::new(
         code,
-        format!("{} could not be written", display_path(path)),
+        format!("{} could not be written", path.display()),
         e.to_string(),
         "Check that the folder exists, you may write there, and no other program has the file open.",
     )
-}
-
-thread_local! {
-    /// The folder [`write_atomic`] must stay inside on this thread (the MCP
-    /// root, canonical), while a [`WriteRoot`] lives.
-    static WRITE_ROOT: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
-}
-
-/// Confines [`write_atomic`] on this thread to a folder until dropped.
-#[must_use = "the confinement ends when this is dropped"]
-pub struct WriteRoot(Option<PathBuf>);
-
-/// Keeps every [`write_atomic`] on this thread inside `root` while the
-/// returned guard lives (review round 2, L-a): a link changed after the
-/// path was resolved cannot lead the write outside.
-pub fn confine_writes(root: &Path) -> WriteRoot {
-    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    WriteRoot(WRITE_ROOT.with(|r| r.replace(Some(root))))
-}
-
-impl Drop for WriteRoot {
-    fn drop(&mut self) {
-        let previous = self.0.take();
-        WRITE_ROOT.with(|r| *r.borrow_mut() = previous);
-    }
-}
-
-/// Refuses when a write confinement is set and `target`'s folder, with
-/// every link followed, is not inside it, or `target` itself now leads
-/// elsewhere than `expected`.
-fn still_inside(target: &Path, expected: &Path, dir: &Path) -> Result<(), CommandError> {
-    let Some(root) = WRITE_ROOT.with(|r| r.borrow().clone()) else {
-        return Ok(());
-    };
-    let inside = link_target(target) == expected
-        && std::fs::canonicalize(dir).is_ok_and(|d| d.starts_with(&root));
-    if inside {
-        return Ok(());
-    }
-    Err(CommandError::new(
-        ErrorCode::OutsideRoot,
-        format!("{} is outside the root folder", display_path(target)),
-        "a link on the way to the file changed while it was being saved, and now leads outside the root folder",
-        "Use a path inside the root folder that is not a link changed by another program; nothing was written.",
-    ))
-}
-
-/// Writes `bytes` to `path` through a temporary file in the same folder,
-/// then renames it into place: a failure leaves the old file as it was.
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), CommandError> {
-    // A link is written through: the file it points to is replaced and the
-    // link stays (review M2).
-    let given = path;
-    let real = link_target(path);
-    let path = real.as_path();
-    // An existing file keeps its permissions (a private 600 file must not
-    // become readable by others).
-    let keep = std::fs::metadata(path).ok().map(|m| m.permissions());
-    let dir = path
-        .parent()
-        .filter(|d| !d.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let tmp = dir.join(format!(".{name}.{}.carrysheet-tmp", std::process::id()));
-    still_inside(given, path, dir)?;
-    let written = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        if let Some(permissions) = keep {
-            // Set before any byte is written.
-            file.set_permissions(permissions)?;
-        }
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        Ok(())
-    })();
-    if let Err(e) = written {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(io_error(path, &e));
-    }
-    // Checked again just before the rename: links may change meanwhile.
-    if let Err(e) = still_inside(given, path, dir) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        io_error(path, &e)
-    })
-}
-
-/// The file `path` names, following symbolic links (at most 40, as the
-/// system does). A link to a missing file gives the missing file's path.
-fn link_target(path: &Path) -> std::path::PathBuf {
-    let mut p = path.to_path_buf();
-    for _ in 0..40 {
-        let is_link = std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink());
-        if !is_link {
-            break;
-        }
-        let Ok(to) = std::fs::read_link(&p) else {
-            break;
-        };
-        p = match p.parent() {
-            Some(dir) if to.is_relative() => dir.join(to),
-            _ => to,
-        };
-    }
-    p
 }
 
 pub(crate) fn encode(
@@ -388,7 +273,7 @@ fn save_failed(e: &gridcraft_engine::EngineError) -> CommandError {
     CommandError::new(
         ErrorCode::Io,
         "the workbook could not be encoded",
-        clean_from_file(&e.to_string(), 200),
+        escape(&e.to_string(), 200),
         "Try another output format; if it keeps failing, report it at https://github.com/yokoten-labs/carrysheet/issues.",
     )
 }
@@ -428,7 +313,7 @@ fn encode_xlsx(book: &Book, path: &Path, name: &str) -> Result<Encoded, CommandE
     }
     let mut report = SaveReport::new(FileFormat::Xlsx);
     match book.kind {
-        SourceKind::Package => package::compare(&book.source, &bytes, &mut report),
+        SourceKind::Package => loss::compare(&book.source, &bytes, &mut report),
         SourceKind::Csv => {}
         SourceKind::Imported(format) => report.lost.push(Loss {
             feature: format!("anything the .{format} import skips (Carrysheet cannot list it yet)"),
@@ -457,7 +342,7 @@ fn open_warnings(book: &Book, report: &mut SaveReport) {
         "missing",
     ];
     for w in &book.warnings {
-        let text = clean_from_file(w, 200);
+        let text = escape(w, 200);
         if LOST.iter().any(|l| w.contains(l)) {
             report.lost.push(Loss {
                 feature: format!("content the opened file could not give: {text}"),
@@ -517,7 +402,7 @@ fn csv_bytes_of(
             CommandError::new(
                 ErrorCode::LimitExceeded,
                 "the csv file would be too large",
-                clean_from_file(&e.to_string(), 200),
+                escape(&e.to_string(), 200),
                 "Save as .xlsx, or copy the part you need to a new sheet and save that.",
             )
         })?;
@@ -570,7 +455,7 @@ fn encode_csv(
         });
     }
     match book.kind {
-        SourceKind::Package => match package::source_features(&book.source) {
+        SourceKind::Package => match loss::source_features(&book.source) {
             Ok(features) => {
                 for (feature, n) in features {
                     report.lost.push(Loss {
@@ -580,7 +465,7 @@ fn encode_csv(
                     });
                 }
             }
-            Err(why) => report.lost.push(package::unchecked_loss(&why)),
+            Err(why) => report.lost.push(loss::unchecked_loss(&why)),
         },
         SourceKind::Csv => {}
         SourceKind::Imported(format) => report.lost.push(Loss {
@@ -593,10 +478,12 @@ fn encode_csv(
 }
 
 /// Writes the workbook in another format.
+/// The caller checks `output` first ([`prepare_output`]).
 pub(crate) fn convert(
     kernel: &Kernel,
     args: &Map<String, Value>,
-) -> Result<Map<String, Value>, CommandError> {
+    bytes: Vec<u8>,
+) -> Result<Answer, CommandError> {
     let path = input(args)?;
     let output = text(args, "output").map(PathBuf::from).ok_or_else(|| {
         CommandError::invalid_argument(
@@ -606,8 +493,7 @@ pub(crate) fn convert(
         )
     })?;
     let format = output_format(&output, text(args, "format"))?;
-    check_output(&output, flag(args, "overwrite"))?;
-    let book = kernel.open(&path)?;
+    let book = kernel.open_bytes(&path, bytes)?;
     let options = EncodeOptions {
         sheet: text(args, "sheet"),
         csv_raw: flag(args, "csv_raw"),
@@ -631,7 +517,7 @@ pub(crate) fn output_format(
     by_name.ok_or_else(|| {
         CommandError::new(
             ErrorCode::UnsupportedFormat,
-            format!("{} has no format Carrysheet writes", display_path(output)),
+            format!("{} has no format Carrysheet writes", output.display()),
             "the format comes from the output's extension: .xlsx, .xlsm or .csv",
             "Name the output with one of those extensions, or pass format.",
         )
@@ -639,15 +525,15 @@ pub(crate) fn output_format(
 }
 
 /// Shows the save report; with `dry_run` stops there, else refuses a lossy
-/// save without `confirm_loss`, then writes. `confirm` (deleting rows,
-/// overwriting) never stands in for it: dropping macros is agreed to on its
-/// own.
+/// save without `confirm_loss`, else gives the bytes to write. `confirm`
+/// (deleting rows, overwriting) never stands in for it: dropping macros is
+/// agreed to on its own.
 pub(crate) fn finish_save(
     args: &Map<String, Value>,
     output: &Path,
     encoded: Encoded,
     mut data: Map<String, Value>,
-) -> Result<Map<String, Value>, CommandError> {
+) -> Result<Answer, CommandError> {
     let Encoded { bytes, report } = encoded;
     let dry_run = flag(args, "dry_run");
     let loses = report.loses_something();
@@ -662,15 +548,13 @@ pub(crate) fn finish_save(
                 json!("Saving would lose what save.lost lists. Call again with confirm_loss set to true to save anyway."),
             );
         }
-        return Ok(data);
+        return Ok(Answer::from(data));
     }
     if loses && !flag(args, "confirm_loss") {
         return Err(loss_error(output, &report));
     }
-    write_atomic(output, &bytes)?;
-    data.insert("written".into(), json!(true));
-    data.insert("bytes".into(), json!(bytes.len()));
-    Ok(data)
+    let save = Some(bytes);
+    Ok(Answer { data, save })
 }
 
 fn loss_error(output: &Path, report: &SaveReport) -> CommandError {
@@ -700,5 +584,5 @@ fn loss_error(output: &Path, report: &SaveReport) -> CommandError {
 
 /// A part name from a file, as shown in reports.
 pub fn part_name(name: &str) -> String {
-    quote_from_file(name, 64)
+    crate::text::quote(name, 64)
 }

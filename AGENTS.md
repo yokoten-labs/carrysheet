@@ -92,8 +92,8 @@ Carrysheet is a small, fast, native spreadsheet written in Rust. The first relea
 
 | Folder | What | License |
 |---|---|---|
-| `crates/` | Libraries: `carrysheet`, the product as one library on the vendored GridCraft (`open`, `view`, `edit`, `save`, `range`, `error`, and `commands` for the command table and its schemas), and `carrysheet-zip`, the hardened zip reader. Unit tests sit in each crate's `src/tests/`, integration tests in `tests/` | MIT OR Apache-2.0 |
-| `apps/` | Programs: `carrysheet-cli` (with MCP), later the desktop app | GPL-3.0-or-later |
+| `crates/` | Libraries: `carrysheet`, the product as one library on the vendored GridCraft (`open`, `view`, `edit`, `save` with the save-loss report in `save/loss.rs`, `range`, `error`, `text` for text from files, and `commands` for the command table and its schemas). It takes bytes and gives back bytes: it has no file access. Unit tests sit in each crate's `src/tests/`, integration tests in `tests/` | MIT OR Apache-2.0 |
+| `apps/` | Programs: `carrysheet-cli` (with MCP; all file access, the `--root` walk and home redaction are in `src/files.rs`), later the desktop app | GPL-3.0-or-later |
 | `research/` | Experiments such as the kernel comparison; its own Cargo workspace | MIT OR Apache-2.0 |
 | `scripts/` | Node scripts: the line cap and the vendor check | MIT OR Apache-2.0 |
 | `vendor/gridcraft/` | Upstream GridCraft, the kernel that reads and writes the file formats | MIT OR Apache-2.0 (upstream's) |
@@ -109,11 +109,12 @@ You must never copy, translate or closely paraphrase code from GPL, LGPL, AGPL o
 ### Code rules
 
 - Rust edition 2024, stable toolchain, `rust-version = 1.90`. No `unsafe` (workspace lint forbids it).
-- CI is the merge gate: a PR is merged only when every job in `.github/workflows/ci.yml` is green. The jobs are plain cargo commands (fmt, clippy, tests, cargo-deny, the zip tests on both inflaters, wasm, Windows builds, MSRV) plus the `lines`, `vendor` and release privacy scan jobs. Run the same commands by hand: `cargo fmt --all --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace`, `cargo deny --locked check` and `cargo wasm-check`. The Rust version is in `rust-toolchain.toml`.
+- CI is the merge gate: a PR is merged only when every job in `.github/workflows/ci.yml` is green. The jobs are plain cargo commands (fmt, clippy, tests, cargo-deny, wasm, Windows builds, MSRV) plus the `lines`, `vendor` and release privacy scan jobs. Run the same commands by hand: `cargo fmt --all --check`, `cargo clippy --locked --workspace --all-targets -- -D warnings`, `cargo test --locked --workspace`, `cargo deny --locked check` and `cargo wasm-check`. The Rust version is in `rust-toolchain.toml`.
 - Parsers treat every input file as hostile: no panics, no unbounded allocation, limits on sizes and counts. A malformed file returns an error that says what is wrong.
 - Never drop data you don't understand when saving: keep it and write it back.
 - Commands call GridCraft directly, through `Kernel` in `crates/carrysheet/src/lib.rs`. Cells and ranges are GridCraft's `CellRef` and `RangeRef`; `range.rs` adds only what GridCraft's parser does not do. Do not add an engine interface or our own workbook types again (record 0010, decision 4). Tests run on the real kernel.
-- Text for people comes from one generic form in `apps/carrysheet-cli/src/output.rs`: a list of rows is a table, every other field is `key: value`. Do not write text by hand for one command. Every string from a file goes through `redact_home` and `clean_from_file` before it is printed.
+- Text for people comes from one generic form in `apps/carrysheet-cli/src/output.rs`: a list of rows is a table, every other field is `key: value`. Do not write text by hand for one command. Every string from a file goes through `redact_home` and `carrysheet::text::escape` before it is printed.
+- The library never reads or writes files, and does not replace the home folder with `~`. The program does both in `apps/carrysheet-cli/src/files.rs`. Every error it shows goes through `redact_error` first (record 0010, decision 2).
 - Errors for people and agents have three parts: what happened, why, and how to fix it.
 - Tests use small files committed under the crate's `tests/data/` (made by us or from Apache POI's test data with its license noted). Never commit large corpora.
 

@@ -5,8 +5,6 @@ use std::fmt;
 use crate::range::RefError;
 use serde::Serialize;
 
-use crate::commands::paths::redact_home;
-
 /// How a command ended, as a process exit code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExitCode {
@@ -118,10 +116,8 @@ impl fmt::Display for ErrorCode {
 /// Keep `fix` short. It is shown right after `what`, before `why`, because
 /// some clients keep only the start of an error.
 ///
-/// The parts often repeat what the user typed (a path, a reference), so
-/// every way of showing an error (`to_json`, `to_text`, `Display` and
-/// `Serialize`) replaces the home folder with `~`. The fields themselves
-/// keep the text as it was.
+/// The parts often repeat what the user typed (a path, a reference); the
+/// program replaces the home folder with `~` before showing them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandError {
     pub code: ErrorCode,
@@ -174,24 +170,14 @@ impl CommandError {
         self.code.exit_code()
     }
 
-    /// The same error with the home folder shown as `~` in every part.
-    pub fn redacted(&self) -> CommandError {
-        CommandError {
-            code: self.code,
-            what: redact_home(&self.what),
-            fix: redact_home(&self.fix),
-            why: redact_home(&self.why),
-        }
-    }
-
     /// `{"code","what","fix","why"}` as JSON, the fix before the reason.
+    /// The program shows the home folder as `~`.
     pub fn to_json(&self) -> serde_json::Value {
-        let shown = self.redacted();
         serde_json::json!({
-            "code": shown.code.as_str(),
-            "what": shown.what,
-            "fix": shown.fix,
-            "why": shown.why,
+            "code": self.code.as_str(),
+            "what": self.what,
+            "fix": self.fix,
+            "why": self.why,
         })
     }
 
@@ -202,17 +188,16 @@ impl CommandError {
 
     /// Plain text for a terminal: three lines, no colour, the fix second.
     pub fn to_text(&self) -> String {
-        let shown = self.redacted();
         format!(
             "error: {}\n  fix: {}\n  why: {}",
-            shown.what, shown.fix, shown.why
+            self.what, self.fix, self.why
         )
     }
 }
 
 impl fmt::Display for CommandError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&redact_home(&self.what))
+        f.write_str(&self.what)
     }
 }
 

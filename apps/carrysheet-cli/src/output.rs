@@ -4,13 +4,13 @@
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use carrysheet::commands::paths::redact_home;
 use carrysheet::commands::{CommandError, ErrorCode};
-use carrysheet::save::clean_from_file;
+use carrysheet::text::escape;
 use clap::error::ErrorKind;
 use serde_json::{Map, Value, json};
 
 use crate::cli::BIN;
+use crate::files::{redact_error, redact_home};
 use crate::run::Done;
 
 /// Set while `mcp serve` runs: stdout then belongs to the MCP transport.
@@ -55,10 +55,10 @@ pub fn print_done(done: &Done, json: bool) {
 fn scalar(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
-        Value::String(s) => clean_from_file(&redact_home(s), 2000),
+        Value::String(s) => escape(&redact_home(s), 2000),
         Value::Number(n) if !n.is_f64() => n.to_string(),
         Value::Number(n) => n.as_f64().unwrap_or_default().to_string(),
-        other => clean_from_file(&redact_home(&other.to_string()), 2000),
+        other => escape(&redact_home(&other.to_string()), 2000),
     }
 }
 
@@ -117,6 +117,7 @@ pub fn render(data: &Map<String, Value>) -> String {
 /// Prints an error: JSON on stdout with `--json`, and always text on stderr.
 /// Both forms show the home folder as `~`.
 pub fn print_error(err: &CommandError, json: bool) {
+    let err = &redact_error(err);
     if json {
         stdout_line(&err.to_envelope().to_string());
     }

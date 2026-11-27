@@ -1,23 +1,28 @@
 //! Running a command once its arguments are validated.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use carrysheet::commands::paths::display_path;
 use carrysheet::commands::schema::command_json;
 use carrysheet::commands::table::{COMMANDS, Command};
 use carrysheet::commands::{CommandError, ErrorCode, check_confirmation};
+use carrysheet::open::{MAX_FILE_BYTES, check_opens};
+use carrysheet::save::prepare_output;
 use carrysheet::{Kernel, run_within};
 use serde_json::{Map, Value, json};
 
+use crate::files::{display_path, exists, read_bounded, write_atomic};
+
 /// How the program was started. Nobody is ever asked a question: a
 /// confirmation comes from `--yes` or the command's own arguments.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Context {
     /// `--yes`: gives `confirm` and `confirm_loss`.
     pub yes: bool,
     /// `--max-seconds`: the time one command may take; `None` is the
     /// default for agents (`limits::MAX_CALL_SECONDS`).
     pub max_seconds: Option<f64>,
+    /// `mcp serve`'s root folder: writes must stay inside it.
+    pub root: Option<PathBuf>,
 }
 
 /// What a command produced: JSON fields, which people see as text too.
@@ -54,7 +59,22 @@ pub fn run(
                 }
             }
             check_confirmation(command, &args)?;
-            let data = run_within(&Kernel::new(), command, &args, ctx.max_seconds)?;
+            let output = prepare_output(command, &mut args, &exists)?;
+            let path = PathBuf::from(args.get("path").and_then(Value::as_str).unwrap_or(""));
+            check_opens(&path)?;
+            let input = read_bounded(&path, MAX_FILE_BYTES).map_err(|e| e.error(&path))?;
+            let answer = run_within(&Kernel::new(), command, &args, input, ctx.max_seconds)?;
+            let mut data = answer.data;
+            if let (Some(bytes), Some(output)) = (answer.save, output) {
+                write_atomic(&output, &bytes, ctx.root.as_deref())?;
+                data.insert("written".into(), json!(true));
+                data.insert("bytes".into(), json!(bytes.len()));
+            }
+            for name in ["file", "output"] {
+                if let Some(Value::String(shown)) = data.get_mut(name) {
+                    *shown = display_path(Path::new(shown));
+                }
+            }
             Ok(Done { data, plain: None })
         }
     }

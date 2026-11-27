@@ -8,12 +8,8 @@
 //!   the schemas against every client's rules lives in `tests/lint`.
 //! - [`error`]: errors with a code, what, why and fix, and exit codes.
 //! - [`limits`]: every limit on the work and memory of one call.
-//! - [`paths`]: showing paths with `~` for the home folder.
-//! - [`root`]: keeping the paths a client gives inside a root folder.
 
 pub mod limits;
-pub mod paths;
-pub mod root;
 pub mod schema;
 pub mod table;
 

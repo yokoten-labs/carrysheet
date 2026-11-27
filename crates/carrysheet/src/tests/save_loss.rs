@@ -1,5 +1,5 @@
-use crate::kernel::package::*;
 use crate::save::SaveReport;
+use crate::save::loss::*;
 
 /// A part to zip: its name, its text, and its raw deflate stream, if
 /// any.
@@ -140,10 +140,7 @@ fn a_package_too_large_to_search_needs_confirm_loss() {
         ("xl/worksheets/sheet1.xml", sheet),
     ];
     let source = package(&parts);
-    let small = Caps {
-        part: 16,
-        total: 16,
-    };
+    let small = (16, 16);
     let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
     compare_within(&source, &source, &mut r, small);
     let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
@@ -208,11 +205,7 @@ fn a_long_run_of_empty_blocks_between_outputs_is_refused_and_named() {
     // Read whole, it is refused for its shape, and nothing else.
     let mut p = Package::open(&source).unwrap();
     let e = p.parts["xl/worksheets/sheet9.xml"].1;
-    assert!(p.unpack(e).is_none());
-    assert_eq!(
-        p.unsearched.iter().copied().collect::<Vec<_>>(),
-        [Unsearched::Slow]
-    );
+    assert_eq!(p.unpack(e).err(), Some(SLOW));
 
     let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
     compare(&source, &source, &mut r);
@@ -290,7 +283,11 @@ fn counting_needles() {
 
 #[test]
 fn part_names_match_features() {
-    let label = |name: &str| PART_FEATURES.iter().find(|(_, t)| t(name)).map(|(l, _)| *l);
+    let label = |name: &str| kind(PART_FEATURES, name);
+    assert_eq!(label("customxml/item1.xml"), Some("custom XML"));
+    assert_eq!(label("xl/model/item.data"), Some("data model"));
+    assert_eq!(label("xl/comments1.xml"), Some("comments"));
+    assert_eq!(label("xl/media/image1.png"), Some("images"));
     assert_eq!(label("xl/charts/chart1.xml"), Some("charts"));
     assert_eq!(label("xl/charts/_rels/chart1.xml.rels"), None);
     assert_eq!(label("xl/vbaproject.bin"), Some("VBA project"));
