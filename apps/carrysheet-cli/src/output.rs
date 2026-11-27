@@ -4,9 +4,9 @@
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use carrysheet::commands::engine::save::clean_from_file;
 use carrysheet::commands::paths::redact_home;
 use carrysheet::commands::{CommandError, ErrorCode};
+use carrysheet::save::clean_from_file;
 use clap::error::ErrorKind;
 use serde_json::{Map, Value, json};
 
