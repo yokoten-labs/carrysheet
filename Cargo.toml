@@ -4,11 +4,20 @@ members = ["crates/*", "apps/*"]
 # vendor/gridcraft is a workspace of its own (see its Cargo.toml).
 exclude = ["research/kernel-bench", "vendor/gridcraft"]
 
+# One version for both crates (issue 97): each says `version.workspace = true`.
+# The release tag vX.Y.Z must equal it; the release workflow checks with
+# `cargo metadata`. SemVer, 0.x until the 1.0 bar (CONTRIBUTING.md).
 [workspace.package]
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
 repository = "https://github.com/yokoten-labs/carrysheet"
 homepage = "https://carrysheet.com"
+
+# The program depends on the library through this line, so the version
+# lives in one file. Keep it equal to the workspace version.
+[workspace.dependencies]
+carrysheet = { path = "crates/carrysheet", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
