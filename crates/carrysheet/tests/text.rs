@@ -29,8 +29,9 @@ fn hidden_characters_in_a_sheet_name_are_escaped_in_json() {
 }
 
 #[test]
-fn a_terminal_escape_in_a_sheet_name_is_escaped_in_the_error() {
-    let what = overview_of("text-error", "x\u{1b}[31m\u{E0041}\u{202E}").unwrap_err();
+fn a_terminal_escape_in_a_sheet_name_is_escaped() {
+    let done = overview_of("text-error", "x\u{1b}[31m\u{E0041}\u{202E}").unwrap();
+    let what = done["sheets"][0]["name"].as_str().unwrap();
     assert!(
         !what.contains('\u{1b}') && !what.contains('\u{E0041}'),
         "{what:?}"
