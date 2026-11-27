@@ -226,7 +226,7 @@ fn encode_csv(
     }
     match book.kind {
         SourceKind::Package => match package::source_features(&book.source) {
-            Some(features) => {
+            Ok(features) => {
                 for (feature, n) in features {
                     report.lost.push(Loss {
                         feature: feature.to_owned(),
@@ -235,7 +235,7 @@ fn encode_csv(
                     });
                 }
             }
-            None => report.lost.push(package::unchecked_loss()),
+            Err(why) => report.lost.push(package::unchecked_loss(&why)),
         },
         SourceKind::Csv => {}
         SourceKind::Imported(format) => report.lost.push(Loss {

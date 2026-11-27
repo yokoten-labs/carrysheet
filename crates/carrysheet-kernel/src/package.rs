@@ -2,17 +2,20 @@
 //! save must keep (record 0003, point 3). The approach follows the kernel
 //! bench's A5 check (research/kernel-bench on branch kernel-bench).
 
-use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Cursor, Read, Seek, SeekFrom};
-use std::rc::Rc;
+use std::io::Cursor;
 
 use carrysheet_commands::engine::save::MAX_LISTED_PARTS;
 use carrysheet_commands::engine::{Loss, PartCounts, SaveReport};
+use carrysheet_zip::{Archive, DuplicateNames, Limits as ZipLimits};
 use gridcraft_engine::core::limits as gc;
 
 /// Most entries listed from one package (as GridCraft reads).
 const MAX_ENTRIES: usize = 200_000;
+/// Largest central directory read: 64 MiB, room for [`MAX_ENTRIES`]
+/// entries with names of up to about 290 bytes (each entry is a 46-byte
+/// header and its name). Excel's part names are far shorter.
+const MAX_DIRECTORY: u64 = 64 << 20;
 /// Largest part searched for features inside sheets and the workbook.
 const MAX_SCANNED_PART: u64 = 64 << 20;
 /// Most bytes searched in one package.
@@ -29,59 +32,44 @@ struct Entry {
     size: u64,
 }
 
-/// Packed bytes a part may read before it gives any output. A real deflate
-/// stream gives output within its first block header (a few hundred
-/// bytes); this leaves room for eight of the zip reader's 8 KiB reads.
-/// GridCraft allows 256 KiB, but parts it reads have passed its own check
-/// already: those this module alone unpacks are ones GridCraft never read
-/// (a sheet part no relationship names), and a quarter megabyte of empty
-/// compressed blocks costs seconds to inflate (round 3: 6 s in a debug
-/// build), so it refuses them four times sooner.
-const FIRST_READ: u64 = 64 << 10;
-
-/// How many packed bytes a part read may take (review H2): at most
-/// [`FIRST_READ`] plus the limit's ratio times the output.
-struct Allowance {
-    read: Cell<u64>,
-    until: Cell<u64>,
+/// Why some of a package was not searched, as the loss text says it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Unsearched {
+    /// Over the part or package cap.
+    TooLarge,
+    /// A part's compressed data is shaped to cost time (such as runs of
+    /// empty deflate blocks), and the zip reader refused it (issue 80).
+    Slow,
+    /// A part could not be unpacked: damaged, or a zip feature Excel does
+    /// not write.
+    Unreadable,
+    /// The command's time limit ran out while unpacking.
+    OutOfTime,
 }
 
-/// The package bytes, read through an [`Allowance`].
-struct Counted<'a> {
-    inner: Cursor<&'a [u8]>,
-    allowance: Rc<Allowance>,
-}
-
-impl Read for Counted<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let a = &self.allowance;
-        let left = a.until.get().saturating_sub(a.read.get());
-        if left == 0 && !buf.is_empty() {
-            return Err(std::io::Error::other(
-                "the part unpacks to far less than it reads",
-            ));
+impl Unsearched {
+    fn text(self) -> &'static str {
+        match self {
+            Unsearched::TooLarge => "the file is too large to search",
+            Unsearched::Slow => {
+                "a part was refused because it unpacks far more slowly than real files do, as files built to waste time are"
+            }
+            Unsearched::Unreadable => "a part could not be unpacked; it may be damaged",
+            Unsearched::OutOfTime => "the command's time limit ran out while unpacking parts",
         }
-        let n = buf.len().min(usize::try_from(left).unwrap_or(usize::MAX));
-        let got = self.inner.read(buf.get_mut(..n).unwrap_or_default())?;
-        a.read.set(a.read.get().saturating_add(got as u64));
-        Ok(got)
-    }
-}
-
-impl Seek for Counted<'_> {
-    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        self.inner.seek(pos)
     }
 }
 
 /// A package's parts by normalized name (lower case, no leading `/`).
 pub(crate) struct Package<'a> {
-    zip: zip::ZipArchive<Counted<'a>>,
-    allowance: Rc<Allowance>,
+    zip: Archive<Cursor<&'a [u8]>>,
     parts: BTreeMap<String, (String, Entry)>,
-    /// Parts already refused by [`Package::unpack`]: each search of the
-    /// package asks again, and must not pay for the same refusal twice.
-    refused: BTreeSet<usize>,
+    /// Parts already refused by [`Package::unpack`], with why: each search
+    /// of the package asks again, and must not pay for the same refusal
+    /// twice.
+    refused: BTreeMap<usize, Unsearched>,
+    /// Why searches of this package stopped short, if any did.
+    unsearched: BTreeSet<Unsearched>,
     caps: Caps,
 }
 
@@ -105,83 +93,79 @@ fn normalize(name: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// The zip reader's limits for the save check. Each search may unpack the
+/// same parts again, so the reader's totals are not the bound: [`Caps`]
+/// bound each search, the reader's guards bound the work per byte, and the
+/// command's clock (the interrupt) bounds the time.
+fn zip_limits() -> ZipLimits {
+    ZipLimits {
+        max_entries: MAX_ENTRIES,
+        max_directory_bytes: MAX_DIRECTORY,
+        max_entry_bytes: MAX_SCANNED_PART,
+        max_total_bytes: u64::MAX,
+        max_total_read: u64::MAX,
+        // Listed as GridCraft lists them: the first of two same names.
+        duplicate_names: DuplicateNames::Report,
+        ..ZipLimits::default()
+    }
+}
+
 impl<'a> Package<'a> {
-    /// Lists a package's parts without unpacking them; `None` if the bytes
-    /// are not a zip.
-    pub(crate) fn open(bytes: &'a [u8]) -> Option<Package<'a>> {
-        let allowance = Rc::new(Allowance {
-            read: Cell::new(0),
-            until: Cell::new(u64::MAX),
-        });
-        let counted = Counted {
-            inner: Cursor::new(bytes),
-            allowance: Rc::clone(&allowance),
-        };
-        let mut zip = zip::ZipArchive::new(counted).ok()?;
+    /// Lists a package's parts without unpacking them; when the bytes are
+    /// not a zip the hardened reader opens, says why in plain words.
+    pub(crate) fn open(bytes: &'a [u8]) -> Result<Package<'a>, String> {
+        let mut zip = Archive::open(Cursor::new(bytes), zip_limits()).map_err(unlisted)?;
+        // Unpacking counts against the command's time limit (round 2, N6).
+        zip.set_interrupt(Box::new(|| !gc::check_time()));
         let mut parts = BTreeMap::new();
-        for index in 0..zip.len().min(MAX_ENTRIES) {
-            let Ok(f) = zip.by_index_raw(index) else {
-                continue;
-            };
+        for (index, f) in zip.entries().iter().enumerate() {
             if f.is_dir() {
                 continue;
             }
-            let Ok(name) = f.name().map(|n| n.into_owned()) else {
-                continue;
-            };
             let entry = Entry {
                 index,
-                crc: f.crc32(),
-                size: f.size(),
+                crc: f.crc32,
+                size: f.size,
             };
-            parts.entry(normalize(&name)).or_insert((name, entry));
+            parts
+                .entry(normalize(&f.name))
+                .or_insert((f.name.clone(), entry));
         }
-        Some(Package {
+        Ok(Package {
             zip,
-            allowance,
             parts,
-            refused: BTreeSet::new(),
+            refused: BTreeMap::new(),
+            unsearched: BTreeSet::new(),
             caps: Caps::DEFAULT,
         })
     }
 
-    /// The unpacked bytes of one part, at most the part cap + 1; `None`
-    /// when it cannot be read, reads far more than it gives, or the
-    /// command's time ran out (round 2, N6: slow unpacking).
+    /// The unpacked bytes of one part (at most the part cap); `None` when
+    /// it cannot be read, is shaped to unpack slowly, or the command's time
+    /// ran out (round 2, N6: slow unpacking). Why is kept in `unsearched`.
     fn unpack(&mut self, e: Entry) -> Option<Vec<u8>> {
-        if self.refused.contains(&e.index) {
+        if let Some(why) = self.refused.get(&e.index) {
+            self.unsearched.insert(*why);
             return None;
         }
-        let ratio = u64::from(carrysheet_commands::limits::MIN_INFLATE_RATIO);
-        let a = Rc::clone(&self.allowance);
-        a.until.set(u64::MAX);
-        let mut file = self.zip.by_index(e.index).ok()?;
-        let start = a.read.get();
-        let mut data = Vec::new();
-        let mut chunk = [0u8; 16 << 10];
-        let result = loop {
-            a.until
-                .set(start + FIRST_READ + (data.len() as u64).saturating_mul(ratio));
-            if !gc::check_time() {
-                break None;
-            }
-            match file.read(&mut chunk) {
-                Ok(0) => break Some(()),
-                Ok(n) => {
-                    data.extend_from_slice(chunk.get(..n).unwrap_or_default());
-                    if data.len() as u64 > self.caps.part {
-                        break Some(());
-                    }
-                }
-                Err(_) => break None,
-            }
-        };
-        drop(file);
-        a.until.set(u64::MAX);
-        if result.is_none() {
-            self.refused.insert(e.index);
+        if !gc::check_time() {
+            self.unsearched.insert(Unsearched::OutOfTime);
+            return None;
         }
-        result.map(|()| data)
+        match self.zip.read(e.index, self.caps.part) {
+            Ok(data) => Some(data),
+            Err(err) => {
+                let why = match err {
+                    carrysheet_zip::Error::Interrupted => Unsearched::OutOfTime,
+                    carrysheet_zip::Error::LimitExceeded { .. } => Unsearched::TooLarge,
+                    ref z if z.is_slow_to_unpack() => Unsearched::Slow,
+                    _ => Unsearched::Unreadable,
+                };
+                self.refused.insert(e.index, why);
+                self.unsearched.insert(why);
+                None
+            }
+        }
     }
 
     fn names(&self) -> impl Iterator<Item = &str> {
@@ -201,6 +185,7 @@ impl<'a> Package<'a> {
             .collect();
         for e in picked {
             if e.size > self.caps.part || total + e.size > self.caps.total {
+                self.unsearched.insert(Unsearched::TooLarge);
                 return None;
             }
             let data = self.unpack(e)?;
@@ -224,6 +209,7 @@ impl<'a> Package<'a> {
             .collect();
         for e in picked {
             if e.size > self.caps.part || total + e.size > self.caps.total {
+                self.unsearched.insert(Unsearched::TooLarge);
                 return false;
             }
             let Some(data) = self.unpack(e) else {
@@ -567,9 +553,10 @@ fn content_losses(before: &mut Package<'_>, after: &mut Package<'_>, report: &mu
     let (Some(had), Some(has)) = (signatures(before), signatures(after)) else {
         // Not searched (too large, or unreadable): a loss, so the save
         // needs confirm_loss (round 2, N4).
-        report
-            .lost
-            .push(unchecked_content("content inside rewritten parts"));
+        report.lost.push(unchecked_content(
+            "content inside rewritten parts",
+            &why_unsearched(before, after),
+        ));
         return;
     };
     let mut lost: BTreeMap<&'static str, (u64, u64)> = BTreeMap::new();
@@ -591,9 +578,10 @@ fn content_losses(before: &mut Package<'_>, after: &mut Package<'_>, report: &mu
     // Formulas GridCraft cannot compute must keep their saved values.
     let names = |p: &mut Package<'_>| p.count_in(sheet_part, &[b"<v>#NAME?</v>", b"_xlfn."]);
     let (Some(b), Some(a)) = (names(before), names(after)) else {
-        report
-            .lost
-            .push(unchecked_content("saved results of formulas"));
+        report.lost.push(unchecked_content(
+            "saved results of formulas",
+            &why_unsearched(before, after),
+        ));
         return;
     };
     {
@@ -741,18 +729,41 @@ fn features(p: &mut Package<'_>) -> (BTreeMap<&'static str, u64>, Vec<&'static s
 }
 
 /// Feature counts of a package, for reports when the output is not one.
-/// `None` when its parts cannot be listed.
-pub(crate) fn source_features(bytes: &[u8]) -> Option<BTreeMap<&'static str, u64>> {
+/// When its parts cannot be listed, why.
+pub(crate) fn source_features(bytes: &[u8]) -> Result<BTreeMap<&'static str, u64>, String> {
     Package::open(bytes).map(|mut p| features(&mut p).0)
 }
 
+/// Why the zip reader would not list a package's parts, in plain words
+/// (its texts hold nothing from the file).
+fn unlisted(e: carrysheet_zip::Error) -> String {
+    match e {
+        carrysheet_zip::Error::LimitExceeded {
+            what: "zip entries",
+            ..
+        } => format!("it has more than {MAX_ENTRIES} parts"),
+        carrysheet_zip::Error::LimitExceeded {
+            what: "bytes of the central directory",
+            ..
+        } => format!(
+            "its list of parts is larger than {} MiB",
+            MAX_DIRECTORY >> 20
+        ),
+        carrysheet_zip::Error::Unsupported(_) => {
+            format!("it uses zip features Excel does not write ({e})")
+        }
+        e => format!("its zip structure cannot be read ({e})"),
+    }
+}
+
 /// The loss reported when a package cannot be compared: the save must not
-/// pass as losing nothing (record 0003).
-pub(crate) fn unchecked_loss() -> Loss {
+/// pass as losing nothing (record 0003). It says what was not checked,
+/// why, and what to do.
+pub(crate) fn unchecked_loss(why: &str) -> Loss {
     Loss {
-        feature:
-            "anything the file holds besides cell values (its parts could not be listed to check)"
-                .into(),
+        feature: format!(
+            "anything the file holds besides cell values (not checked: its parts could not be listed because {why}; open and save the file in Excel to repair it, or pass confirm_loss to save without the check)"
+        ),
         before: 1,
         after: 0,
     }
@@ -760,13 +771,29 @@ pub(crate) fn unchecked_loss() -> Loss {
 
 /// The loss reported for features the gate could not search (the file is
 /// too large, or a part could not be unpacked): like [`unchecked_loss`],
-/// the save must not pass as losing nothing (round 2, N4).
-fn unchecked_content(what: &str) -> Loss {
+/// the save must not pass as losing nothing (round 2, N4). The text names
+/// the real reasons (issue 80): a part refused for unpacking slowly is not
+/// a file too large to search.
+fn unchecked_content(what: &str, why: &BTreeSet<Unsearched>) -> Loss {
+    let why = if why.is_empty() {
+        Unsearched::TooLarge.text().to_owned()
+    } else {
+        why.iter().map(|w| w.text()).collect::<Vec<_>>().join("; ")
+    };
     Loss {
-        feature: format!("{what} (not checked: the file is too large to search)"),
+        feature: format!("{what} (not checked: {why})"),
         before: 1,
         after: 0,
     }
+}
+
+/// Why searches of either package stopped short.
+fn why_unsearched(before: &Package<'_>, after: &Package<'_>) -> BTreeSet<Unsearched> {
+    before
+        .unsearched
+        .union(&after.unsearched)
+        .copied()
+        .collect()
 }
 
 /// Compares the opened package with the one about to be written.
@@ -775,9 +802,18 @@ pub(crate) fn compare(source: &[u8], output: &[u8], report: &mut SaveReport) {
 }
 
 fn compare_within(source: &[u8], output: &[u8], report: &mut SaveReport, caps: Caps) {
-    let (Some(mut before), Some(mut after)) = (Package::open(source), Package::open(output)) else {
-        report.lost.push(unchecked_loss());
-        return;
+    let (mut before, mut after) = match (Package::open(source), Package::open(output)) {
+        (Ok(b), Ok(a)) => (b, a),
+        (Err(why), _) => {
+            report.lost.push(unchecked_loss(&why));
+            return;
+        }
+        (_, Err(why)) => {
+            report
+                .lost
+                .push(unchecked_loss(&format!("in the file to be written, {why}")));
+            return;
+        }
     };
     before.caps = caps;
     after.caps = caps;
@@ -828,7 +864,10 @@ fn compare_within(source: &[u8], output: &[u8], report: &mut SaveReport, caps: C
     unchecked.sort_unstable();
     unchecked.dedup();
     if !unchecked.is_empty() {
-        report.lost.push(unchecked_content(&unchecked.join(", ")));
+        report.lost.push(unchecked_content(
+            &unchecked.join(", "),
+            &why_unsearched(&before, &after),
+        ));
     }
     if had.contains_key("digital signatures") {
         report
@@ -841,16 +880,62 @@ fn compare_within(source: &[u8], output: &[u8], report: &mut SaveReport, caps: C
 mod tests {
     use super::*;
 
-    fn package(parts: &[(&str, &str)]) -> Vec<u8> {
-        use std::io::Write as _;
-        let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        let opts = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Stored);
-        for (name, text) in parts {
-            w.start_file(*name, opts).unwrap();
-            w.write_all(text.as_bytes()).unwrap();
+    /// A part to zip: its name, its text, and its raw deflate stream, if
+    /// any.
+    type Part<'a> = (&'a str, &'a [u8], Option<&'a [u8]>);
+
+    /// A zip package of `parts`: each stored, or with the raw deflate
+    /// stream given (which must unpack to the text).
+    fn zip_of(parts: &[Part<'_>]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut central = Vec::new();
+        for (name, text, deflated) in parts {
+            let (method, body): (u16, &[u8]) = match deflated {
+                Some(d) => (8, d),
+                None => (0, text),
+            };
+            let mut crc = flate2::Crc::new();
+            crc.update(text);
+            let offset = out.len() as u32;
+            let mut fields = Vec::new();
+            fields.extend(20u16.to_le_bytes()); // version needed
+            fields.extend(0u16.to_le_bytes()); // flags
+            fields.extend(method.to_le_bytes());
+            fields.extend(0u32.to_le_bytes()); // time, date
+            fields.extend(crc.sum().to_le_bytes());
+            fields.extend((body.len() as u32).to_le_bytes());
+            fields.extend((text.len() as u32).to_le_bytes());
+            fields.extend((name.len() as u16).to_le_bytes());
+            fields.extend(0u16.to_le_bytes()); // extra
+            out.extend(b"PK\x03\x04");
+            out.extend(&fields);
+            out.extend(name.as_bytes());
+            out.extend(body);
+            central.extend(b"PK\x01\x02");
+            central.extend(20u16.to_le_bytes()); // version made by
+            central.extend(&fields);
+            central.extend([0u8; 10]); // comment, disk, attributes
+            central.extend(offset.to_le_bytes());
+            central.extend(name.as_bytes());
         }
-        w.finish().unwrap().into_inner()
+        let at = out.len() as u32;
+        out.extend(&central);
+        out.extend(b"PK\x05\x06");
+        out.extend([0u8; 4]);
+        out.extend((parts.len() as u16).to_le_bytes());
+        out.extend((parts.len() as u16).to_le_bytes());
+        out.extend((central.len() as u32).to_le_bytes());
+        out.extend(at.to_le_bytes());
+        out.extend([0u8; 2]);
+        out
+    }
+
+    fn package(parts: &[(&str, &str)]) -> Vec<u8> {
+        let parts: Vec<Part<'_>> = parts
+            .iter()
+            .map(|(n, t)| (*n, t.as_bytes(), None))
+            .collect();
+        zip_of(&parts)
     }
 
     #[test]
@@ -947,10 +1032,113 @@ mod tests {
             "{lost:?}"
         );
         assert!(lost.iter().any(|l| l.contains("not checked")), "{lost:?}");
+        assert!(lost.iter().all(|l| !l.contains("slowly")), "{lost:?}");
+        assert!(lost.iter().any(|l| l.contains("too large")), "{lost:?}");
         // With room to search, the same package loses nothing.
         let mut r = SaveReport::new(carrysheet_commands::engine::FileFormat::Xlsx);
         compare(&source, &source, &mut r);
         assert!(r.lost.is_empty(), "{:?}", r.lost);
+    }
+
+    /// Raw deflate of `text` in stored blocks, with `filler` bytes of
+    /// empty stored blocks (5 bytes each, no output) after the first
+    /// `split` bytes of output.
+    fn with_empty_run(text: &[u8], split: usize, filler: usize) -> Vec<u8> {
+        fn stored(out: &mut Vec<u8>, data: &[u8], last: bool) {
+            let chunks: Vec<&[u8]> = data.chunks(65_535).collect();
+            for (i, chunk) in chunks.iter().enumerate() {
+                out.push(u8::from(last && i + 1 == chunks.len()));
+                let n = chunk.len() as u16;
+                out.extend(n.to_le_bytes());
+                out.extend((!n).to_le_bytes());
+                out.extend(*chunk);
+            }
+        }
+        let mut out = Vec::new();
+        stored(&mut out, &text[..split], false);
+        for _ in 0..filler / 5 {
+            out.extend(b"\x00\x00\x00\xff\xff");
+        }
+        stored(&mut out, &text[split..], true);
+        out
+    }
+
+    #[test]
+    fn a_long_run_of_empty_blocks_between_outputs_is_refused_and_named() {
+        // Issue 80: a sheet part no relationship names (only this check
+        // unpacks it) gives 192 KiB of output, then 40 KiB of empty
+        // blocks, then the rest. Its total stays within what its output
+        // earns (a quarter more input than output), so only the cap on a
+        // run without output refuses it, far below the 64 MiB part cap.
+        let mut sheet = b"<worksheet><sheetData/><!--".to_vec();
+        sheet.resize(256 << 10, b'x');
+        sheet.extend(b"--></worksheet>");
+        let packed = with_empty_run(&sheet, 192 << 10, 40 << 10);
+        assert!(packed.len() as u64 <= sheet.len() as u64 * 5 / 4);
+        let workbook = b"<workbook/>".as_slice();
+        let source = zip_of(&[
+            ("xl/workbook.xml", workbook, None),
+            (
+                "xl/worksheets/sheet9.xml",
+                sheet.as_slice(),
+                Some(packed.as_slice()),
+            ),
+        ]);
+        // Read whole, it is refused for its shape, and nothing else.
+        let mut p = Package::open(&source).unwrap();
+        let e = p.parts["xl/worksheets/sheet9.xml"].1;
+        assert!(p.unpack(e).is_none());
+        assert_eq!(
+            p.unsearched.iter().copied().collect::<Vec<_>>(),
+            [Unsearched::Slow]
+        );
+
+        let mut r = SaveReport::new(carrysheet_commands::engine::FileFormat::Xlsx);
+        compare(&source, &source, &mut r);
+        let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
+        assert!(!lost.is_empty(), "{lost:?}");
+        for l in &lost {
+            assert!(l.contains("not checked"), "{l}");
+            assert!(l.contains("unpacks far more slowly"), "{l}");
+            assert!(!l.contains("too large"), "{l}");
+        }
+
+        // The same part without the run is searched, and loses nothing.
+        let plain = zip_of(&[
+            ("xl/workbook.xml", workbook, None),
+            (
+                "xl/worksheets/sheet9.xml",
+                sheet.as_slice(),
+                Some(with_empty_run(&sheet, 192 << 10, 0).as_slice()),
+            ),
+        ]);
+        let mut r = SaveReport::new(carrysheet_commands::engine::FileFormat::Xlsx);
+        compare(&plain, &plain, &mut r);
+        assert!(r.lost.is_empty(), "{:?}", r.lost);
+    }
+
+    #[test]
+    fn a_package_that_cannot_be_listed_says_why_and_what_to_do() {
+        let good = package(&[("xl/workbook.xml", "<workbook/>")]);
+        let mut r = SaveReport::new(carrysheet_commands::engine::FileFormat::Xlsx);
+        compare(b"not a zip at all, but long enough", &good, &mut r);
+        let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
+        assert_eq!(lost.len(), 1, "{lost:?}");
+        assert!(
+            lost[0].contains(
+                "could not be listed because its zip structure cannot be read (the zip is damaged: "
+            ),
+            "{}",
+            lost[0]
+        );
+        assert!(lost[0].contains("confirm_loss"), "{}", lost[0]);
+        let mut r = SaveReport::new(carrysheet_commands::engine::FileFormat::Xlsx);
+        compare(&good, b"PK", &mut r);
+        assert!(
+            r.lost[0].feature.contains("in the file to be written"),
+            "{:?}",
+            r.lost
+        );
     }
 
     #[test]

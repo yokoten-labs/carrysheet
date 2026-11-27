@@ -3,10 +3,16 @@
 
 #![allow(dead_code)]
 
-use std::io::{Cursor, Write};
-
 use carrysheet_numbers::{Document, NumbersError};
-use zip::write::SimpleFileOptions;
+
+/// carrysheet-zip's byte-level zip builder, used in place.
+#[path = "../../../carrysheet-zip/tests/common/mod.rs"]
+pub mod zip_builder;
+
+/// The names the tests use for compression methods (`zip::CompressionMethod::Deflated`).
+pub mod zip {
+    pub use super::zip_builder::Method as CompressionMethod;
+}
 
 // --- A tiny protobuf writer -------------------------------------------------
 
@@ -99,13 +105,11 @@ pub fn chunk(block: &[u8]) -> Vec<u8> {
 }
 
 pub fn zip(entries: &[(&str, Vec<u8>)], method: zip::CompressionMethod) -> Vec<u8> {
-    let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    let options = SimpleFileOptions::default().compression_method(method);
+    let mut b = zip_builder::Builder::new();
     for (name, data) in entries {
-        w.start_file(*name, options).unwrap();
-        w.write_all(data).unwrap();
+        b.add(name, data, method);
     }
-    w.finish().unwrap().into_inner()
+    b.finish()
 }
 
 pub fn stored(entries: &[(&str, Vec<u8>)]) -> Vec<u8> {

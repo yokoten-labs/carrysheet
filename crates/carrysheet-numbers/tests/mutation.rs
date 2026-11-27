@@ -3,11 +3,15 @@
 //! decompressed protobuf and cell bytes), and check that reading never
 //! panics and stays inside the limits.
 
-use std::io::{Cursor, Read, Write};
+use std::io::Cursor;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 
 use carrysheet_numbers::{Document, Limits};
+
+/// carrysheet-zip's byte-level zip builder, used in place.
+#[path = "../../carrysheet-zip/tests/common/mod.rs"]
+mod zip_builder;
 
 /// A small deterministic generator (xorshift64*), so failures repeat.
 struct Rng(u64);
@@ -63,26 +67,22 @@ fn mutate(rng: &mut Rng, input: &[u8]) -> Vec<u8> {
 }
 
 fn unzip(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
-    (0..archive.len())
+    let limits = carrysheet_zip::Limits::default();
+    let mut archive = carrysheet_zip::Archive::open(Cursor::new(bytes), limits).unwrap();
+    (0..archive.entries().len())
         .map(|i| {
-            let mut file = archive.by_index(i).unwrap();
-            let mut data = Vec::new();
-            file.read_to_end(&mut data).unwrap();
-            (file.name().unwrap().into_owned(), data)
+            let name = archive.entries()[i].name.clone();
+            (name, archive.read(i, u64::MAX).unwrap())
         })
         .collect()
 }
 
 fn rezip(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
-    let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    let options =
-        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let mut b = zip_builder::Builder::new();
     for (name, data) in entries {
-        w.start_file(name.as_str(), options).unwrap();
-        w.write_all(data).unwrap();
+        b.add(name, data, zip_builder::Method::Stored);
     }
-    w.finish().unwrap().into_inner()
+    b.finish()
 }
 
 /// The decompressed contents of an `.iwa` part.

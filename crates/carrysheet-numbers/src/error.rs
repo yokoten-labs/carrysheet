@@ -56,6 +56,12 @@ pub enum NumbersError {
         /// The type number found in the package.
         found: u32,
     },
+    /// Unpacking the zip file took longer than
+    /// [`Limits::max_unpack_time`](crate::Limits::max_unpack_time).
+    TooSlow {
+        /// The limit, in whole seconds (rounded up).
+        seconds: u64,
+    },
     /// The document uses a storage format this version does not read.
     Unsupported {
         /// What is not supported.
@@ -89,6 +95,9 @@ impl NumbersError {
                 expected,
                 found,
             } => format!("Object {id} should be a {expected} but has type {found}."),
+            Self::TooSlow { seconds } => {
+                format!("Unpacking the document took longer than the limit of {seconds} seconds.")
+            }
             Self::Unsupported { feature } => {
                 format!("The document uses {feature}, which this reader does not support yet.")
             }
@@ -110,6 +119,9 @@ impl NumbersError {
             }
             Self::Damaged { .. } | Self::MissingObject { .. } | Self::WrongObjectType { .. } => {
                 "The file was probably cut short, changed by another program, or damaged.".into()
+            }
+            Self::TooSlow { .. } => {
+                "Its compressed data unpacks far more slowly than real documents, which take well under a second; data built to waste time looks like this.".into()
             }
             Self::Unsupported { .. } => {
                 "Reading it anyway could show wrong values instead of the real ones.".into()
@@ -133,6 +145,9 @@ impl NumbersError {
             }
             Self::Damaged { .. } | Self::MissingObject { .. } | Self::WrongObjectType { .. } => {
                 "Open the document in Numbers and save it again, or use an earlier copy.".into()
+            }
+            Self::TooSlow { .. } => {
+                "If you trust the file, raise `max_unpack_time` in `Limits`; otherwise open it in Numbers and save it again, or ask the sender for a fresh copy.".into()
             }
             Self::Unsupported { .. } => {
                 "In Numbers, export the document to Excel or CSV (File > Export To) and read that instead."

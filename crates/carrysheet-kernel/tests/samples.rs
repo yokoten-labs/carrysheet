@@ -1,7 +1,6 @@
 //! Apache POI samples with macros and charts: a save keeps them, or says
 //! before saving that they would be lost (record 0003, point 3).
 
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use carrysheet_commands::engine::run;
@@ -33,25 +32,29 @@ fn p(path: &Path) -> String {
     path.display().to_string()
 }
 
+/// A saved package, opened with the hardened zip reader.
+fn open_zip(path: &Path) -> carrysheet_zip::Archive<std::fs::File> {
+    let file = std::fs::File::open(path).unwrap();
+    carrysheet_zip::Archive::open(file, carrysheet_zip::Limits::default()).unwrap()
+}
+
 /// The part names of a saved package, lower case.
 fn parts(path: &Path) -> Vec<String> {
-    let mut zip = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
-    (0..zip.len())
-        .map(|i| {
-            zip.by_index(i)
-                .unwrap()
-                .name()
-                .unwrap()
-                .to_ascii_lowercase()
-        })
+    open_zip(path)
+        .entries()
+        .iter()
+        .map(|e| e.name.to_ascii_lowercase())
         .collect()
 }
 
+fn part_bytes(path: &Path, name: &str) -> Vec<u8> {
+    let mut zip = open_zip(path);
+    let index = zip.find(name).unwrap();
+    zip.read(index, u64::MAX).unwrap()
+}
+
 fn part_text(path: &Path, name: &str) -> String {
-    let mut zip = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
-    let mut s = String::new();
-    zip.by_name(name).unwrap().read_to_string(&mut s).unwrap();
-    s
+    String::from_utf8(part_bytes(path, name)).unwrap()
 }
 
 fn lost(done: &Map<String, Value>) -> Vec<String> {
@@ -79,18 +82,8 @@ fn macros_are_kept_in_xlsm_and_reported_before_xlsx() {
     assert_eq!(done["written"], true, "{done:?}");
     assert!(lost(&done).is_empty(), "{done:?}");
     assert!(parts(&out).contains(&"xl/vbaproject.bin".to_owned()));
-    let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
-    let mut vba = Vec::new();
-    zip.by_name("xl/vbaProject.bin")
-        .unwrap()
-        .read_to_end(&mut vba)
-        .unwrap();
-    let mut zip = zip::ZipArchive::new(std::fs::File::open(&src).unwrap()).unwrap();
-    let mut original = Vec::new();
-    zip.by_name("xl/vbaProject.bin")
-        .unwrap()
-        .read_to_end(&mut original)
-        .unwrap();
+    let vba = part_bytes(&out, "xl/vbaProject.bin");
+    let original = part_bytes(&src, "xl/vbaProject.bin");
     assert_eq!(vba, original);
 
     // As .xlsx the macros cannot stay: refused before writing, with the list.

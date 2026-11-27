@@ -6,7 +6,7 @@ use std::io::{Read, Seek, SeekFrom};
 use flate2::{Crc, Decompress, FlushDecompress, Status};
 
 use crate::directory::{LOCAL_LEN, Zip64Fields, le16, le32};
-use crate::error::{Error, damaged, limit};
+use crate::error::{Error, SLOW_IDLE_RUN, SLOW_NO_OUTPUT, SLOW_SHAPE, damaged, limit};
 use crate::{
     Archive, Entry, FLAG_DATA_DESCRIPTOR, FLAG_ENCRYPTED, FLAG_STRONG_ENCRYPTION, Interrupt,
     Limits, Method,
@@ -67,8 +67,8 @@ pub(crate) fn read<R: Read + Seek>(
         Method::Deflated
             if entry.compressed_size > entry.size.saturating_add(entry.size / 4 + 1024) =>
         {
-            return Err(damaged(format!(
-                "entry {index}'s compressed data is far larger than its output, which is how padding made to waste time looks; a valid but unusual writer (such as one that flushes after every few bytes) can also cause it"
+            return Err(Error::Slow(format!(
+                "entry {index}'s {SLOW_SHAPE}, which is how padding made to waste time looks; a valid but unusual writer (such as one that flushes after every few bytes) can also cause it"
             )));
         }
         _ => {}
@@ -89,6 +89,7 @@ pub(crate) fn read<R: Read + Seek>(
             entry.compressed_size,
             CHUNK,
             Want::Whole(entry.size),
+            a.limits.max_read_without_output,
             |_| Ok(()),
             &mut a.interrupt,
         )?,
@@ -147,6 +148,7 @@ pub(crate) fn read_prefix<R: Read + Seek>(
             entry.compressed_size,
             FIRST_PREFIX_CHUNK,
             Want::Prefix(n),
+            limits.max_read_without_output,
             |k| charge(read_total, limits, k, &mut spent, limits.max_prefix_read),
             interrupt,
         )?,
@@ -339,12 +341,17 @@ enum Want {
 /// nothing. Real deflate never consumes much input without output, so
 /// the input consumed may lead the output by [`PROGRESS_SLACK`] (plus a
 /// 1/[`PROGRESS_SHARE`] share of the output) and no more, checked every
-/// [`STEP`] bytes.
+/// [`STEP`] bytes. That bound is cumulative: output earns room for
+/// filler later. So the input consumed in a row without output (counted
+/// per step) is also capped at `idle_max` (issue 80): a long run of empty
+/// blocks between bits of output is refused when it passes the cap, not
+/// only when it uses up the room the output earned.
 fn inflate<R: Read>(
     reader: &mut R,
     compressed: u64,
     first_chunk: usize,
     want: Want,
+    idle_max: u64,
     mut charge: impl FnMut(u64) -> Result<(), Error>,
     interrupt: &mut Option<Interrupt>,
 ) -> Result<Vec<u8>, Error> {
@@ -365,6 +372,8 @@ fn inflate<R: Read>(
     let mut left = compressed;
     let mut chunk = first_chunk;
     let mut buf = vec![0u8; 32 << 10];
+    // Input consumed since the last step that produced output.
+    let mut idle = 0u64;
     loop {
         // With every input byte consumed, the inflater may still hold
         // output that did not fit in `buf` (a tail that inflates at a high
@@ -396,9 +405,11 @@ fn inflate<R: Read>(
         pos += used;
         let (total_in, total_out) = (dec.total_in(), dec.total_out());
         if total_in > total_out + total_out / PROGRESS_SHARE + PROGRESS_SLACK {
-            return Err(damaged(
-                "an entry's deflate data consumes input without producing output (such as runs of empty blocks)",
-            ));
+            return Err(Error::Slow(SLOW_NO_OUTPUT.into()));
+        }
+        idle = if made > 0 { 0 } else { idle + used as u64 };
+        if idle > idle_max {
+            return Err(Error::Slow(SLOW_IDLE_RUN.into()));
         }
         if let Some(stop) = interrupt.as_mut()
             && stop()

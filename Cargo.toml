@@ -30,6 +30,14 @@ opt-level = 3
 [profile.dev.package.flate2]
 opt-level = 3
 
+# The same for the VBA reader (carrysheet-vba tests/hostile.rs probes):
+# unoptimized, 400 sources full of hits took 3.3 s of a 10 s limit on an
+# M-series Mac and 12.5 s on a GitHub macOS runner, so the limit measured
+# the debug build. Optimized: 0.24 s. Overflow checks stay on (they follow
+# the dev profile, not opt-level).
+[profile.dev.package.carrysheet-vba]
+opt-level = 3
+
 # Release builds: small and fast binaries. Measured on carrysheet-cli 0.1.0,
 # x86_64-unknown-linux-gnu, rustc 1.99.1, one build job:
 #   default profile                          1,522,184 bytes, 22 s
