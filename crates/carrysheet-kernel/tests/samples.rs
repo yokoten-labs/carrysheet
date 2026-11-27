@@ -1,5 +1,6 @@
 //! Apache POI samples with macros and charts: a save keeps them, or says
-//! before saving that they would be lost (record 0003, point 3).
+//! before saving that they would be lost (record 0003, point 3). Then the
+//! csv samples in `tests/data/formats/csv`.
 
 use std::path::{Path, PathBuf};
 
@@ -315,5 +316,168 @@ fn csv_output_lists_what_it_cannot_hold() {
     assert_eq!(done["format"], "csv");
     let text = std::fs::read_to_string(&out).unwrap();
     assert!(text.starts_with("1,10,,5,25"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// The csv front end (record 0010, decision 3): encodings are decoded, and
+// a field is a number only when the number prints back as the same text.
+
+/// Writes `bytes` as `<name>.csv` and reads the whole sheet.
+fn read_csv(name: &str, bytes: &[u8]) -> Result<Vec<Vec<Value>>, CommandError> {
+    let dir = scratch(&format!("csv-{name}"));
+    let path = dir.join(format!("{name}.csv"));
+    std::fs::write(&path, bytes).unwrap();
+    let page = call("read", json!({ "path": p(&path) }));
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(page?["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["cells"].as_array().unwrap().clone())
+        .collect())
+}
+
+#[test]
+fn csv_fields_become_numbers_only_when_nothing_changes() {
+    let rows = read_csv(
+        "values",
+        b"007,1E5,+1,12345678901234567890,SEPT1,2024-01-02,1.0,TRUE,inf\n3,4.5,-2,0.1,-0, 5\n",
+    )
+    .unwrap();
+    let text = [
+        "007",
+        "1E5",
+        "+1",
+        "12345678901234567890",
+        "SEPT1",
+        "2024-01-02",
+        "1.0",
+        "TRUE",
+        "inf",
+    ];
+    assert_eq!(rows[0], text.map(|t| json!(t)));
+    assert_eq!(
+        rows[1][..6],
+        [
+            json!(3.0),
+            json!(4.5),
+            json!(-2.0),
+            json!(0.1),
+            json!(-0.0),
+            json!(" 5")
+        ]
+    );
+}
+
+#[test]
+fn csv_legacy_and_unicode_encodings_are_decoded() {
+    let cases = [
+        ("legacy/gbk.csv", "张伟", "这个问题已经解决了"),
+        ("legacy/big5.csv", "陳大文", "我們的產品價格是多少"),
+        ("legacy/shift_jis.csv", "山田太郎", "ありがとうございます"),
+        ("unicode/utf16be-bom.csv", "Ada", "Zürich"),
+        ("unicode/utf16le-bom-tab.txt", "Ada", "Zürich"),
+        ("unicode/utf8-bom-semicolon.csv", "Ada", "Zürich"),
+    ];
+    for (file, first, last) in cases {
+        let bytes = std::fs::read(data("formats/csv").join(file)).unwrap();
+        let rows = read_csv("encoding", &bytes).unwrap();
+        assert_eq!(rows[1][0], json!(first), "{file}: {rows:?}");
+        assert!(rows.iter().flatten().any(|v| v == last), "{file}: {rows:?}");
+        let fields: Vec<_> = rows.iter().flatten().filter_map(|v| v.as_str()).collect();
+        assert!(fields.iter().all(|f| !f.contains('\u{FFFD}')), "{file}");
+    }
+}
+
+#[test]
+fn csv_short_legacy_files_report_what_chardetng_guesses() {
+    use encoding_rs::{BIG5, GBK, SHIFT_JIS};
+    // Detection is weak on a few bytes. This pins what chardetng 0.1.17
+    // gives: `false` marks a wrong guess, read as text in another encoding
+    // (one GBK character, one or two Shift_JIS kanji, two katakana).
+    let cases = [
+        (GBK, "张", false),
+        (GBK, "北京", true),
+        (GBK, "张伟", true),
+        (GBK, "姓名,城市", true),
+        (BIG5, "臺", true),
+        (BIG5, "臺北", true),
+        (BIG5, "陳大文", true),
+        (BIG5, "姓名,城市", true),
+        (SHIFT_JIS, "東", false),
+        (SHIFT_JIS, "東京", false),
+        (SHIFT_JIS, "山田", false),
+        (SHIFT_JIS, "名前,都市", true),
+        (SHIFT_JIS, "メモ", false),
+    ];
+    for (encoding, text, is_right) in cases {
+        let (bytes, _, _) = encoding.encode(text);
+        let mut detector = chardetng::EncodingDetector::new();
+        detector.feed(&bytes, true);
+        let guess = detector.guess(None, true).name();
+        let opened = read_csv("short", &bytes);
+        let first = match &opened {
+            Ok(rows) => rows[0][0].to_string(),
+            Err(e) => format!("error: {} / {} / {}", e.what, e.why, e.fix),
+        };
+        eprintln!(
+            "short {}: {text:?} -> guess {guess}, A1 {first}",
+            encoding.name()
+        );
+        assert_eq!(guess == encoding.name(), is_right, "{text}: {guess}");
+        let field = text.split(',').next().unwrap();
+        assert_eq!(first == format!("{field:?}"), is_right, "{text}: {first}");
+    }
+}
+
+#[test]
+fn csv_bytes_that_fit_no_encoding_are_an_error() {
+    // Valid UTF-8 for the whole guess sample, then a byte UTF-8 never has.
+    let mut bytes = "Zürich,1\n".repeat(120_000).into_bytes();
+    bytes.extend(b"\xFF,2\n");
+    let e = read_csv("bad-utf8", &bytes).unwrap_err();
+    assert_eq!(e.code, ErrorCode::DamagedFile, "{e:?}");
+    assert!(
+        e.why.contains("UTF-8") && e.why.contains("guessed"),
+        "{}",
+        e.why
+    );
+    assert!(e.fix.contains("UTF-8"), "{}", e.fix);
+    // A byte order mark decides, so its encoding must hold every byte.
+    let e = read_csv("bad-bom", b"\xEF\xBB\xBFa,\xFF\n").unwrap_err();
+    assert_eq!(e.code, ErrorCode::DamagedFile, "{e:?}");
+    assert!(e.why.contains("byte order mark"), "{}", e.why);
+    let e = read_csv("bad-utf16", b"\xFF\xFEa\x00\x00\xD8,\x00").unwrap_err();
+    assert!(e.why.contains("UTF-16LE"), "{}", e.why);
+}
+
+#[test]
+fn csv_to_xlsx_to_csv_keeps_every_field() {
+    let dir = scratch("csv-trip");
+    let text = "id,code,amount,gene,note\r\n1,007,1E5,SEPT1,\"a, b\"\r\n2,+1,-2.5,MARCH1,12345678901234567890\r\n3,0.1,2024-01-02,TRUE,\"line one\nline two\"\r\n";
+    let src = dir.join("trip.csv");
+    std::fs::write(&src, text).unwrap();
+    let book = dir.join("trip.xlsx");
+    call("convert", json!({ "path": p(&src), "output": p(&book) })).unwrap();
+    let out = dir.join("back.csv");
+    let args =
+        json!({ "path": p(&book), "output": p(&out), "confirm_loss": true, "csv_raw": true });
+    call("convert", args).unwrap();
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), text);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn csv_open_keeps_the_time_limit() {
+    let dir = scratch("csv-time");
+    let path = dir.join("slow.csv");
+    std::fs::write(&path, "a,1\n".repeat(10_000)).unwrap();
+    let command = COMMANDS.iter().find(|c| c.name == "overview").unwrap();
+    let args = validate_args(command, &json!({ "path": p(&path) })).unwrap();
+    let kernel = Kernel::new();
+    let e = run::run_within(&kernel, command, &args, Some(0.0)).unwrap_err();
+    assert_eq!(e.code, ErrorCode::LimitExceeded, "{e:?}");
+    assert!(e.what.contains("took longer"), "{}", e.what);
+    run::run_within(&kernel, command, &args, None).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }

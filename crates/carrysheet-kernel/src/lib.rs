@@ -15,6 +15,7 @@
 //!   runs out is a `limit_exceeded` error, never a hang or an abort.
 
 mod book;
+mod csv;
 mod edit;
 mod limits;
 mod package;

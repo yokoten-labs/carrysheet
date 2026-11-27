@@ -192,8 +192,12 @@ impl Book {
             gridcraft_xlsx::Format::Ods => SourceKind::Imported("ods"),
             _ => SourceKind::Imported("xls"),
         };
-        let (mut wb, warnings) =
-            gridcraft_engine::io::open_bytes(&name, &bytes).map_err(|e| open_error(path, &e))?;
+        // Text goes through the csv front end, which keeps what was written.
+        let (mut wb, warnings) = if kind == SourceKind::Csv {
+            (crate::csv::read(path, &name, &bytes)?, Vec::new())
+        } else {
+            gridcraft_engine::io::open_bytes(&name, &bytes).map_err(|e| open_error(path, &e))?
+        };
         // Relative links to other workbooks are rewritten when saving to
         // another folder.
         wb.source_dir = std::path::absolute(path)

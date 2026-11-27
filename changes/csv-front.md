@@ -1,0 +1,3 @@
+Changed
+
+csv files keep what they say (record 0006, record 0010 decision 3). A field becomes a number only when the number prints back as the same text, so `007`, `1E5`, `+1`, `12345678901234567890`, `SEPT1` and dates stay text; before, `007` became 7. The encoding comes from a byte order mark, else UTF-8, else a guess by `chardetng` (GBK, Big5, Shift_JIS and others); before, bytes that were not UTF-8 were read as Windows-1252. Bytes the encoding cannot hold are a `damaged_file` error instead of replacement characters. A guess on a file of a few characters can be wrong; such a file opens as text in another encoding.
