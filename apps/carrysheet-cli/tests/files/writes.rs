@@ -90,7 +90,7 @@ fn every_way_of_showing_hides_the_home_folder() {
         assert!(shown.contains('~'), "{shown}");
     }
     // A reference error repeats what was typed.
-    let typed = format!("'{p}'!A1");
+    let typed = format!("'{p}'!A0");
     let e: CommandError = carrysheet::range::SheetRange::parse(&typed).unwrap_err().into();
     // The name is quoted, which shows each `\` of a Windows home as `\\`.
     let quoted = home.replace('\\', r"\\");
