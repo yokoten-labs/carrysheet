@@ -55,8 +55,6 @@ pub enum ErrorCode {
     LimitExceeded,
     /// The workbook has no sheet with that name.
     NoSuchSheet,
-    /// A confirmation was needed and the answer was no (or nobody could answer).
-    Declined,
     /// Deleting or overwriting needs `confirm: true`, and it was not given.
     ConfirmationRequired,
     /// A formula could not be computed.
@@ -70,27 +68,9 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// The code as written in JSON, such as `not_implemented`.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ErrorCode::Usage => "usage",
-            ErrorCode::InvalidArgument => "invalid_argument",
-            ErrorCode::InvalidReference => "invalid_reference",
-            ErrorCode::NotImplemented => "not_implemented",
-            ErrorCode::NothingToDo => "nothing_to_do",
-            ErrorCode::FileNotFound => "file_not_found",
-            ErrorCode::FileExists => "file_exists",
-            ErrorCode::PermissionDenied => "permission_denied",
-            ErrorCode::OutsideRoot => "outside_root",
-            ErrorCode::UnsupportedFormat => "unsupported_format",
-            ErrorCode::DamagedFile => "damaged_file",
-            ErrorCode::LimitExceeded => "limit_exceeded",
-            ErrorCode::NoSuchSheet => "no_such_sheet",
-            ErrorCode::Declined => "declined",
-            ErrorCode::ConfirmationRequired => "confirmation_required",
-            ErrorCode::Formula => "formula",
-            ErrorCode::Io => "io",
-            ErrorCode::Internal => "internal_error",
-        }
+    pub fn as_str(self) -> String {
+        let name = serde_json::to_value(self).unwrap_or_default();
+        name.as_str().unwrap_or_default().to_owned()
     }
 
     /// The exit code this error ends the process with.
@@ -107,18 +87,14 @@ impl ErrorCode {
 
 impl fmt::Display for ErrorCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str(&self.as_str())
     }
 }
 
-/// An error with the three parts people and agents need, plus a code.
-///
-/// Keep `fix` short. It is shown right after `what`, before `why`, because
-/// some clients keep only the start of an error.
-///
-/// The parts often repeat what the user typed (a path, a reference); the
-/// program replaces the home folder with `~` before showing them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// An error with the three parts people and agents need, plus a code. A
+/// short `fix` comes right after `what`, because some clients keep only the
+/// start of an error. The fields are the JSON keys, in order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CommandError {
     pub code: ErrorCode,
     /// What happened.
@@ -144,8 +120,7 @@ impl CommandError {
         }
     }
 
-    /// A command that is in the table but not built yet. `cli_name` is how it
-    /// is typed, such as `mcp install`.
+    /// A command that is not built yet, by how it is typed (`mcp install`).
     pub fn not_implemented(cli_name: &str) -> Self {
         CommandError::new(
             ErrorCode::NotImplemented,
@@ -157,12 +132,8 @@ impl CommandError {
 
     /// An argument with a wrong value.
     pub fn invalid_argument(name: &str, why: impl Into<String>, fix: impl Into<String>) -> Self {
-        CommandError::new(
-            ErrorCode::InvalidArgument,
-            format!("the argument `{name}` is not valid"),
-            why,
-            fix,
-        )
+        let what = format!("the argument `{name}` is not valid");
+        CommandError::new(ErrorCode::InvalidArgument, what, why, fix)
     }
 
     /// The exit code for this error.
@@ -171,14 +142,8 @@ impl CommandError {
     }
 
     /// `{"code","what","fix","why"}` as JSON, the fix before the reason.
-    /// The program shows the home folder as `~`.
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "code": self.code.as_str(),
-            "what": self.what,
-            "fix": self.fix,
-            "why": self.why,
-        })
+        serde_json::to_value(self).unwrap_or_default()
     }
 
     /// The full error envelope: `{"ok": false, "error": {...}}`.
@@ -202,12 +167,6 @@ impl fmt::Display for CommandError {
 }
 
 impl std::error::Error for CommandError {}
-
-impl Serialize for CommandError {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.to_json().serialize(serializer)
-    }
-}
 
 impl From<RefError> for CommandError {
     fn from(e: RefError) -> Self {

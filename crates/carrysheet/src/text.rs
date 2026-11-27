@@ -2,35 +2,26 @@
 //!
 //! A file can hold characters a person does not see but a program or a
 //! language model reads: terminal escapes, direction overrides, zero-width
-//! characters, tag characters (U+E0000 to U+E007F), private use characters.
-//! Such text never reaches a message, a JSON result or a terminal raw.
+//! characters, tag characters, private use characters. Such text never
+//! reaches a message, a JSON result or a terminal raw.
 //!
-//! A character is *hidden* when its general category is Cc, Cf, Co, Zl or
-//! Zp, or when it is a Default_Ignorable_Code_Point ([`HIDDEN`]).
-//!
-//! - [`escape`]: hidden characters become `\u{1b}` (lowercase hex), a
-//!   backslash becomes `\\`, so text cannot fake an escape.
+//! - [`escape`]: hidden characters ([`HIDDEN`]) become `\u{1b}` (lowercase
+//!   hex), a backslash becomes `\\`, so text cannot fake an escape.
 //! - [`quote`]: the same in double quotes, with `"` written as `\"`.
-//! - [`terminal`]: tab and line feed stay; other hidden characters show as
-//!   U+FFFD.
 //!
-//! [`escape`] and [`quote`] take a limit in characters of output. A longer
-//! text is cut before the escape that would not fit, never inside one, and
-//! ends with [`CUT`] and how many characters of the input were left out.
+//! Both take a limit in characters of output. A longer text is cut before
+//! the escape that would not fit, never inside one, and ends with [`CUT`]
+//! and how many characters of the input were left out.
 
 use std::fmt::Write as _;
 
 /// Starts the mark after a cut text: `…[cut: 12 more characters]`.
 pub const CUT: &str = "…[cut: ";
 
-/// The Unicode version [`HIDDEN`] was made from.
-pub const UNICODE_VERSION: &str = "18.0.0";
-
-/// Hidden code points as inclusive (first, last) ranges, sorted, not
-/// overlapping and not touching. From DerivedGeneralCategory.txt (Cc, Cf,
-/// Co, Zl, Zp) and DerivedCoreProperties.txt (Default_Ignorable_Code_Point).
-/// At a new Unicode release, merge the ranges of those files again and set
-/// [`UNICODE_VERSION`]; the tests check the order and the control characters.
+/// Hidden code points (general category Cc, Cf, Co, Zl or Zp, or
+/// Default_Ignorable_Code_Point) as inclusive, sorted ranges that do not
+/// touch. Made from the Unicode 18.0.0 files DerivedGeneralCategory.txt and
+/// DerivedCoreProperties.txt; merge them again at a new release.
 #[rustfmt::skip]
 pub const HIDDEN: [(u32, u32); 30] = [
     (0x0000, 0x001F), (0x007F, 0x009F), (0x00AD, 0x00AD), (0x034F, 0x034F),
@@ -53,13 +44,6 @@ pub fn is_hidden(c: char) -> bool {
     HIDDEN.get(at).is_some_and(|&(first, _)| first <= c)
 }
 
-/// True when the text holds a hidden character other than tab, line feed
-/// and carriage return.
-pub fn has_hidden(text: &str) -> bool {
-    text.chars()
-        .any(|c| is_hidden(c) && !matches!(c, '\t' | '\n' | '\r'))
-}
-
 /// Text for messages and JSON: hidden characters as `\u{…}`, `\` as `\\`,
 /// at most `max` characters before the cut mark.
 pub fn escape(text: &str, max: usize) -> String {
@@ -75,21 +59,6 @@ pub fn quote(text: &str, max: usize) -> String {
     let mut out = format!("\"{body}\"");
     push_cut(&mut out, rest);
     out
-}
-
-/// Text for a terminal: tab and line feed stay, every other hidden
-/// character (carriage return too, which can overwrite a line) is U+FFFD.
-pub fn terminal(text: &str) -> String {
-    let keep = |c: char| !is_hidden(c) || matches!(c, '\t' | '\n');
-    text.chars()
-        .map(|c| {
-            if keep(c) {
-                c
-            } else {
-                char::REPLACEMENT_CHARACTER
-            }
-        })
-        .collect()
 }
 
 /// The escaped text, cut to `max` characters, and how many characters of

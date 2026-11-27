@@ -1,13 +1,9 @@
-//! One struct per command: the single source of its command-line flags, its
-//! MCP tool schema and its help (record 0010, decisions 2 and 6).
-//!
-//! - A struct's first doc line is the summary for help lists; the rest is
-//!   the tool description. A field's doc line describes the argument.
-//! - `schemars` writes the schema, `serde` checks what a client sent, and
-//!   `clap` (feature `cli`, which only the program turns on) makes the flags.
-//!   The program reads the flags as text and checks them here like an MCP
-//!   call, so clap's typed result is never used.
-//! - An optional argument is an `Option`: absent and `null` mean the same.
+//! One struct per command: the source of its flags, MCP schema and help
+//! (record 0010, decisions 2 and 6). A struct's first doc line is the help
+//! summary, the rest the tool description; a field's doc line describes it.
+//! `schemars` writes the schema, `serde` checks a call, and `clap` (feature
+//! `cli`) makes the flags, read back as text and checked here like a call.
+//! An optional argument is an `Option`: absent and `null` mean the same.
 
 use std::path::{Path, PathBuf};
 
@@ -26,17 +22,14 @@ use crate::view::ReadMode;
 /// The most items a list argument may hold.
 pub const MAX_LIST_ITEMS: usize = 10_000;
 
-/// The most characters a text argument may hold (Excel limits a formula to
-/// 8,192; this leaves room for long cell text).
+/// The most characters a text argument may hold (Excel's cell text limit).
 pub const MAX_TEXT_CHARS: usize = 32_767;
 
-/// The arguments that name a file or folder; `mcp serve` keeps them in its
-/// root. Only these top-level names are confined: a path field added inside
-/// an edit operation must be confined by hand.
+/// The top-level arguments that name a file or folder, which `mcp serve`
+/// keeps in its root. A path field inside an operation is not confined.
 pub const PATHS: &[&str] = &["path", "output", "root"];
 
-/// The largest value of each whole-number argument; the smallest is 1. The
-/// schema carries no limits, because not every client accepts them.
+/// The largest value of each whole-number argument, from 1; not in the schema, for strict clients.
 const LARGEST: &[(&str, u64)] = &[
     ("max_rows", 10_000),
     ("max_columns", 16_384),
@@ -47,17 +40,14 @@ const LARGEST: &[(&str, u64)] = &[
 #[cfg(feature = "cli")]
 const SWITCH: clap::ArgAction = clap::ArgAction::SetTrue;
 
-/// Show sheets, used ranges, headers and formula counts of a workbook
+/// Show sheets, used ranges and formula counts of a workbook
 ///
-/// Workbook overview: sheets, used ranges, header rows, formula and error counts, and whether it has macros (or that they could not be checked). Call first on any workbook.
+/// Workbook overview: sheets, used ranges, formula and error counts, and whether it has macros (or that they could not be checked). Call first on any workbook.
 #[derive(Deserialize, JsonSchema)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct Overview {
     /// The workbook: xlsx, xlsm, xlsb, xls or csv.
     pub path: String,
-    /// concise (default), or detailed: adds types, formats and formulas.
-    #[cfg_attr(feature = "cli", arg(long))]
-    pub response_format: Option<ResponseFormat>,
 }
 
 /// Read a range as a table of values or formulas, a page at a time
@@ -102,9 +92,9 @@ pub struct Eval {
     pub sheet: Option<String>,
 }
 
-/// Save a workbook as xlsx, xls or csv, to a new file
+/// Save a workbook as xlsx or csv, to a new file
 ///
-/// Convert a workbook to xlsx, xls or csv as a new file. Use dry_run first to see what the format cannot hold.
+/// Convert a workbook to xlsx or csv as a new file. Use dry_run first to see what the format cannot hold.
 #[derive(Deserialize, JsonSchema)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct Convert {
@@ -163,9 +153,8 @@ pub struct Edit {
     pub dry_run: Option<bool>,
 }
 
-// The `ops` of `edit`: on the command line one JSON text, not a repeated
-// flag. A doc comment on the types below would add a description to every
-// tool list, so they have none.
+// The `ops` of `edit`, one JSON text on the command line. A doc comment on
+// the types below would add a description to every tool list.
 pub type Operations = Vec<Operation>;
 
 #[derive(Clone, Deserialize, JsonSchema)]
@@ -224,8 +213,7 @@ pub struct Commands {}
 
 /// One command: its name, what a client is told about it, and its struct.
 pub struct Command {
-    /// Unique `snake_case` name: the MCP tool name. On the command line a
-    /// `_` is a space, as in `mcp serve`.
+    /// The MCP tool name; on the command line `_` is a space, as in `mcp serve`.
     pub name: &'static str,
     /// Offered as a tool by the MCP server.
     pub mcp_tool: bool,
@@ -285,8 +273,7 @@ impl Command {
         self.name.replace('_', " ")
     }
 
-    /// The struct's doc comment: the summary for help lists (one line), then
-    /// the tool description (key words first, then when to use it).
+    /// The help summary and the tool description, from the struct's doc comment.
     pub fn doc(&self) -> (String, String) {
         let schema = (self.schema)();
         let text = schema["description"].as_str().unwrap_or_default();
@@ -297,9 +284,7 @@ impl Command {
     /// The names of the command's arguments, in order.
     pub fn arg_names(&self) -> Vec<String> {
         let schema = input_schema(self);
-        let properties = schema["properties"].as_object();
-        let names = properties.into_iter().flat_map(Map::keys);
-        names.cloned().collect()
+        schema["properties"].as_object().into_iter().flat_map(Map::keys).cloned().collect()
     }
 
     /// True when the command takes an argument of this name.
@@ -326,8 +311,7 @@ impl Command {
 /// What schemars writes for a struct, with nothing left as a `$ref`.
 fn schema_of<T: JsonSchema>() -> Value {
     let settings = SchemaSettings::draft2020_12().with(|s| s.inline_subschemas = true);
-    let generator = settings.into_generator();
-    generator.into_root_schema_for::<T>().to_value()
+    settings.into_generator().into_root_schema_for::<T>().to_value()
 }
 
 /// What serde says when `given` is not a `T`.
@@ -335,9 +319,8 @@ fn check<T: DeserializeOwned>(given: Value) -> Result<(), String> {
     T::deserialize(given).map(|_| ()).map_err(|e| e.to_string())
 }
 
-/// The single-type schemas a value may match, without null: schemars'
-/// schema with `format`, limits, defaults and type lists taken out. An
-/// object lists every property as required and allows no others.
+/// The single-type schemas a value may match, without null, `format`, limits,
+/// defaults or type lists. An object requires every property and no others.
 fn branches(node: &Value) -> Vec<Value> {
     if let Some(any) = node["anyOf"].as_array() {
         return any.iter().flat_map(branches).collect();
@@ -372,8 +355,7 @@ fn branches(node: &Value) -> Vec<Value> {
     types.into_iter().map(branch).collect()
 }
 
-/// One property in the strict form: its description, and for an optional
-/// value an `anyOf` of its types with null last.
+/// One property in the strict form; an optional one is an `anyOf` ending in null.
 fn property(node: &Value, is_optional: bool) -> Value {
     let mut any = branches(node);
     let mut out = if is_optional || any.len() != 1 {
@@ -388,11 +370,9 @@ fn property(node: &Value, is_optional: bool) -> Value {
     out
 }
 
-/// The input schema of a command: an object with one property per argument,
-/// in the strict form that Claude, Gemini and OpenAI strict mode accept
-/// (`docs/agents.md`). The lint in `tests/lint` checks it.
+/// A command's arguments, without the struct's description, in the strict
+/// form that Claude, Gemini and OpenAI accept (`docs/agents.md`, `tests/lint`).
 pub fn input_schema(command: &Command) -> Value {
-    // The struct's doc comment is the tool description, not part of this.
     branches(&(command.schema)()).pop().unwrap_or_default()
 }
 
@@ -406,8 +386,7 @@ pub fn tool_definition(command: &Command) -> Value {
     })
 }
 
-/// The checked arguments of a call: every argument of the command by name,
-/// absent ones as `null`.
+/// The checked arguments of a call: every argument by name, absent ones `null`.
 pub type Checked = Map<String, Value>;
 
 fn invalid(name: &str, why: impl Into<String>, fix: impl Into<String>) -> CommandError {
@@ -426,12 +405,11 @@ fn without_nulls(value: &Value) -> Value {
     }
 }
 
-/// Checks `args` (a JSON object) on our side, because a client may skip
-/// schema validation.
+/// Checks `args` (a JSON object) here, because a client may skip the schema.
 pub fn validate_args(command: &Command, args: &Value) -> Result<Checked, CommandError> {
     let cli = command.cli_name();
     let help = format!("Run `carrysheet-cli {cli} --help` for the arguments.");
-    let Value::Object(mut given) = without_nulls(args) else {
+    let Value::Object(given) = without_nulls(args) else {
         let why = "the arguments must be a JSON object";
         let fix = format!("Send an object such as {{\"path\": \"book.xlsx\"}}. {help}");
         return Err(invalid("arguments", why, fix));
@@ -453,25 +431,19 @@ pub fn validate_args(command: &Command, args: &Value) -> Result<Checked, Command
         let why: String = why.chars().take(300).collect();
         return Err(invalid(&name, why, fix));
     }
-    let all = names.into_iter().map(|name| {
-        let value = given.remove(&name).unwrap_or(Value::Null);
-        (name, value)
-    });
-    Ok(all.collect())
+    let value_of = |name: &String| given.get(name).cloned().unwrap_or_default();
+    Ok(names.iter().map(|name| (name.clone(), value_of(name))).collect())
 }
 
-/// What to send instead of a value serde refused (`why`): for an item of a
-/// list its fields and an example, else the allowed values or the type;
-/// then the argument's description.
+/// What to send instead of a value serde refused (`why`): the fields of a list
+/// item, the allowed values or the type; then the argument's description.
 fn fix_for(schema: &Value, name: &str, why: &str) -> Option<String> {
     let field = name.split('[').next().unwrap_or_default();
     let node = &schema["properties"][field];
     let about = node["description"].as_str()?;
     let kind = node.pointer("/anyOf/0").unwrap_or(node);
-    let fields = kind["items"]["properties"].as_object();
-    let todo = if let Some(fields) = fields {
-        let fields: Vec<&str> = fields.keys().map(String::as_str).collect();
-        let fields = fields.join(", ");
+    let todo = if let Some(fields) = kind["items"]["properties"].as_object() {
+        let fields = fields.keys().cloned().collect::<Vec<_>>().join(", ");
         format!("Send `{field}` as a list of objects with {fields}, like [{OPERATION_EXAMPLE}].")
     } else if let Some(values) = kind["enum"].as_array() {
         let values: Vec<&str> = values.iter().filter_map(Value::as_str).collect();
@@ -482,7 +454,6 @@ fn fix_for(schema: &Value, name: &str, why: &str) -> Option<String> {
         let expected = match (kind["type"].as_str(), LARGEST.iter().find(|l| l.0 == field)) {
             (_, Some((_, max))) => format!("a whole number from 1 to {max}"),
             (Some("boolean"), _) => "true or false".to_owned(),
-            (Some("integer"), _) => "a whole number".to_owned(),
             _ => "text".to_owned(),
         };
         format!("Give `{field}` as {expected}.")
@@ -565,22 +536,19 @@ fn check_limits(name: &str, key: &str, value: &Value) -> Result<(), CommandError
     Ok(())
 }
 
-/// Checks that a call which deletes data or overwrites a file says
-/// `confirm: true`. `args` come from [`validate_args`]. `dry_run: true`
-/// never needs it, because nothing is written.
+/// Checks that a call from [`validate_args`] which deletes data or overwrites
+/// a file says `confirm: true`. A `dry_run` writes nothing, so it never needs it.
 pub fn check_confirmation(command: &Command, args: &Checked) -> Result<(), CommandError> {
-    let is_true = |name: &str| args.get(name) == Some(&Value::Bool(true));
-    if !args.contains_key("confirm") || is_true("confirm") || is_true("dry_run") {
+    if !args.contains_key("confirm") || flag(args, "confirm") || flag(args, "dry_run") {
         return Ok(());
     }
-    let ops = args.get("ops").and_then(Value::as_array);
     let deletes = |(i, op): (usize, &Value)| {
         let kind = op.get("op")?.as_str()?.strip_prefix("delete_")?;
         Some(format!("delete {kind} (ops[{i}])"))
     };
-    let ops = ops.into_iter().flatten().enumerate();
-    let mut actions: Vec<String> = ops.filter_map(deletes).collect();
-    if is_true("overwrite") {
+    let ops = args.get("ops").and_then(Value::as_array).into_iter().flatten();
+    let mut actions: Vec<String> = ops.enumerate().filter_map(deletes).collect();
+    if flag(args, "overwrite") {
         actions.push("overwrite a file".to_owned());
     }
     let Some(first) = actions.first() else {
@@ -590,34 +558,16 @@ pub fn check_confirmation(command: &Command, args: &Checked) -> Result<(), Comma
         1 => String::new(),
         n => format!(" and {} more", n - 1),
     };
-    // The same call with `confirm: true`; long lists and text are summed up.
-    let mut call = Vec::new();
-    for (name, value) in args {
-        let shown = match value {
-            Value::Null => continue,
-            _ if name == "confirm" => continue,
-            Value::Array(items) if value.to_string().chars().count() > 160 => {
-                format!("[...the same {} items...]", items.len())
-            }
-            Value::String(text) if text.chars().count() > 80 => "\"...\"".to_owned(),
-            _ => value.to_string(),
-        };
-        call.push(format!("\"{name}\":{shown}"));
-    }
-    let call = call.join(",");
     let cli = command.cli_name();
     Err(CommandError::new(
         ErrorCode::ConfirmationRequired,
         format!("`{cli}` would {first}{more}; confirm is not true"),
         "deleting sheets, rows or columns and overwriting files cannot be undone, so they need confirm: true. dry_run lists the changes without it.",
-        format!(
-            "Call again with confirm set to true: {{{call},\"confirm\":true}}. On the command line, add --confirm."
-        ),
+        "Call again with the same arguments and \"confirm\":true. On the command line, add --confirm.",
     ))
 }
 
 // Reading the checked arguments of a command.
-
 pub(crate) fn text<'a>(args: &'a Checked, name: &str) -> Option<&'a str> {
     args.get(name).and_then(Value::as_str)
 }

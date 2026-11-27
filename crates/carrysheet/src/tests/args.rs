@@ -147,9 +147,9 @@ fn overview_schema_shape() {
     let s = input_schema(command("overview").unwrap());
     assert_eq!(s["type"], "object");
     assert_eq!(s["additionalProperties"], false);
-    assert_eq!(s["required"], json!(["path", "response_format"]));
+    assert_eq!(s["required"], json!(["path"]));
     assert_eq!(s["properties"]["path"]["type"], "string");
-    let rf = &s["properties"]["response_format"];
+    let rf = &input_schema(read())["properties"]["response_format"];
     assert_eq!(rf["anyOf"][0]["enum"], json!(["concise", "detailed"]));
     assert_eq!(rf["anyOf"][1], json!({ "type": "null" }));
     assert!(rf["description"].is_string());
@@ -550,25 +550,14 @@ fn deleting_and_overwriting_need_confirm() {
     assert_eq!(e.code, ErrorCode::ConfirmationRequired);
     assert_eq!(e.exit_code(), ExitCode::Failed);
     assert!(e.what.contains("delete rows (ops[1])"), "{}", e.what);
-    assert!(
-        e.fix
-            .starts_with("Call again with confirm set to true: {\"path\":\"book.xlsx\",\"ops\":[{"),
-        "{}",
-        e.fix
-    );
-    assert!(e.fix.contains(r#""confirm":true}"#), "{}", e.fix);
-    assert!(!e.fix.contains("null"), "{}", e.fix);
+    let fix = "Call again with the same arguments and \"confirm\":true. On the command line, add --confirm.";
+    assert_eq!(e.fix, fix);
     // The fix comes within the first ~200 characters agents keep.
     let shown = e.to_json().to_string();
     assert!(shown.find("Call again").unwrap() < 200, "{shown}");
 
     let e = call(json!({ "overwrite": true })).unwrap_err();
     assert!(e.what.contains("and 1 more"), "{}", e.what);
-    assert!(
-        e.fix.contains(r#""overwrite":true,"confirm":true"#),
-        "{}",
-        e.fix
-    );
 
     assert!(call(json!({ "confirm": true })).is_ok());
     assert!(call(json!({ "dry_run": true })).is_ok());
@@ -608,13 +597,12 @@ fn deleting_and_overwriting_need_confirm() {
         e.what
     );
 
-    // Long lists are summed up in the example.
+    // Long lists are summed up.
     let ops: Vec<Value> = (0..50)
         .map(|i| json!({ "op": "delete_sheet", "target": format!("S{i}") }))
         .collect();
     let args = validate_args(edit, &json!({ "path": "a", "ops": ops })).unwrap();
     let e = check_confirmation(edit, &args).unwrap_err();
-    assert!(e.fix.contains("[...the same 50 items...]"), "{}", e.fix);
     assert!(e.what.contains("and 49 more"), "{}", e.what);
 
     // Commands without confirm never need it.
