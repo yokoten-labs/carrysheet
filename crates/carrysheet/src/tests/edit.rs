@@ -37,7 +37,7 @@ fn bad_ops_name_their_index() {
             ErrorCode::InvalidArgument,
         ),
         (
-            json!([{ "op": "add_sheet", "target": "a/b" }]),
+            json!([{ "op": "add_sheet", "target": "a\u{7}b" }]),
             ErrorCode::InvalidArgument,
         ),
         (
@@ -131,7 +131,7 @@ fn dangerous_formulas_are_refused() {
         "CUBEMEMBERPROPERTY(\"c\",\"m\",\"p\")",
         "CUBEKPIMEMBER(\"c\",\"k\",1)",
     ] {
-        assert!(refused_formula(f).is_some(), "{f}");
+        assert!(check_formula(0, f).is_err(), "{f}");
     }
     for f in [
         "SUM(A1:A3)",
@@ -148,13 +148,10 @@ fn dangerous_formulas_are_refused() {
         "SUM(PY:PY)+SUM(RTD:RTD)+SUM($DDE$1:$DDE$9)",
         "XLOOKUP(1,A:A,B:B)",
     ] {
-        assert_eq!(refused_formula(f), None, "{f}");
+        assert!(check_formula(0, f).is_ok(), "{f}");
     }
-    assert!(
-        refused_formula("_xlws._xlfn.WEBSERVICE(A1)")
-            .unwrap()
-            .starts_with("WEBSERVICE")
-    );
+    let e = check_formula(0, "_xlws._xlfn.WEBSERVICE(A1)").unwrap_err();
+    assert!(e.why.starts_with("WEBSERVICE"), "{}", e.why);
 }
 
 #[test]
@@ -162,7 +159,7 @@ fn every_refused_function_is_refused_in_every_spelling() {
     let table = REFUSED_FUNCTIONS.lines().filter_map(|l| l.split_once(": "));
     let mut slipped = Vec::new();
     let mut names = 0;
-    for (name, _) in table {
+    for name in table.flat_map(|(names, _)| names.split(' ')) {
         names += 1;
         let lower = name.to_ascii_lowercase();
         for formula in [
@@ -180,7 +177,7 @@ fn every_refused_function_is_refused_in_every_spelling() {
             format!("LET(x,{lower}(A1),x+1)"),
             format!("Sheet1!{name}"),
         ] {
-            if refused_formula(&formula).is_none() {
+            if check_formula(0, &formula).is_ok() {
                 slipped.push(formula);
             }
         }
@@ -205,4 +202,22 @@ fn a_formula_typo_is_not_a_policy_refusal() {
     let e = parse_ops(&json!([{ "op": "set_formula", "target": "B2", "value": "WEBSERVICE(A1)" }]))
         .unwrap_err();
     assert!(e.what.contains("does not let agents write"), "{}", e.what);
+}
+
+#[test]
+fn new_sheet_names_are_checked_by_gridcraft_when_applied() {
+    let kernel = crate::Kernel::new();
+    let path = std::path::Path::new("a.csv");
+    let mut book = kernel.open_bytes(path, b"1,2\n".to_vec()).unwrap();
+    for (name, is_allowed) in [("a/b", false), ("History", false), ("Q1 売上", true)] {
+        let ops = parse_ops(&json!([{ "op": "add_sheet", "target": name }])).unwrap();
+        match kernel.edit(&mut book, &ops) {
+            Ok(_) => assert!(is_allowed, "{name}"),
+            Err(e) => {
+                assert!(!is_allowed, "{name}: {e:?}");
+                assert_eq!(e.code, ErrorCode::InvalidArgument);
+                assert!(e.what.contains("ops[0]"), "{}", e.what);
+            }
+        }
+    }
 }

@@ -166,6 +166,20 @@ fn moved_rows_report_what_no_longer_fits() {
 }
 
 #[test]
+fn a_save_to_csv_counts_from_the_model_and_the_parts() {
+    let dir = scratch("csv-counts");
+    let src = dir.join("features.xlsx");
+    std::fs::write(&src, features_book()).unwrap();
+    let out = dir.join("out.csv");
+    let args = json!({ "path": p(&src), "output": p(&out), "dry_run": true });
+    let lost = lost(&call("convert", args).unwrap());
+    for feature in ["formulas (their values are kept)", "hyperlinks", "comments"] {
+        assert!(lost.contains(&feature.to_owned()), "{feature}: {lost:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn csv_escapes_text_that_could_run_as_a_formula() {
     let dir = scratch("csv-escape");
     let src = dir.join("data.xlsx");

@@ -276,7 +276,7 @@ fn reading_pages_and_errors() {
         json!({ "path": p(&csv), "output": p(&dir.join("x.xls")) }),
     )
     .unwrap_err();
-    assert_eq!(e.code, ErrorCode::NotImplemented);
+    assert_eq!(e.code, ErrorCode::UnsupportedFormat);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -3,14 +3,6 @@ use crate::save::*;
 use std::path::Path;
 
 #[test]
-fn file_text_is_quoted_escaped_and_cut() {
-    assert_eq!(part_name("xl/a.xml"), "\"xl/a.xml\"");
-    assert_eq!(part_name("a\u{202E}b\n\""), "\"a\\u{202e}b\\u{a}\\\"\"");
-    let cut = format!("\"{}\"…[cut: 36 more characters]", "x".repeat(64));
-    assert_eq!(part_name(&"x".repeat(100)), cut);
-}
-
-#[test]
 fn reports_say_what_is_lost() {
     let mut r = SaveReport::new(FileFormat::Xlsx);
     assert!(!r.loses_something());
@@ -44,19 +36,14 @@ fn outputs_never_replace_a_file_unless_asked() {
 }
 
 #[test]
-fn file_formats_from_paths() {
-    assert_eq!(
-        FileFormat::from_path(Path::new("a.XLSX")),
-        Some(FileFormat::Xlsx)
-    );
-    assert_eq!(
-        FileFormat::from_path(Path::new("a.xls")),
-        Some(FileFormat::Xls)
-    );
-    assert_eq!(
-        FileFormat::from_path(Path::new("a.csv")),
-        Some(FileFormat::Csv)
-    );
-    assert_eq!(FileFormat::from_path(Path::new("a.ods")), None);
-    assert_eq!(FileFormat::from_path(Path::new("a")), None);
+fn file_formats_from_extensions() {
+    assert_eq!(FileFormat::from_extension("XLSX"), Some(FileFormat::Xlsx));
+    assert_eq!(FileFormat::from_extension("xlsm"), Some(FileFormat::Xlsx));
+    assert_eq!(FileFormat::from_extension("csv"), Some(FileFormat::Csv));
+    assert_eq!(FileFormat::from_extension("xls"), None);
+    assert_eq!(FileFormat::from_extension("ods"), None);
+    let e = output_format(Path::new("a.xls"), None).unwrap_err();
+    assert_eq!(e.code, ErrorCode::UnsupportedFormat);
+    let by_flag = output_format(Path::new("a"), Some("csv")).unwrap();
+    assert_eq!(by_flag, FileFormat::Csv);
 }

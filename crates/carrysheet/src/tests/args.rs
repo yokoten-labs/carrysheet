@@ -197,7 +197,7 @@ fn schemas_keep_only_what_every_client_accepts() {
     );
     assert_eq!(
         s["properties"]["format"]["anyOf"][0]["enum"],
-        json!(["xlsx", "xls", "csv"])
+        json!(["xlsx", "csv"])
     );
     assert_eq!(
         input_schema(command("commands").unwrap()),

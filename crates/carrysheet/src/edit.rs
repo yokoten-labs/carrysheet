@@ -2,14 +2,14 @@
 //! GridCraft's command layer, which checks protection, tables and array
 //! formulas, and recalculates only what depends on the changed cells.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use gridcraft_engine::core::{CellRef, RangeRef, col_to_letters};
 use gridcraft_engine::formula::{Expr, SheetSel, parse};
 use gridcraft_engine::model::{Sheet, Workbook};
-use gridcraft_engine::{EngineError, Session};
+use gridcraft_engine::EngineError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -19,8 +19,8 @@ use crate::args::{OPERATION_EXAMPLE, Operation, Operations, input, shown, text};
 pub use crate::commands::limits::{MAX_BATCH_CELLS, MAX_FILL_CELLS, MAX_OPS};
 use crate::error::{CommandError, ErrorCode};
 use crate::open::Book;
-use crate::range::{Shape, SheetRange, validate_sheet_name};
-use crate::save::{EncodeOptions, finish_save, output_format};
+use crate::range::SheetRange;
+use crate::save::{EncodeOptions, Loss, finish_save, output_format};
 use crate::text::escape;
 use crate::view::value_json;
 use crate::{Answer, Kernel, internal};
@@ -81,11 +81,11 @@ impl EditOp {
         }
     }
 
-    /// The range of a cell, row or column operation.
-    pub fn range(&self) -> Option<&SheetRange> {
-        match &self.target {
-            EditTarget::Range(r) => Some(r),
-            EditTarget::Sheet(_) => None,
+    /// The cells a `set_value` or `set_formula` operation fills.
+    fn fill_cells(&self) -> u64 {
+        match (&self.target, self.kind) {
+            (EditTarget::Range(r), EditKind::SetValue | EditKind::SetFormula) => r.range.count(),
+            _ => 0,
         }
     }
 }
@@ -130,11 +130,7 @@ pub fn parse_ops(ops: &Value) -> Result<Vec<EditOp>, CommandError> {
         .enumerate()
         .map(|(i, item)| parse_op(i, item))
         .collect::<Result<_, _>>()?;
-    let filled: u64 = ops
-        .iter()
-        .filter(|op| matches!(op.kind, EditKind::SetValue | EditKind::SetFormula))
-        .map(|op| op.range().map_or(0, |r| r.range.count()))
-        .sum();
+    let filled: u64 = ops.iter().map(EditOp::fill_cells).sum();
     if filled > MAX_BATCH_CELLS {
         return Err(CommandError::new(
             ErrorCode::LimitExceeded,
@@ -150,14 +146,14 @@ pub fn parse_ops(ops: &Value) -> Result<Vec<EditOp>, CommandError> {
 
 fn parse_op(i: usize, item: Operation) -> Result<EditOp, CommandError> {
     let kind = item.op;
+    // GridCraft checks the rest of Excel's rules when the operation runs.
     let check_new_name = |name: &str| {
-        validate_sheet_name(name).map_err(|e| {
-            op_error(
-                i,
-                format!("the new sheet name is not allowed: {e}"),
-                "Use 1 to 31 characters without : \\ / ? * [ ].",
-            )
-        })
+        if name.chars().any(char::is_control) {
+            let why = "the new sheet name contains a control character";
+            let fix = "Use 1 to 31 characters without : \\ / ? * [ ].";
+            return Err(op_error(i, why, fix));
+        }
+        Ok(())
     };
     let is_sheet_op = matches!(
         kind,
@@ -207,25 +203,7 @@ fn parse_op(i: usize, item: Operation) -> Result<EditOp, CommandError> {
                     "Add \"value\": \"SUM(B2:B9)\".",
                 ));
             }
-            match check_formula(formula) {
-                None => {}
-                Some(Refusal::Unreadable(why)) => {
-                    return Err(CommandError::new(
-                        ErrorCode::InvalidArgument,
-                        format!("ops[{i}] has a formula Carrysheet cannot read"),
-                        why,
-                        "Correct the formula (use , between arguments) and call again; nothing was saved.",
-                    ));
-                }
-                Some(Refusal::Refused(why)) => {
-                    return Err(CommandError::new(
-                        ErrorCode::InvalidArgument,
-                        format!("ops[{i}] writes a formula Carrysheet does not let agents write"),
-                        why,
-                        "Write the value instead, or ask a person to add this formula in a spreadsheet app.",
-                    ));
-                }
-            }
+            check_formula(i, formula)?;
             text = Some(formula.to_owned());
         }
         (EditKind::SetFormula, _) => {
@@ -256,8 +234,8 @@ fn parse_op(i: usize, item: Operation) -> Result<EditOp, CommandError> {
         text,
         count: item.count,
     };
-    let cells = op.range().map_or(0, |r| r.range.count());
-    if matches!(kind, EditKind::SetValue | EditKind::SetFormula) && cells > MAX_FILL_CELLS {
+    let cells = op.fill_cells();
+    if cells > MAX_FILL_CELLS {
         return Err(CommandError::new(
             ErrorCode::LimitExceeded,
             format!("ops[{i}] fills {cells} cells"),
@@ -277,14 +255,13 @@ fn parse_op(i: usize, item: Operation) -> Result<EditOp, CommandError> {
 pub(crate) const REFUSED_FUNCTIONS: &str = "\
 WEBSERVICE: it fetches a web address
 FILTERXML: it is used with WEBSERVICE to read fetched pages
-IMPORTXML: it fetches a web page
+IMPORTXML IMPORTHTML: it fetches a web page
 IMPORTDATA: it fetches a file from the web
-STOCKHISTORY: it fetches data from an online service
+STOCKHISTORY GOOGLEFINANCE: it fetches data from an online service
 COPILOT: it sends cell data to an online AI service
 PY: it runs Python code (in Microsoft's cloud)
 CALL: it calls a function in a program library (DLL)
-REGISTER: it loads a function from a program library (DLL)
-REGISTER.ID: it loads a function from a program library (DLL)
+REGISTER REGISTER.ID: it loads a function from a program library (DLL)
 EXEC: it starts another program (an Excel 4 macro function)
 DDE: it talks to another program over DDE
 RTD: it reads live data from another program
@@ -294,16 +271,9 @@ IMAGE: it downloads a picture from a web address
 TRANSLATE: it sends cell text to an online translation service
 DETECTLANGUAGE: it sends cell text to an online language service
 IMPORTRANGE: it reads data from another online spreadsheet
-IMPORTHTML: it fetches a web page
 IMPORTFEED: it fetches a web feed
-GOOGLEFINANCE: it fetches data from an online service
-CUBEVALUE: it queries an outside data cube (OLAP) server
-CUBEMEMBER: it queries an outside data cube (OLAP) server
-CUBEMEMBERPROPERTY: it queries an outside data cube (OLAP) server
-CUBERANKEDMEMBER: it queries an outside data cube (OLAP) server
-CUBESET: it queries an outside data cube (OLAP) server
-CUBESETCOUNT: it queries an outside data cube (OLAP) server
-CUBEKPIMEMBER: it queries an outside data cube (OLAP) server";
+CUBEVALUE CUBEMEMBER CUBEMEMBERPROPERTY CUBERANKEDMEMBER CUBESET CUBESETCOUNT CUBEKPIMEMBER: \
+it queries an outside data cube (OLAP) server";
 
 /// Prefixes files put before function and parameter names. Any number of
 /// them, in any order, is stripped before a name is compared.
@@ -317,7 +287,7 @@ fn refused_name(word: &str) -> Option<String> {
         name.drain(..p.len());
     }
     let mut table = REFUSED_FUNCTIONS.lines().filter_map(|l| l.split_once(": "));
-    let (name, why) = table.find(|(refused, _)| *refused == name)?;
+    let (_, why) = table.find(|(names, _)| names.split(' ').any(|n| n == name))?;
     Some(format!("{name} is refused: {why}"))
 }
 
@@ -327,44 +297,25 @@ fn outside_file(sheets: &[&str]) -> Option<String> {
     names_file.then(|| "it reads another file through a quoted reference".to_owned())
 }
 
-/// Why a formula is refused when an agent writes it (docs/agents.md,
-/// "Dangerous formulas"), or `None`. GridCraft's parser reads it as the
-/// kernel stores it, so text in strings never counts. Refused: the
-/// functions of [`REFUSED_FUNCTIONS`], called or passed as a value; sheet
-/// names that name a file; and what does not parse, which includes links
-/// to other workbooks (`[1]Sheet!A1`) and DDE (`app|topic!item`).
-pub fn refused_formula(formula: &str) -> Option<String> {
-    check_formula(formula).map(|r| match r {
-        Refusal::Unreadable(why) | Refusal::Refused(why) => why,
-    })
-}
-
-/// Why [`check_formula`] refused: a typo the agent can fix, or a policy refusal.
-enum Refusal {
-    Unreadable(String),
-    Refused(String),
-}
-
-fn check_formula(formula: &str) -> Option<Refusal> {
+/// Refuses a formula an agent may not write (docs/agents.md, "Dangerous
+/// formulas"), read by GridCraft's parser as the kernel stores it, so text
+/// in strings never counts. Refused: the functions of [`REFUSED_FUNCTIONS`],
+/// called or passed as a value; sheet names that name a file; and what does
+/// not parse, such as links to other workbooks (`[1]Sheet!A1`) and DDE.
+pub fn check_formula(i: usize, formula: &str) -> Result<(), CommandError> {
     // The kernel closes up to 8 missing parentheses, as Excel does.
-    let mut closed = formula.to_owned();
-    let mut parsed = parse(&closed);
-    for _ in 0..8 {
-        if parsed.is_ok() {
-            break;
-        }
-        closed.push(')');
-        parsed = parse(&closed);
-    }
-    let expr = match parsed {
-        Ok(expr) => expr,
-        Err(e) => {
-            let e = escape(&e.to_string(), 100);
-            return Some(Refusal::Unreadable(format!(
-                "{e}; links to other workbooks and DDE are not allowed"
-            )));
-        }
-    };
+    let close = |n: usize| parse(&format!("{formula}{}", ")".repeat(n)));
+    let found = (0..8).map(close).find(Result::is_ok);
+    let parsed = found.unwrap_or_else(|| close(8));
+    let expr = parsed.map_err(|e| {
+        let e = escape(&e.to_string(), 100);
+        CommandError::new(
+            ErrorCode::InvalidArgument,
+            format!("ops[{i}] has a formula Carrysheet cannot read"),
+            format!("{e}; links to other workbooks and DDE are not allowed"),
+            "Correct the formula (use , between arguments) and call again; nothing was saved.",
+        )
+    })?;
     let mut why = None;
     expr.walk(&mut |node| {
         let found = match node {
@@ -385,7 +336,14 @@ fn check_formula(formula: &str) -> Option<Refusal> {
             why = found;
         }
     });
-    why.map(Refusal::Refused)
+    why.map_or(Ok(()), |why| {
+        Err(CommandError::new(
+            ErrorCode::InvalidArgument,
+            format!("ops[{i}] writes a formula Carrysheet does not let agents write"),
+            why,
+            "Write the value instead, or ask a person to add this formula in a spreadsheet app.",
+        ))
+    })
 }
 
 /// What one cell held before and after an edit.
@@ -415,11 +373,13 @@ pub struct EditResult {
     pub changes: Vec<CellChange>,
     /// All cells the operations wrote.
     pub changes_total: u64,
-    /// Formula cells whose result changed because of the edit (not
-    /// counted when rows, columns or sheets moved), up to
-    /// [`MAX_LISTED_CHANGES`].
+    /// Formula cells whose result changed because of the edit, up to
+    /// [`MAX_LISTED_CHANGES`] (not counted when rows, columns or sheets moved).
     pub recalculated: Vec<CellChange>,
     pub recalculated_total: u64,
+    /// Kept content the edit dropped, by feature, for the save report.
+    #[serde(skip)]
+    pub(crate) dropped: BTreeMap<&'static str, u64>,
 }
 
 /// Applies `ops` in order. On an error the book is put back as it was.
@@ -431,10 +391,9 @@ pub(crate) fn apply(book: &mut Book, ops: &[EditOp]) -> Result<EditResult, Comma
     let outcome = ops
         .iter()
         .enumerate()
-        .try_for_each(|(i, op)| apply_one(&mut book.session, i, op, &mut result, &mut written));
-    let session = &mut book.session;
+        .try_for_each(|(i, op)| apply_one(book, i, op, &mut result, &mut written));
     if let Err(e) = outcome {
-        if let Some(d) = session.active_mut() {
+        if let Some(d) = book.session.active_mut() {
             d.wb = start;
             d.calc.rebuild(&d.wb);
         }
@@ -442,16 +401,18 @@ pub(crate) fn apply(book: &mut Book, ops: &[EditOp]) -> Result<EditResult, Comma
     }
     // Filling a range moves the active sheet; the file keeps its own.
     if let Some(name) = active {
-        let _ = session.execute_headless("sheet.activate", json!({ "sheet": name }));
+        let _ = book
+            .session
+            .execute_headless("sheet.activate", json!({ "sheet": name }));
     }
     // After rows, columns or sheets move, cells cannot be compared by address.
     let fills = [EditKind::SetValue, EditKind::SetFormula, EditKind::Clear];
     if ops.iter().all(|op| fills.contains(&op.kind)) {
-        let after = wb(session)?;
+        let after = book.doc()?.wb.clone();
         recalculated(&start, &after, &written, &mut result);
     }
     // One-shot calls keep no undo history (record 0003, point 4).
-    if let Some(d) = session.active_mut() {
+    if let Some(d) = book.session.active_mut() {
         d.undo.clear();
         d.redo.clear();
         d.saved = d.wb.clone();
@@ -461,13 +422,13 @@ pub(crate) fn apply(book: &mut Book, ops: &[EditOp]) -> Result<EditResult, Comma
 
 /// Runs one GridCraft command for operation `i`.
 fn execute(
-    session: &mut Session,
+    book: &mut Book,
     i: usize,
     op: &EditOp,
     id: &str,
     params: Value,
 ) -> Result<(), CommandError> {
-    match session.execute_headless(id, params) {
+    match book.session.execute_headless(id, params) {
         Ok(_) => Ok(()),
         Err(EngineError::Internal(_, detail)) => Err(internal("editing", &detail)),
         Err(e) => Err(CommandError::new(
@@ -479,46 +440,17 @@ fn execute(
     }
 }
 
-fn shape_error(i: usize, op: &EditOp, wanted: &str) -> CommandError {
-    CommandError::new(
-        ErrorCode::InvalidArgument,
-        format!("ops[{i}] ({}) needs {wanted}", op.kind.name()),
-        format!("the target {} has no {wanted}", op.target_text()),
-        "Use a target like 5:7 or B2:B9 for rows, and C:D or C1:D1 for columns.",
-    )
-}
-
-fn no_such_sheet(i: usize, name: &str) -> CommandError {
-    CommandError::new(
-        ErrorCode::NoSuchSheet,
-        format!("ops[{i}] names a sheet that does not exist: \"{name}\""),
-        "the workbook has no sheet with that name at this point of the batch",
-        "Run overview to see the sheet names.",
-    )
-}
-
-fn wb(session: &Session) -> Result<Arc<Workbook>, CommandError> {
-    session
-        .active()
-        .map(|d| d.wb.clone())
-        .ok_or_else(|| internal("editing", "no document is open"))
-}
-
-/// A sheet's index; no name means the first sheet.
-fn sheet_of(session: &Session, i: usize, name: Option<&str>) -> Result<usize, CommandError> {
-    let wb = wb(session)?;
-    match name {
-        Some(n) => wb.sheet_index(n).ok_or_else(|| no_such_sheet(i, n)),
-        None if wb.sheets.is_empty() => Err(no_such_sheet(i, "(first sheet)")),
-        None => Ok(0),
-    }
+/// A sheet's index at this point of the batch; no name means the first sheet.
+fn sheet(book: &Book, i: usize, name: Option<&str>) -> Result<usize, CommandError> {
+    book.sheet_index(name).map_err(|mut e| {
+        e.what = format!("ops[{i}]: {}", e.what);
+        e
+    })
 }
 
 /// What a cell holds, for the change list.
 fn cell_state(sh: Option<&Sheet>, at: CellRef) -> Value {
-    let Some(sh) = sh else {
-        return Value::Null;
-    };
+    let Some(sh) = sh else { return Value::Null };
     let value = value_json(&sh.value(at));
     match sh.cell(at).and_then(|c| c.formula.as_ref()) {
         Some(f) => {
@@ -529,7 +461,7 @@ fn cell_state(sh: Option<&Sheet>, at: CellRef) -> Value {
 }
 
 fn apply_one(
-    session: &mut Session,
+    book: &mut Book,
     i: usize,
     op: &EditOp,
     result: &mut EditResult,
@@ -537,66 +469,71 @@ fn apply_one(
 ) -> Result<(), CommandError> {
     let done = match (&op.target, op.kind) {
         (EditTarget::Sheet(name), EditKind::AddSheet) => {
-            let n = wb(session)?.sheets.len();
+            let n = book.wb()?.sheets.len();
             let params = json!({ "name": name, "before": n });
-            execute(session, i, op, "home.insertSheet", params)?;
+            execute(book, i, op, "home.insertSheet", params)?;
             format!("sheet added at the end ({} sheets now)", n + 1)
         }
         (EditTarget::Sheet(name), EditKind::RenameSheet) => {
-            let si = sheet_of(session, i, Some(name))?;
+            let si = sheet(book, i, Some(name))?;
             let new = op.text.clone().unwrap_or_default();
             let params = json!({ "sheet": si, "name": new });
-            execute(session, i, op, "sheet.rename", params)?;
+            execute(book, i, op, "sheet.rename", params)?;
             format!("renamed to {new}")
         }
         (EditTarget::Sheet(name), EditKind::DeleteSheet) => {
-            let si = sheet_of(session, i, Some(name))?;
-            execute(session, i, op, "home.deleteSheet", json!({ "sheet": si }))?;
+            let si = sheet(book, i, Some(name))?;
+            execute(book, i, op, "home.deleteSheet", json!({ "sheet": si }))?;
             "sheet deleted".to_owned()
         }
         (
             EditTarget::Range(target),
             EditKind::SetValue | EditKind::SetFormula | EditKind::Clear,
         ) => {
-            let si = sheet_of(session, i, target.sheet.as_deref())?;
-            write_cells(session, i, op, si, target, result, written)?
+            let si = sheet(book, i, target.sheet.as_deref())?;
+            write_cells(book, i, op, si, target, result, written)?
         }
-        (EditTarget::Range(target), EditKind::InsertRows | EditKind::DeleteRows) => {
-            let (si, r) = (sheet_of(session, i, target.sheet.as_deref())?, target.range);
-            if target.shape == Shape::Columns {
-                return Err(shape_error(i, op, "rows"));
+        (
+            EditTarget::Range(target),
+            kind @ (EditKind::InsertRows
+            | EditKind::DeleteRows
+            | EditKind::InsertColumns
+            | EditKind::DeleteColumns),
+        ) => {
+            let (si, r) = (sheet(book, i, target.sheet.as_deref())?, target.range);
+            let (id, key, start, size) = match kind {
+                EditKind::InsertRows => ("home.insertRows", "rows", r.start.row, r.height()),
+                EditKind::DeleteRows => ("home.deleteRows", "rows", r.start.row, r.height()),
+                EditKind::InsertColumns => ("home.insertColumns", "cols", r.start.col, r.width()),
+                _ => ("home.deleteColumns", "cols", r.start.col, r.width()),
+            };
+            let is_rows = key == "rows";
+            let word = if is_rows { "row" } else { "column" };
+            // A whole-column target has no rows, and the reverse.
+            if (r.is_full_rows(), r.is_full_cols()) == (!is_rows, is_rows) {
+                return Err(CommandError::new(
+                    ErrorCode::InvalidArgument,
+                    format!("ops[{i}] ({}) needs {word}s", kind.name()),
+                    format!("the target {} has no {word}s", op.target_text()),
+                    "Use a target like 5:7 or B2:B9 for rows, and C:D or C1:D1 for columns.",
+                ));
             }
-            forget_kept(session, si, None);
-            let n = op.count.unwrap_or(r.height()).max(1);
-            let rows = format!("{}:{}", r.start.row + 1, r.start.row.saturating_add(n));
-            let params = json!({ "sheet": si, "rows": rows });
-            if op.kind == EditKind::InsertRows {
-                execute(session, i, op, "home.insertRows", params)?;
-                format!("{n} row(s) inserted before row {}", r.start.row + 1)
-            } else {
-                execute(session, i, op, "home.deleteRows", params)?;
-                format!("row(s) {rows} deleted")
-            }
-        }
-        (EditTarget::Range(target), EditKind::InsertColumns | EditKind::DeleteColumns) => {
-            let (si, r) = (sheet_of(session, i, target.sheet.as_deref())?, target.range);
-            if target.shape == Shape::Rows {
-                return Err(shape_error(i, op, "columns"));
-            }
-            forget_kept(session, si, None);
-            let n = op.count.unwrap_or(r.width()).max(1);
-            let first = col_to_letters(r.start.col);
-            let cols = format!(
-                "{first}:{}",
-                col_to_letters(r.start.col.saturating_add(n - 1))
-            );
-            let params = json!({ "sheet": si, "cols": cols });
-            if op.kind == EditKind::InsertColumns {
-                execute(session, i, op, "home.insertColumns", params)?;
-                format!("{n} column(s) inserted before column {first}")
-            } else {
-                execute(session, i, op, "home.deleteColumns", params)?;
-                format!("column(s) {cols} deleted")
+            forget_kept(book, si, None, &mut result.dropped);
+            let n = op.count.unwrap_or(size).max(1);
+            let label = |at: u32| {
+                if is_rows {
+                    at.saturating_add(1).to_string()
+                } else {
+                    col_to_letters(at)
+                }
+            };
+            let span = format!("{}:{}", label(start), label(start.saturating_add(n - 1)));
+            execute(book, i, op, id, json!({ "sheet": si, key: span }))?;
+            match kind {
+                EditKind::InsertRows | EditKind::InsertColumns => {
+                    format!("{n} {word}(s) inserted before {word} {}", label(start))
+                }
+                _ => format!("{word}(s) {span} deleted"),
             }
         }
         // parse_ops never makes these; an EditOp built by hand can.
@@ -619,7 +556,7 @@ fn apply_one(
 /// `set_value`, `set_formula` and `clear`: writes the cells, lists what
 /// changed, and says how many cells changed.
 fn write_cells(
-    session: &mut Session,
+    book: &mut Book,
     i: usize,
     op: &EditOp,
     si: usize,
@@ -628,7 +565,7 @@ fn write_cells(
     written: &mut HashSet<(usize, u32, u32)>,
 ) -> Result<String, CommandError> {
     let r = target.range;
-    let before = wb(session)?;
+    let before = book.doc()?.wb.clone();
     let before_sheet = before.sheets.get(si).map(Arc::as_ref);
     // A clear lists only the cells that hold something: a clear of A:A is
     // not a million changes.
@@ -642,7 +579,7 @@ fn write_cells(
         EditKind::SetValue => {
             let values = values_of(op, &r, &before, si);
             let params = json!({ "sheet": si, "range": start, "values": values });
-            execute(session, i, op, "range.setValues", params)?;
+            execute(book, i, op, "range.setValues", params)?;
         }
         // One cell, or a range filled the way Excel fills it (relative
         // references move with each cell).
@@ -650,20 +587,20 @@ fn write_cells(
             let input = format!("={}", op.text.as_deref().unwrap_or(""));
             if r.is_single() {
                 let params = json!({ "sheet": si, "cell": start, "input": input });
-                execute(session, i, op, "cell.set", params)?;
+                execute(book, i, op, "cell.set", params)?;
             } else {
                 let select = json!({ "sheet": si, "range": range, "active": start });
-                execute(session, i, op, "selection.set", select)?;
+                execute(book, i, op, "selection.set", select)?;
                 let params = json!({ "sheet": si, "range": range, "input": input });
-                execute(session, i, op, "range.fill", params)?;
+                execute(book, i, op, "range.fill", params)?;
             }
         }
         _ => {
             let params = json!({ "sheet": si, "range": range });
-            execute(session, i, op, "edit.clearContents", params)?;
+            execute(book, i, op, "edit.clearContents", params)?;
         }
     }
-    let after = wb(session)?;
+    let after = book.doc()?.wb.clone();
     let after_sheet = after.sheets.get(si).map(Arc::as_ref);
     let name = after_sheet.map(|s| s.name.clone()).unwrap_or_default();
     let mut count = 0u64;
@@ -699,7 +636,7 @@ fn write_cells(
             "Write the formula to a cell with another number format; nothing was saved.",
         ));
     }
-    forget_kept(session, si, Some(&r));
+    forget_kept(book, si, Some(&r), &mut result.dropped);
     Ok(format!("{count} cell(s) changed"))
 }
 
@@ -725,41 +662,56 @@ fn values_of(op: &EditOp, r: &RangeRef, wb: &Workbook, si: usize) -> Vec<Value> 
         .collect()
 }
 
-/// Kept sheet content that names cells (scenarios, ignored-error ranges,
-/// data table formulas, formatted note text; see the vendor README) and
-/// that GridCraft does not move with them. After rows or columns move
-/// (`within` is `None`) all of it goes; after a fill or clear, the data
-/// tables anchored in the range. The save report then lists it as lost,
-/// so nothing is written that points at the wrong cells.
-fn forget_kept(session: &mut Session, si: usize, within: Option<&RangeRef>) {
-    let Some(d) = session.active_mut() else {
+/// The feature of kept content that names cells GridCraft does not move (vendor README).
+fn kept_feature(slot: &str) -> Option<&'static str> {
+    match slot.split_once(':').map_or(slot, |(kind, _)| kind) {
+        "scenarios" => Some("scenarios"),
+        "ignoredErrors" => Some("ignored error flags"),
+        "dataTable" => Some("what-if data tables"),
+        "note" => Some("formatted note text"),
+        _ => None,
+    }
+}
+
+/// Drops kept content that would point at the wrong cells, counted in `dropped` for the
+/// save report: all of it after rows or columns move (`within` is `None`), else the data
+/// tables anchored in the range.
+fn forget_kept(
+    book: &mut Book,
+    si: usize,
+    within: Option<&RangeRef>,
+    dropped: &mut BTreeMap<&'static str, u64>,
+) {
+    let Some(d) = book.session.active_mut() else {
         return;
     };
     let stale = |slot: &str| match within {
-        None => {
-            matches!(slot, "scenarios" | "ignoredErrors")
-                || slot.starts_with("dataTable:")
-                || slot.starts_with("note:")
-        }
+        None => kept_feature(slot),
         Some(r) => slot
             .strip_prefix("dataTable:")
             .and_then(CellRef::parse)
-            .is_some_and(|c| r.contains(c)),
+            .filter(|c| r.contains(*c))
+            .and_then(|_| kept_feature(slot)),
     };
     let has_stale =
         d.wb.sheets
             .get(si)
             .and_then(|sh| sh.preserved.as_deref())
-            .is_some_and(|p| p.elements.iter().any(|e| stale(&e.slot)));
+            .is_some_and(|p| p.elements.iter().any(|e| stale(&e.slot).is_some()));
     if !has_stale {
         return;
     }
     let wb = Arc::make_mut(&mut d.wb);
-    if let Some(sh) = wb.sheets.get_mut(si) {
-        let sh = Arc::make_mut(sh);
-        if let Some(p) = sh.preserved.as_mut() {
-            Arc::make_mut(p).elements.retain(|e| !stale(&e.slot));
-        }
+    if let Some(sh) = wb.sheets.get_mut(si)
+        && let Some(p) = Arc::make_mut(sh).preserved.as_mut()
+    {
+        Arc::make_mut(p).elements.retain(|e| match stale(&e.slot) {
+            Some(feature) => {
+                *dropped.entry(feature).or_default() += 1;
+                false
+            }
+            None => true,
+        });
     }
 }
 
@@ -809,7 +761,9 @@ pub(crate) fn edit(
     let format = output_format(&output, None)?;
     let mut book = kernel.open_bytes(&path, bytes)?;
     let result = kernel.edit(&mut book, &ops)?;
-    let encoded = kernel.encode(&book, &output, format, &EncodeOptions::default())?;
+    let mut encoded = kernel.encode(&book, &output, format, &EncodeOptions::default())?;
+    let dropped = result.dropped.iter().map(|(f, n)| Loss::all(*f, *n));
+    encoded.report.lost.extend(dropped);
     let mut data = Map::new();
     data.insert("file".into(), shown(&path));
     data.insert("output".into(), shown(&output));

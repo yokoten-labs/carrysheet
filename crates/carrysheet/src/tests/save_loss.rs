@@ -1,5 +1,5 @@
-use crate::save::SaveReport;
 use crate::save::loss::*;
+use crate::save::{FileFormat, SaveReport};
 
 /// A part to zip: its name, its text, and its raw deflate stream, if
 /// any.
@@ -59,105 +59,6 @@ fn package(parts: &[(&str, &str)]) -> Vec<u8> {
     zip_of(&parts)
 }
 
-#[test]
-fn content_lost_inside_rewritten_parts_is_reported() {
-    let sheet = r#"<worksheet><sheetPr codeName="Sheet1"/><sheetData><row><c r="B2"><f t="dataTable" ref="B2:B3" r1="A1"/><v>3</v></c><c r="C2"><f>_xlfn.NEWFN(1)</f><v>7</v></c></row></sheetData><x:hyperlinks xmlns:x="m"><x:hyperlink ref="A1" display="Go &amp; see"/></x:hyperlinks></worksheet>"#;
-    let source = package(&[
-        (
-            "xl/workbook.xml",
-            r#"<workbook><fileSharing userName="Ann"/><workbookPr codeName="ThisWorkbook"/></workbook>"#,
-        ),
-        ("xl/worksheets/sheet1.xml", sheet),
-        (
-            "xl/sharedStrings.xml",
-            "<sst><si><r><rPr><b/></rPr><t>a</t></r></si></sst>",
-        ),
-        (
-            "xl/persons/person.xml",
-            r#"<personList><person displayName="Ann" id="{1}" userId="a@x" providerId="AD"/></personList>"#,
-        ),
-    ]);
-    // The same content, written differently: nothing is reported.
-    let same = package(&[
-        (
-            "xl/workbook.xml",
-            r#"<workbook><fileSharing userName='Ann'/><workbookPr date1904="0" codeName="ThisWorkbook"/></workbook>"#,
-        ),
-        (
-            "xl/worksheets/sheet1.xml",
-            &sheet.replace("x:", "").replace("&amp;", "&#38;"),
-        ),
-        (
-            "xl/sharedStrings.xml",
-            "<sst><si><r><rPr><b/></rPr><t>a</t></r></si></sst>",
-        ),
-        (
-            "xl/persons/person.xml",
-            r#"<personList><person displayName="Ann" id="{9}" userId="a@x" providerId="AD"/></personList>"#,
-        ),
-    ]);
-    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
-    compare(&source, &same, &mut r);
-    assert!(r.lost.is_empty(), "{:?}", r.lost);
-
-    // Every part rewritten without it: each is reported, by name.
-    let lossy = package(&[
-        ("xl/workbook.xml", "<workbook><workbookPr/></workbook>"),
-        (
-            "xl/worksheets/sheet1.xml",
-            r#"<worksheet><sheetData><row><c r="B2"><v>3</v></c><c r="C2" t="e"><f>NEWFN(1)</f><v>#NAME?</v></c></row></sheetData><hyperlinks><hyperlink ref="A1" display="A1"/></hyperlinks></worksheet>"#,
-        ),
-        ("xl/sharedStrings.xml", "<sst><si><t>a</t></si></sst>"),
-        (
-            "xl/persons/person.xml",
-            r#"<personList><person displayName="Ann" id="{1}" userId="Ann" providerId="None"/></personList>"#,
-        ),
-    ]);
-    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
-    compare(&source, &lossy, &mut r);
-    let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
-    for feature in [
-        "file sharing settings",
-        "workbook code name (VBA)",
-        "sheet code names (VBA)",
-        "what-if data tables",
-        "hyperlink text and tips",
-        "rich text in cells",
-        "people of threaded comments (user ids)",
-        "formula results (they would become #NAME?)",
-        "newer Excel function names (_xlfn.)",
-    ] {
-        assert!(lost.contains(&feature), "{feature}: {lost:?}");
-    }
-}
-
-#[test]
-fn a_package_too_large_to_search_needs_confirm_loss() {
-    // Round 2, N4: what the gate could not search is a loss, not a note.
-    let sheet = r#"<worksheet><sheetPr codeName="Sheet1"/><sheetData/></worksheet>"#;
-    let parts = [
-        ("xl/workbook.xml", "<workbook/>"),
-        ("xl/worksheets/sheet1.xml", sheet),
-    ];
-    let source = package(&parts);
-    let small = (16, 16);
-    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
-    compare_within(&source, &source, &mut r, small);
-    let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
-    assert!(
-        lost.iter()
-            .any(|l| l.contains("content inside rewritten parts")),
-        "{lost:?}"
-    );
-    assert!(lost.iter().any(|l| l.contains("not checked")), "{lost:?}");
-    assert!(lost.iter().all(|l| !l.contains("slowly")), "{lost:?}");
-    assert!(lost.iter().any(|l| l.contains("too large")), "{lost:?}");
-    // With room to search, the same package loses nothing.
-    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
-    compare(&source, &source, &mut r);
-    assert!(r.lost.is_empty(), "{:?}", r.lost);
-}
-
 /// Raw deflate of `text` in stored blocks, with `filler` bytes of
 /// empty stored blocks (5 bytes each, no output) after the first
 /// `split` bytes of output.
@@ -182,59 +83,44 @@ fn with_empty_run(text: &[u8], split: usize, filler: usize) -> Vec<u8> {
 }
 
 #[test]
-fn a_long_run_of_empty_blocks_between_outputs_is_refused_and_named() {
-    // Issue 80: a sheet part no relationship names (only this check
-    // unpacks it) gives 192 KiB of output, then 40 KiB of empty
-    // blocks, then the rest. Its total stays within what its output
-    // earns (a quarter more input than output), so only the cap on a
-    // run without output refuses it, far below the 64 MiB part cap.
-    let mut sheet = b"<worksheet><sheetData/><!--".to_vec();
-    sheet.resize(256 << 10, b'x');
-    sheet.extend(b"--></worksheet>");
-    let packed = with_empty_run(&sheet, 192 << 10, 40 << 10);
-    assert!(packed.len() as u64 <= sheet.len() as u64 * 5 / 4);
-    let workbook = b"<workbook/>".as_slice();
-    let source = zip_of(&[
-        ("xl/workbook.xml", workbook, None),
-        (
-            "xl/worksheets/sheet9.xml",
-            sheet.as_slice(),
-            Some(packed.as_slice()),
-        ),
+fn parts_are_compared_from_the_zip_directory_only() {
+    let source = package(&[
+        ("xl/workbook.xml", "<workbook/>"),
+        ("xl/charts/chart1.xml", "<c/>"),
+        ("xl/charts/chart2.xml", "<c/>"),
+        ("xl/calcChain.xml", "<calcChain/>"),
+        ("_xmlsignatures/sig1.xml", "<s/>"),
     ]);
-    // Read whole, it is refused for its shape, and nothing else.
-    let mut p = Package::open(&source).unwrap();
-    let e = p.parts["xl/worksheets/sheet9.xml"].1;
-    assert_eq!(p.unpack(e).err(), Some(SLOW));
-
-    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
+    let output = package(&[
+        ("xl/workbook.xml", "<workbook date1904=\"0\"/>"),
+        ("xl/charts/chart1.xml", "<c/>"),
+        ("_xmlsignatures/sig1.xml", "<s/>"),
+        ("xl/styles.xml", "<styleSheet/>"),
+    ]);
+    let mut r = SaveReport::new(FileFormat::Xlsx);
+    compare(&source, &output, &mut r);
+    let parts = r.parts.unwrap();
+    let counts = (parts.identical, parts.rewritten, parts.dropped, parts.added);
+    assert_eq!(counts, (2, 1, 2, 1), "{parts:?}");
+    assert_eq!(r.dropped_parts, vec!["\"xl/charts/chart2.xml\"".to_owned()]);
+    assert_eq!(r.lost.len(), 1, "{:?}", r.lost);
+    assert_eq!(
+        (r.lost[0].feature.as_str(), r.lost[0].before, r.lost[0].after),
+        ("charts", 2, 1)
+    );
+    let notes = r.notes.join("; ");
+    assert!(notes.contains("Excel rebuilds it"), "{notes}");
+    assert!(notes.contains("digital signature"), "{notes}");
+    // The same package loses nothing, and nothing inside a part counts.
+    let mut r = SaveReport::new(FileFormat::Xlsx);
     compare(&source, &source, &mut r);
-    let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
-    assert!(!lost.is_empty(), "{lost:?}");
-    for l in &lost {
-        assert!(l.contains("not checked"), "{l}");
-        assert!(l.contains("unpacks far more slowly"), "{l}");
-        assert!(!l.contains("too large"), "{l}");
-    }
-
-    // The same part without the run is searched, and loses nothing.
-    let plain = zip_of(&[
-        ("xl/workbook.xml", workbook, None),
-        (
-            "xl/worksheets/sheet9.xml",
-            sheet.as_slice(),
-            Some(with_empty_run(&sheet, 192 << 10, 0).as_slice()),
-        ),
-    ]);
-    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
-    compare(&plain, &plain, &mut r);
-    assert!(r.lost.is_empty(), "{:?}", r.lost);
+    assert!(!r.loses_something(), "{r:?}");
 }
 
 #[test]
 fn a_package_that_cannot_be_listed_says_why_and_what_to_do() {
     let good = package(&[("xl/workbook.xml", "<workbook/>")]);
-    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
+    let mut r = SaveReport::new(FileFormat::Xlsx);
     compare(b"not a zip at all, but long enough", &good, &mut r);
     let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
     assert_eq!(lost.len(), 1, "{lost:?}");
@@ -246,39 +132,13 @@ fn a_package_that_cannot_be_listed_says_why_and_what_to_do() {
         lost[0]
     );
     assert!(lost[0].contains("confirm_loss"), "{}", lost[0]);
-    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
+    let mut r = SaveReport::new(FileFormat::Xlsx);
     compare(&good, b"PK", &mut r);
     assert!(
         r.lost[0].feature.contains("in the file to be written"),
         "{:?}",
         r.lost
     );
-}
-
-#[test]
-fn tags_are_read_with_local_names_and_decoded_values() {
-    let mut seen = vec![];
-    for_each_tag(
-        br#"<?xml version="1.0"?><!-- <b x="1"/> --><a:t q='x>y' r="&lt;&#65;&#x42;"/><![CDATA[<c/>]]></a:t>"#,
-        &mut |name, attrs| {
-            seen.push(format!(
-                "{name}:{}",
-                attrs
-                    .iter()
-                    .map(|(k, v)| format!("{k}={v}"))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ));
-        },
-    );
-    assert_eq!(seen, vec!["t:q=x>y,r=<AB"]);
-}
-
-#[test]
-fn counting_needles() {
-    assert_eq!(count(b"<a ><a ><b>", b"<a "), 2);
-    assert_eq!(count(b"", b"<a "), 0);
-    assert_eq!(count(b"aaaa", b"aa"), 2);
 }
 
 #[test]
@@ -364,6 +224,17 @@ fn macros_are_found_by_part_name_or_said_unchecked() {
     ]);
     let said = macros(&wide, true).unwrap();
     assert!(said.starts_with("not checked:"), "{said}");
+
+    // Content types padded far beyond their size are never unpacked (issue 80).
+    let types = br#"<Types><Override PartName="/xl/p.bin" ContentType="application/vnd.ms-office.vbaProject"/></Types>"#;
+    let padded = with_empty_run(types, 10, 64 << 10);
+    let padded = zip_of(&[("[Content_Types].xml", types, Some(padded.as_slice()))]);
+    let said = macros(&padded, true).unwrap();
+    assert!(said.starts_with("not checked:"), "{said}");
+    let plain = with_empty_run(types, 10, 0);
+    let plain = zip_of(&[("[Content_Types].xml", types, Some(plain.as_slice()))]);
+    let said = macros(&plain, true).unwrap();
+    assert!(said.contains("VBA project"), "{said}");
 
     let said = macros(b"not a zip", true).unwrap();
     assert!(
