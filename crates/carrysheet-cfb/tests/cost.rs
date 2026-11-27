@@ -214,7 +214,7 @@ fn an_unreadable_unknown_or_detached_entry_is_reported() {
 #[test]
 fn extenxls_copies_with_its_short_package_reported() {
     let path = format!(
-        "{}/../carrysheet-crypto/tests/data/xlsx/extenxls_pwd123.xlsx",
+        "{}/../carrysheet-kernel/tests/data/formats/crypto/xlsx/extenxls_pwd123.xlsx",
         env!("CARGO_MANIFEST_DIR")
     );
     let bytes = std::fs::read(path).unwrap();

@@ -9,12 +9,8 @@ The first release will be `carrysheet-cli`: a command-line tool with an MCP serv
 
 ## What works today
 
-The file-format libraries in `crates/` work and are tested. Each one treats every file as hostile: no crashes, limits on size and memory, and an error that says what went wrong.
+The libraries in `crates/` work and are tested. Each one treats every file as hostile: no crashes, limits on size and memory, and an error that says what went wrong.
 
-- **CSV and TSV** (`carrysheet-csv`): read and write, with the delimiter and encoding detected (UTF-8, UTF-16, GBK, Big5, Shift_JIS, Windows-1252 and more). Values stay exactly as written.
-- **Old Excel files** (`carrysheet-biff`): read `.xls` from Excel 2.x to Excel 2003 (BIFF2 to BIFF8), and Excel 4.0 `.xlw` workbooks. Records it doesn't understand are kept as bytes. Writing `.xls` is not done yet.
-- **Apple Numbers** (`carrysheet-numbers`): read `.numbers` files: sheets, tables, cell values, formulas as text and merged cells. Read only.
-- **Password-protected files** (`carrysheet-crypto`): detect them, decrypt them with the password, and encrypt them again. Covers `.xlsx`/`.xlsm`/`.xlsb` (agile and standard encryption) and `.xls` (RC4 and XOR). Files locked with Rights Management are detected and explained.
 - **Macros** (`carrysheet-vba`): list the VBA modules in a file, show their source and flag code that may be risky. Macros are never run, and their bytes are kept untouched.
 - **The workbook model and the command table** (`carrysheet-model`, `carrysheet-commands`): one list of commands that drives both the command line and the MCP tools, with JSON schemas that Claude, Gemini and OpenAI accept.
 
