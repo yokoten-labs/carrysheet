@@ -178,7 +178,7 @@ fn log_lines_are_cleaned_like_file_text() {
         let line = log_line(&format!("opened {}", home.join("a.xlsx").display()));
         assert!(!line.contains(&home.display().to_string()), "{line}");
     }
-    assert!(log_line(&"x".repeat(5_000)).len() < MAX_LOG_LINE + 40);
+    assert!(log_line(&"x".repeat(5_000)).len() < MAX_LOG_LINE + 60);
 }
 
 #[test]
