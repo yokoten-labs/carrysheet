@@ -92,10 +92,11 @@ Carrysheet is a small, fast, native spreadsheet written in Rust. The first relea
 
 | Folder | What | License |
 |---|---|---|
-| `crates/` | Libraries: file formats, the workbook model, the command layer | MIT OR Apache-2.0 |
+| `crates/` | Libraries: the join to the vendored GridCraft kernel, the workbook model, the command layer, and the macro readers (vba, cfb, zip) | MIT OR Apache-2.0 |
 | `apps/` | Programs: `carrysheet-cli` (with MCP), later the desktop app | GPL-3.0-or-later |
 | `research/` | Experiments such as the kernel comparison; its own Cargo workspace | MIT OR Apache-2.0 |
-| `tools/` | Developer tools: `fuzzlite` (the fuzzer for the file readers), later `bench` | MIT OR Apache-2.0 |
+| `scripts/` | Node scripts: the full check, the release check, the line cap | MIT OR Apache-2.0 |
+| `vendor/gridcraft/` | Upstream GridCraft, the kernel that reads and writes the file formats | MIT OR Apache-2.0 (upstream's) |
 
 Every crate sets `license` in its `Cargo.toml` to match its folder. A library must never depend on anything in `apps/`.
 
@@ -113,6 +114,19 @@ You must never copy, translate or closely paraphrase code from GPL, LGPL, AGPL o
 - Never drop data you don't understand when saving: keep it and write it back.
 - Errors for people and agents have three parts: what happened, why, and how to fix it.
 - Tests use small files committed under the crate's `tests/data/` (made by us or from Apache POI's test data with its license noted). Never commit large corpora.
+
+### The 5,000-line cap
+
+Our own source is at most 5,000 lines; the planning target is 4,500. [Record 0010](docs/records/0010-five-thousand-lines.md) says what counts and why. Why: set by the owner, so one person or agent can read the whole product. Check: the `lines` CI job (`node scripts/lines.mjs`, tests in `scripts/tests/`).
+
+- Every line of a tracked code file counts, blank and comment lines too. `vendor/`, paths with a `tests` or `benches` folder, and `*.test.mjs` do not count.
+- A tracked file that is neither code nor on the data list in `scripts/lines.mjs` fails the check.
+- Unit tests go in `src/tests/` behind `#[cfg(test)] mod tests;`. A counted Rust file with `#[path`, `include!(` or an unguarded `mod tests;` fails.
+- Above 4,500 the check prints a note. The pull request then says why.
+- `vendor/gridcraft/` is upstream GridCraft plus the patch files in `patches/`, and nothing else. The `vendor` CI job checks it (`node scripts/vendor.mjs verify`). A patch never carries a Carrysheet feature; the patch files add at most `PATCH_MAX` lines (`scripts/lines.mjs`).
+- During the cut, CI passes `--max` with the ceiling of the current step. A pull request never raises the ceiling or the cap; a new cap needs a new record.
+- Before you push, run the command of the `lines` job in `.github/workflows/ci.yml`. It needs no Rust and takes under a second.
+- A reason that needs more than a few lines goes into a record or `docs/`, not into a code comment.
 
 ### Command line and MCP
 

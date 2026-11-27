@@ -1,0 +1,41 @@
+diff --git a/crates/book/model/src/cellmap.rs b/crates/book/model/src/cellmap.rs
+index dbbe202..2fb5d94 100644
+--- a/crates/book/model/src/cellmap.rs
++++ b/crates/book/model/src/cellmap.rs
+@@ -43,7 +43,7 @@ mod tests {
+                 dates: vec![],
+             },
+         );
+-        s.hyperlinks.insert(c3, Hyperlink { target: "Sheet1!A1".into(), tooltip: Some("jump".into()), external: false });
++        s.hyperlinks.insert(c3, Hyperlink { target: "Sheet1!A1".into(), tooltip: Some("jump".into()), external: false, display: None });
+         let json = serde_json::to_string(&s).expect("serialize");
+         let back: Sheet = serde_json::from_str(&json).expect("deserialize");
+         assert_eq!(back.comments, s.comments);
+diff --git a/crates/book/model/src/features.rs b/crates/book/model/src/features.rs
+index b51f7bc..61b4d98 100644
+--- a/crates/book/model/src/features.rs
++++ b/crates/book/model/src/features.rs
+@@ -335,6 +335,9 @@ pub struct Hyperlink {
+     /// the file, not a `location`. A bare file name can't be told from a defined name by its text.
+     #[serde(default)]
+     pub external: bool,
++    /// The text the file gives for the link (`display`), kept for saving (Carrysheet patch).
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub display: Option<String>,
+ }
+ 
+ // ---------------------------------------------------------------- drawing objects
+@@ -831,6 +834,13 @@ pub struct SheetProtection {
+     pub delete_rows: bool,
+     pub sort: bool,
+     pub autofilter: bool,
++    /// Carrysheet patch: the file left objects (`objects`) or scenarios
++    /// (`scenarios`) unprotected. Kept as read; false writes them protected,
++    /// as GridCraft always did for new protections.
++    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
++    pub objects_editable: bool,
++    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
++    pub scenarios_editable: bool,
+ }
+ 
+ /// Review › Allow Edit Ranges: cells that stay editable on a protected sheet, with or without a

@@ -3,14 +3,12 @@
 Who could harm a Carrysheet user, through what, and what we do about it. To
 report a problem, see [SECURITY.md](../../SECURITY.md).
 
-**Where things stand (2026-10-20).** The file readers exist as libraries in
-`crates/`: `.xls` (carrysheet-biff), CSV (carrysheet-csv), Apple Numbers
-(carrysheet-numbers), VBA projects (carrysheet-vba) and encrypted files
-(carrysheet-crypto). `carrysheet-cli` runs its MCP server over stdio, but the
-`macros` command opens a workbook and lists its VBA project. The other
-commands that open workbooks answer "not implemented yet" until the kernel
-lands ([issue 45][i45]). Some defences below are not built yet; they are
-marked **planned**. This page must change when they land.
+**Where things stand (2026-11-27).** Workbook files are read by the vendored
+GridCraft kernel, through `carrysheet-kernel`. VBA projects are read by
+carrysheet-vba, on top of carrysheet-cfb and carrysheet-zip. `carrysheet-cli`
+runs its MCP server over stdio. Only `check`, `sanitize`, `mcp install` and
+`mcp doctor` still answer "not implemented yet". Some defences below are
+not built yet; they are marked **planned**. This page must change when they land.
 
 ## What we protect
 
@@ -58,7 +56,7 @@ defend against.
 ### 1. A hostile file
 
 *Spoofing a valid file, tampering, denial of service.* Someone sends a
-crafted `.xls`, `.xlsx`, `.csv`, `.numbers`, zip or compound file (CFB) and
+crafted `.xlsx`, `.xlsb`, `.ods`, `.xls`, `.csv`, zip or compound file (CFB) and
 the user or an agent opens it.
 
 Attacks: decompression bombs; small inputs that cost a lot of CPU
@@ -67,28 +65,13 @@ sizes and counts; archive entry names with `..`, absolute paths or control
 characters; XML with a DOCTYPE and entities.
 
 **Now:**
-- `.xls`: carrysheet-biff bounds stream size, records, continues, sheets,
-  cells, shared strings, names, formula text and formula work per byte.
-  Unknown records are kept as bytes.
-- CSV: carrysheet-csv bounds total bytes, rows, columns, cells and field
-  size. Bytes invalid in the encoding are an error by default, not silently
-  replaced.
-- Numbers: carrysheet-numbers bounds input, zip entries, bytes after zip and
-  Snappy decompression, objects, tables, rows, columns and cells, and charges
-  every use of a shared object to a whole-document budget. It reads end
-  records only near the end of the zip and caps them.
 - VBA: carrysheet-vba bounds input, streams, storages, entries, decompressed
   source, modules, references and flags. All module sources share one
   decompression budget tied to the storage size (`max_source_ratio`), so a
   bomb behind every module cannot multiply the per-stream limit
   ([issue 53][i53]).
-- Encrypted files: carrysheet-crypto caps the key-stretching spin count
-  (default 10,000,000), reads the `EncryptionInfo` XML with a size and event
-  budget, and refuses a DOCTYPE.
-- Hostile-input tests under `tests/`: carrysheet-biff, carrysheet-cfb,
-  carrysheet-crypto, carrysheet-numbers, carrysheet-vba and carrysheet-zip.
-  Mutation tests: carrysheet-biff, carrysheet-csv and carrysheet-numbers.
-  carrysheet-csv has no hostile-input test file yet.
+- Hostile-input tests under `tests/`: carrysheet-cfb, carrysheet-kernel,
+  carrysheet-vba and carrysheet-zip.
 - Compound files are read with our own carrysheet-cfb. It returns an error on
   a damaged file and never panics, so no `catch_unwind` is needed. Record 0003
   counts a caught panic as a failure, not a pass. (The `cfb` crate is only a
@@ -99,12 +82,13 @@ characters; XML with a DOCTYPE and entities.
 
 **Open:**
 - Use carrysheet-zip for every reader ([issue 40][i40], partly done).
-  carrysheet-numbers still uses the `zip` crate.
+  carrysheet-kernel lists and unpacks package parts through carrysheet-zip,
+  but the vendored GridCraft `.xlsx` and engine crates still use the `zip`
+  crate.
 - On wasm32 a panic aborts (`docs/web-build.md`). The readers return errors
   instead of panicking, but a Web Worker should still run the parsing.
 - One shared work budget with a deadline ([issue 56][i56]).
-- Continuous fuzzing of every reader ([issue 8][i8]; fuzzlite work in
-  [issue 54][i54]).
+- Continuous fuzzing of every reader ([issue 8][i8]).
 - Overflow checks in release builds ([issue 59][i59]).
 - `.xlsx` reading and writing through the vendored GridCraft kernel
   ([issue 45][i45]); it must meet the same rules.
@@ -148,18 +132,9 @@ model obey. Run agents on untrusted files with `--read-only`.
 
 ### 3. A hostile SQL query
 
-*Elevation of privilege, denial of service, information disclosure.* The
-`query` command runs SQL over a workbook ([issue 25][i25], planned). A query
-could try `ATTACH` to reach other files, `load_extension` to run native
-code, or a huge cross join.
-
-**Planned (issue 25):** an in-memory SQLite holding only the workbook's
-tables, opened read-only after loading; no `ATTACH`, no extensions; limits
-on time and rows; results paged. Its tests cover these hostile queries.
-Changes never go through SQL; they go through `edit` with `dry_run`.
-
-**Not defended:** a correct query that returns what the user did not mean to
-share. The query sees the whole workbook it was given.
+Not a threat today. Record 0010 (decision 4) removed `carrysheet-query` and
+ended the SQL plan ([issue 25][i25]); no SQL engine is built. If SQL comes
+back, a new record decides it (decision 7), and this part returns with it.
 
 ### 4. A hostile or buggy MCP client
 
@@ -265,9 +240,11 @@ without running it ([issue 22][i22]). Running macros is undecided and lowest
 priority ([issue 21][i21]); so is refreshing external data
 ([issue 27][i27]).
 
-**CSV formula injection:** carrysheet-csv's writer puts an apostrophe before
-fields that start with `=`, `+`, `-` or `@` (OWASP advice), on by default, so
-a CSV we write does not run formulas when opened elsewhere.
+**CSV formula injection:** carrysheet-kernel's csv writer puts an apostrophe
+before text that starts with `=`, `+`, `-`, `@`, a tab or a carriage return
+(OWASP advice), on by default, so a CSV we write does not run formulas when
+opened elsewhere. Numbers are never changed. `csv_raw` (`--csv-raw`) turns
+it off.
 
 **Not defended:** what Excel or another program does with a file after we
 save it. We keep macros intact, so a file with a harmful macro stays
@@ -278,16 +255,8 @@ harmful when opened in Excel with macros enabled.
 *Information disclosure.* Connection strings, Power Query, and the password
 of an encrypted file.
 
-**Now:** carrysheet-crypto keeps passwords and key material in memory that
-is cleared after use (`zeroize`), never puts them in errors, and reports a
-wrong password only as wrong. A save is never weaker than the file that was
-opened ([issue 5][i5]).
-
-**Planned (issue 26):** connections are listed by parsed fields; raw
-connection text and M code are hidden; passwords and tokens are always
-masked in command output, MCP results and feedback reports; a SQL command
-text that may hold a credential is hidden whole. One flag shows the raw
-text.
+Record 0010 (decision 4) removed carrysheet-connections and ended the plan
+to list connections with masked secrets ([issue 26][i26]).
 
 **Not defended:** secrets in files the user shares themselves. The
 `sanitize` command (planned) replaces values before a file is attached to
@@ -320,7 +289,6 @@ decided with it ([issue 50][i50] covers retention).
 
 Please do not open a public issue. Follow [SECURITY.md](../../SECURITY.md).
 
-[i5]: https://github.com/yokoten-labs/carrysheet/issues/5
 [i8]: https://github.com/yokoten-labs/carrysheet/issues/8
 [i9]: https://github.com/yokoten-labs/carrysheet/issues/9
 [i10]: https://github.com/yokoten-labs/carrysheet/issues/10
@@ -339,7 +307,6 @@ Please do not open a public issue. Follow [SECURITY.md](../../SECURITY.md).
 [i51]: https://github.com/yokoten-labs/carrysheet/issues/51
 [i52]: https://github.com/yokoten-labs/carrysheet/issues/52
 [i53]: https://github.com/yokoten-labs/carrysheet/issues/53
-[i54]: https://github.com/yokoten-labs/carrysheet/issues/54
 [i56]: https://github.com/yokoten-labs/carrysheet/issues/56
 [i59]: https://github.com/yokoten-labs/carrysheet/issues/59
 [i64]: https://github.com/yokoten-labs/carrysheet/issues/64

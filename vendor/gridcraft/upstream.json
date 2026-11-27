@@ -1,0 +1,36 @@
+{
+  "repository": "https://github.com/storytold/gridcraft",
+  "commit": "823c56582d00be91e31b4f7f3680496cf89e84fb",
+  "tag": "v0.8.0",
+  "copy": ["src", "Cargo.toml"],
+  "folders": {
+    "crates/core": "crates/base/core",
+    "crates/numfmt": "crates/base/numfmt",
+    "crates/formula": "crates/base/formula",
+    "crates/functions": "crates/base/functions",
+    "crates/model": "crates/book/model",
+    "crates/calc": "crates/book/calc",
+    "crates/chart": "crates/draw/chart",
+    "crates/pdf": "crates/draw/pdf",
+    "crates/xlsx": "crates/xlsx",
+    "crates/engine": "crates/engine"
+  },
+  "files": {
+    "Cargo.toml": "Cargo.toml",
+    "LICENSE-APACHE": "LICENSE-APACHE",
+    "LICENSE-MIT": "LICENSE-MIT",
+    "NOTICE": "NOTICE",
+    "rustfmt.toml": "rustfmt.toml"
+  },
+  "left_out": [],
+  "ours": ["README.md", "upstream.json", "patches"],
+  "patches": [
+    "patches/manifests.patch",
+    "patches/base-core.patch",
+    "patches/base-functions.patch",
+    "patches/book-calc.patch",
+    "patches/book-model.patch",
+    "patches/engine.patch",
+    "patches/xlsx.patch"
+  ]
+}

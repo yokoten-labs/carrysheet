@@ -1,0 +1,277 @@
+diff --git a/crates/base/functions/src/dynamic.rs b/crates/base/functions/src/dynamic.rs
+index 2e29b41..d05fde6 100644
+--- a/crates/base/functions/src/dynamic.rs
++++ b/crates/base/functions/src/dynamic.rs
+@@ -11,7 +11,7 @@ use std::collections::HashMap;
+ 
+ use gridcraft_core::{Array, CellError, Value, sort_compare};
+ 
+-use crate::util::{A, MAX_CELLS, R, arg, array_val, as_array, has, num, opt_bool, scalar};
++use crate::util::{A, R, arg, array_val, as_array, has, max_cells, num, opt_bool, scalar};
+ use crate::{Arg, Ctx, FnSpec, VAR};
+ 
+ // ---------------------------------------------------------------------------------------------
+@@ -32,7 +32,7 @@ fn rows_of(a: &Array) -> Vec<Vec<Value>> {
+ 
+ /// `#NUM!` when an `h` x `w` output would exceed the function cell budget.
+ fn check_output_size(h: usize, w: usize) -> R<()> {
+-    if h.saturating_mul(w) > MAX_CELLS { Err(CellError::Num) } else { Ok(()) }
++    if h.saturating_mul(w) > max_cells() { Err(CellError::Num) } else { Ok(()) }
+ }
+ 
+ /// Builds an array from rows (all rows padded to the widest with `pad`). Empty → `#CALC!`.
+@@ -177,6 +177,10 @@ fn sort(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+     let orders: Vec<i64> = (0..idx.len()).map(|i| *ord.get(i).or(ord.first()).unwrap_or(&1)).collect();
+     let mut lines: Vec<(Vec<Value>, Vec<Value>)> =
+         rows_of(&a).into_iter().map(|r| (idx.iter().map(|&i| r.get(i as usize - 1).cloned().unwrap_or(Value::Empty)).collect(), r)).collect();
++    // Carrysheet patch: sorting counts as work, about one unit per cell and comparison.
++    if !gridcraft_core::limits::charge((a.rows * a.cols + lines.len() * (usize::BITS - lines.len().leading_zeros()) as usize) as u64) {
++        return Err(CellError::Calc);
++    }
+     lines.sort_by(|x, y| cmp_keys(&x.0, &y.0, &orders));
+     let out = Array::new(a.rows, a.cols, lines.into_iter().flat_map(|(_, r)| r).collect()).ok_or(CellError::Calc)?;
+     Ok(Value::from(if by_col { out.transpose() } else { out }))
+@@ -214,6 +218,10 @@ fn sortby(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+         .enumerate()
+         .map(|(r, row)| (keys.iter().map(|k| k.data.get(r).cloned().unwrap_or(Value::Empty)).collect(), row))
+         .collect();
++    // Carrysheet patch: as in `sort`.
++    if !gridcraft_core::limits::charge((base.rows * base.cols + lines.len() * (usize::BITS - lines.len().leading_zeros()) as usize) as u64) {
++        return Err(CellError::Calc);
++    }
+     lines.sort_by(|x, y| cmp_keys(&x.0, &y.0, &orders));
+     let out = Array::new(base.rows, base.cols, lines.into_iter().flat_map(|(_, r)| r).collect()).ok_or(CellError::Calc)?;
+     Ok(Value::from(if by_rows { out } else { out.transpose() }))
+@@ -264,7 +272,7 @@ fn dims(args: &[Arg], ri: usize, ci: usize) -> R<(usize, usize)> {
+     if r == 0.0 || c == 0.0 {
+         return Err(CellError::Calc);
+     }
+-    if r > 1_048_576.0 || c > 16_384.0 || r * c > MAX_CELLS as f64 {
++    if r > 1_048_576.0 || c > 16_384.0 || r * c > max_cells() as f64 {
+         return Err(CellError::Num);
+     }
+     Ok((r as usize, c as usize))
+@@ -313,7 +321,7 @@ fn vstack(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+     for i in 0..args.len() {
+         let a = arr_arg(args, i)?;
+         total = total.saturating_add(a.data.len());
+-        if total > MAX_CELLS {
++        if total > max_cells() {
+             return Err(CellError::Num);
+         }
+         rows.extend(rows_of(&a));
+@@ -331,7 +339,7 @@ fn hstack(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+         h = h.max(a.rows);
+         w = w.saturating_add(a.cols);
+         total = total.saturating_add(a.data.len());
+-        if total > MAX_CELLS {
++        if total > max_cells() {
+             return Err(CellError::Num);
+         }
+         arrays.push(a);
+@@ -471,7 +479,7 @@ fn choose_lines(args: &[Arg], rows: bool) -> R<Value> {
+                 return Err(CellError::Value);
+             };
+             out.push(grid.get(idx as usize).cloned().ok_or(CellError::Value)?);
+-            if out.len().saturating_mul(base.cols) > MAX_CELLS {
++            if out.len().saturating_mul(base.cols) > max_cells() {
+                 return Err(CellError::Num);
+             }
+         }
+@@ -498,7 +506,7 @@ fn expand(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+     if r < a.rows as i64 || c < a.cols as i64 {
+         return Err(CellError::Value);
+     }
+-    if r > 1_048_576 || c > 16_384 || (r as usize).saturating_mul(c as usize) > MAX_CELLS {
++    if r > 1_048_576 || c > 16_384 || (r as usize).saturating_mul(c as usize) > max_cells() {
+         return Err(CellError::Num);
+     }
+     let pad = pad_arg(args, 3);
+@@ -847,7 +855,7 @@ fn pivotby(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+     let body_rows = rk.len().saturating_add(usize::from(row_total != 0));
+     // Reject before building any header or body row: every column-field header row is as wide as the whole grid.
+     let (height, width) = pivot_dims(header_rows, body_rows, cols.len(), vals.cols, lead);
+-    if height.saturating_mul(width) > MAX_CELLS {
++    if height.saturating_mul(width) > max_cells() {
+         return Err(CellError::Num);
+     }
+     let mut out: Vec<Vec<Value>> = Vec::new();
+diff --git a/crates/base/functions/src/engineering.rs b/crates/base/functions/src/engineering.rs
+index f34ce99..7c72d4e 100644
+--- a/crates/base/functions/src/engineering.rs
++++ b/crates/base/functions/src/engineering.rs
+@@ -841,7 +841,10 @@ fn hankel(n: u32, x: f64) -> Option<(f64, f64)> {
+     if j.is_finite() && y.is_finite() { Some((j, y)) } else { None }
+ }
+ 
+-const EULER: f64 = std::f64::consts::EULER_GAMMA;
++/// The Euler–Mascheroni constant γ. Written out because
++/// `std::f64::consts::EULER_GAMMA` is newer than the minimum supported Rust
++/// (1.90); this literal rounds to the same f64 (bits 0x3fe2788cfc6fb619).
++const EULER: f64 = 0.577_215_664_901_532_860_606_512_090_082_402_431_f64;
+ 
+ /// J_0..J_m(x) for 0 < x ≤ ~100 by Miller's backward recurrence, normalised with
+ /// J_0 + 2ΣJ_{2k} = 1.
+@@ -1125,9 +1128,15 @@ pub(crate) fn specs() -> Vec<FnSpec> {
+ mod tests {
+     use gridcraft_core::{CellError, Value};
+ 
+-    use super::parse_complex;
++    use super::{EULER, parse_complex};
+     use crate::util::testutil::*;
+ 
++    #[test]
++    fn euler_matches_std_bits() {
++        // Same bits as std::f64::consts::EULER_GAMMA (checked on Rust 1.99).
++        assert_eq!(EULER.to_bits(), 0x3fe2_788c_fc6f_b619);
++    }
++
+     #[track_caller]
+     fn cx(v: Value, re: f64, im: f64) {
+         let Value::Text(s) = &v else { panic!("expected complex text, got {v:?}") };
+diff --git a/crates/base/functions/src/info.rs b/crates/base/functions/src/info.rs
+index 84ca72a..f8d210d 100644
+--- a/crates/base/functions/src/info.rs
++++ b/crates/base/functions/src/info.rs
+@@ -4,7 +4,7 @@ use std::cmp::Ordering;
+ 
+ use gridcraft_core::{Array, CellError, Value, compare_text};
+ 
+-use crate::util::{A, MAX_CELLS, R, S, has, scalar, text};
++use crate::util::{A, R, S, has, max_cells, scalar, text};
+ use crate::{Arg, Ctx, FnSpec, VAR};
+ 
+ // ---------------------------------------------------------------------------------------------
+@@ -173,7 +173,7 @@ fn drive(a: &[Arg], drivers: &dyn Fn(usize) -> bool, f: &dyn Fn(&[Value]) -> R<V
+             cols = cols.max(arr.cols);
+         }
+     }
+-    if rows.saturating_mul(cols) > MAX_CELLS {
++    if rows.saturating_mul(cols) > max_cells() {
+         return Err(CellError::Num);
+     }
+     let mut data = Vec::with_capacity(rows * cols);
+diff --git a/crates/base/functions/src/lift.rs b/crates/base/functions/src/lift.rs
+index cea0067..f90c331 100644
+--- a/crates/base/functions/src/lift.rs
++++ b/crates/base/functions/src/lift.rs
+@@ -3,7 +3,7 @@
+ 
+ use gridcraft_core::{Array, CellError, Value};
+ 
+-use crate::util::MAX_CELLS;
++use crate::util::max_cells;
+ use crate::{Arg, Ctx, FnSpec};
+ 
+ pub(crate) fn call_lifted(spec: &FnSpec, args: &[Arg], ctx: &mut dyn Ctx) -> Value {
+@@ -22,7 +22,7 @@ pub(crate) fn call_lifted(spec: &FnSpec, args: &[Arg], ctx: &mut dyn Ctx) -> Val
+     if !any {
+         return (spec.imp)(args, ctx);
+     }
+-    if rows.saturating_mul(cols) > MAX_CELLS {
++    if rows.saturating_mul(cols) > max_cells() {
+         return Value::Error(CellError::Num);
+     }
+     let mut cell_args: Vec<Arg> = args.to_vec();
+@@ -48,6 +48,10 @@ pub(crate) fn call_lifted(spec: &FnSpec, args: &[Arg], ctx: &mut dyn Ctx) -> Val
+     if rows == 1 && cols == 1 {
+         return data.pop().unwrap_or(Value::Empty);
+     }
++    // Carrysheet patch: the lifted array counts as work.
++    if !gridcraft_core::limits::charge(data.len() as u64) {
++        return Value::Error(CellError::Calc);
++    }
+     Array::new(rows, cols, data).map(Value::from).unwrap_or(Value::Error(CellError::Calc))
+ }
+ 
+diff --git a/crates/base/functions/src/math.rs b/crates/base/functions/src/math.rs
+index 7611dc4..d907adf 100644
+--- a/crates/base/functions/src/math.rs
++++ b/crates/base/functions/src/math.rs
+@@ -7,7 +7,7 @@ use gridcraft_core::{Array, CellError, Value};
+ 
+ use crate::criteria::Criterion;
+ use crate::util::{
+-    A, MAX_CELLS, R, S, array_val, as_array, check_size, has, num, num_val, numbers, opt_num, round_half_away, text, text_val, to_sig_digits,
++    A, R, S, array_val, as_array, check_size, has, max_cells, num, num_val, numbers, opt_num, round_half_away, text, text_val, to_sig_digits,
+ };
+ use crate::{Arg, Ctx, FnSpec, VAR};
+ 
+@@ -785,7 +785,7 @@ fn mmult(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+     if ac != br {
+         return Err(CellError::Value);
+     }
+-    if ar.saturating_mul(bc) > MAX_CELLS || ar.saturating_mul(bc).saturating_mul(ac) > 2_000_000_000 {
++    if ar.saturating_mul(bc) > max_cells() || ar.saturating_mul(bc).saturating_mul(ac) > 2_000_000_000 {
+         return Err(CellError::Num);
+     }
+     let mut out = vec![0.0; ar * bc];
+diff --git a/crates/base/functions/src/text.rs b/crates/base/functions/src/text.rs
+index 91962d6..dbe2c46 100644
+--- a/crates/base/functions/src/text.rs
++++ b/crates/base/functions/src/text.rs
+@@ -5,7 +5,7 @@ use gridcraft_core::{CellError, Value, number_to_text};
+ 
+ use crate::criteria::wildcard_find;
+ use crate::util::{
+-    A, MAX_CELLS, MAX_TEXT, R, S, arg, array_val, as_array, boolean, has, num, num_val, opt_bool, opt_int, opt_num, round_half_away, scalar, text,
++    A, MAX_TEXT, R, S, arg, array_val, as_array, boolean, has, max_cells, num, num_val, opt_bool, opt_int, opt_num, round_half_away, scalar, text,
+     text_val,
+ };
+ use crate::{Arg, Ctx, FnSpec, VAR};
+@@ -611,7 +611,7 @@ fn textsplit(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+     }
+     let ncols = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
+     let nrows = rows.len();
+-    if nrows.saturating_mul(ncols) > MAX_CELLS {
++    if nrows.saturating_mul(ncols) > max_cells() {
+         return Err(CellError::Num);
+     }
+     let mut data = Vec::with_capacity(nrows * ncols);
+diff --git a/crates/base/functions/src/util.rs b/crates/base/functions/src/util.rs
+index 14c6279..e8c5dd3 100644
+--- a/crates/base/functions/src/util.rs
++++ b/crates/base/functions/src/util.rs
+@@ -11,6 +11,12 @@ pub(crate) type R<T> = Result<T, CellError>;
+ 
+ /// Largest array a function may build.
+ pub(crate) const MAX_CELLS: usize = 10_000_000;
++
++/// Most cells an array result may hold: [`MAX_CELLS`], or less when the caller set a lower
++/// limit (Carrysheet patch, `gridcraft_core::limits`).
++pub(crate) fn max_cells() -> usize {
++    usize::try_from(gridcraft_core::limits::array_cells()).unwrap_or(usize::MAX).min(MAX_CELLS)
++}
+ /// Longest text a cell can hold.
+ pub(crate) const MAX_TEXT: usize = 32_767;
+ 
+@@ -116,9 +122,13 @@ pub(crate) fn as_array(v: &Value) -> Cow<'_, Array> {
+ 
+ /// Wraps an array result. Rejects empty and oversized arrays.
+ pub(crate) fn array_val(rows: usize, cols: usize, data: Vec<Value>) -> R<Value> {
+-    if rows.checked_mul(cols).is_none_or(|n| n > MAX_CELLS) {
++    if rows.checked_mul(cols).is_none_or(|n| n > max_cells()) {
+         return Err(CellError::Num);
+     }
++    // Carrysheet patch: every array a function builds counts as work, not only a cell's result.
++    if !gridcraft_core::limits::charge((rows * cols) as u64) {
++        return Err(CellError::Calc);
++    }
+     Array::new(rows, cols, data).map(Value::from).ok_or(CellError::Calc)
+ }
+ 
+@@ -128,9 +138,13 @@ pub(crate) fn check_size(rows: f64, cols: f64) -> R<(usize, usize)> {
+         return Err(CellError::Value);
+     }
+     let (r, c) = (rows as usize, cols as usize);
+-    if r > 1_048_576 || c > 16_384 || r.saturating_mul(c) > MAX_CELLS {
++    if r > 1_048_576 || c > 16_384 || r.saturating_mul(c) > max_cells() {
+         return Err(CellError::Num);
+     }
++    // Carrysheet patch: counted before the array is built.
++    if !gridcraft_core::limits::charge((r * c) as u64) {
++        return Err(CellError::Calc);
++    }
+     Ok((r, c))
+ }
+ 

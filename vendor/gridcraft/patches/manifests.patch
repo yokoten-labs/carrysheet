@@ -1,0 +1,233 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index a967b99..4478dc4 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,7 +1,15 @@
++# GridCraft's kernel crates, vendored at upstream commit 823c565 (v0.8.0).
++# See README.md for what was copied and changed.
++#
++# This is a workspace of its own, excluded from Carrysheet's: the copied
++# crates keep upstream's settings (inherited from here) and are not linted
++# by Carrysheet's workspace lints or clippy.toml. Carrysheet builds them as
++# path dependencies of crates/carrysheet-kernel, resolved in Carrysheet's
++# Cargo.lock.
++
+ [workspace]
+ resolver = "3"
+-members = ["crates/*", "apps/*", "xtask"]
+-default-members = ["crates/*", "apps/gridcraft", "apps/gridcraft-cli", "xtask"]
++members = ["crates/base/*", "crates/book/*", "crates/draw/*", "crates/xlsx", "crates/engine"]
+ 
+ [workspace.package]
+ version = "0.8.0"
+@@ -11,50 +19,32 @@ rust-version = "1.90"
+ repository = "https://github.com/storytold/gridcraft"
+ 
+ [workspace.dependencies]
+-# internal
+-gridcraft-core = { path = "crates/core" }
+-gridcraft-numfmt = { path = "crates/numfmt" }
+-gridcraft-formula = { path = "crates/formula" }
+-gridcraft-functions = { path = "crates/functions" }
+-gridcraft-model = { path = "crates/model" }
+-gridcraft-calc = { path = "crates/calc" }
+-gridcraft-xlsx = { path = "crates/xlsx" }
+-gridcraft-chart = { path = "crates/chart" }
+-gridcraft-engine = { path = "crates/engine" }
+-gridcraft-ui-egui = { path = "crates/ui-egui" }
+-gridcraft-mcp = { path = "crates/mcp" }
+-gridcraft-pdf = { path = "crates/pdf" }
+-
+-# foundation
++# internal (paths regrouped; versions added so cargo-deny sees no wildcards)
++gridcraft-core = { path = "crates/base/core", version = "0.8.0" }
++gridcraft-numfmt = { path = "crates/base/numfmt", version = "0.8.0" }
++gridcraft-formula = { path = "crates/base/formula", version = "0.8.0" }
++gridcraft-functions = { path = "crates/base/functions", version = "0.8.0" }
++gridcraft-model = { path = "crates/book/model", version = "0.8.0" }
++gridcraft-calc = { path = "crates/book/calc", version = "0.8.0" }
++gridcraft-chart = { path = "crates/draw/chart", version = "0.8.0" }
++gridcraft-pdf = { path = "crates/draw/pdf", version = "0.8.0" }
++gridcraft-xlsx = { path = "crates/xlsx", version = "0.8.0" }
++gridcraft-engine = { path = "crates/engine", version = "0.8.0" }
++
++# foundation (as upstream, except zip: see README.md)
+ thiserror = "2"
+ serde = { version = "1", features = ["derive", "rc"] }
+ serde_json = { version = "1", features = ["float_roundtrip"] }
+ log = "0.4"
+-rayon = "1"
+ regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
+ quick-xml = "0.41"
+-zip = { version = "3", default-features = false, features = ["deflate"] }
++zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2"] }
++flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+ sha2 = { version = "0.11", default-features = false }
+-# Decrypting password-protected workbooks ([MS-OFFCRYPTO]): AES and SHA-1, pure Rust (wasm-safe).
+ aes = { version = "0.9", default-features = false }
+ sha1 = { version = "0.11", default-features = false }
+ image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+ 
+-# ui
+-egui = "0.36"
+-egui_extras = { version = "0.36", default-features = false }
+-eframe = { version = "0.36", default-features = false }
+-egui_kittest = "0.36"
+-rfd = "0.17"
+-arboard = { version = "3.6", default-features = false }
+-# The desktop's preferred language, for the first-run interface language (native only).
+-sys-locale = "0.3"
+-# Font parser egui's epaint uses; the UI validates system font files with it before handing them
+-# to egui, which panics on a file it can't parse. Same version as epaint's, so no second copy.
+-skrifa = { version = "0.44", default-features = false, features = ["std"] }
+-# Real font bytes for tests (Ubuntu Light, compiled into epaint).
+-epaint_default_fonts = "0.36"
+-
+ [workspace.lints.rust]
+ unsafe_code = "forbid"
+ 
+@@ -63,15 +53,3 @@ dbg_macro = "warn"
+ todo = "warn"
+ too_many_arguments = "allow"
+ type_complexity = "allow"
+-
+-[profile.dev.package."*"]
+-opt-level = 2
+-
+-[profile.dev]
+-opt-level = 1
+-
+-[profile.release]
+-opt-level = 3
+-lto = "thin"
+-codegen-units = 16
+-debug = 0
+diff --git a/crates/base/core/Cargo.toml b/crates/base/core/Cargo.toml
+index 1decf62..cf0fa69 100644
+--- a/crates/base/core/Cargo.toml
++++ b/crates/base/core/Cargo.toml
+@@ -3,6 +3,7 @@ name = "gridcraft-core"
+ version.workspace = true
+ edition.workspace = true
+ license.workspace = true
++publish = false
+ description = "GridCraft core types: cell addresses, values, errors, date serials"
+ 
+ [lints]
+diff --git a/crates/base/formula/Cargo.toml b/crates/base/formula/Cargo.toml
+index e1b0ca7..6708ec7 100644
+--- a/crates/base/formula/Cargo.toml
++++ b/crates/base/formula/Cargo.toml
+@@ -3,6 +3,7 @@ name = "gridcraft-formula"
+ version.workspace = true
+ edition.workspace = true
+ license.workspace = true
++publish = false
+ description = "GridCraft formula language: lexer, parser, printer and reference adjustment"
+ 
+ [lints]
+diff --git a/crates/base/functions/Cargo.toml b/crates/base/functions/Cargo.toml
+index 97f51c2..5340ac5 100644
+--- a/crates/base/functions/Cargo.toml
++++ b/crates/base/functions/Cargo.toml
+@@ -3,6 +3,7 @@ name = "gridcraft-functions"
+ version.workspace = true
+ edition.workspace = true
+ license.workspace = true
++publish = false
+ description = "GridCraft worksheet function library: math, statistics, text, dates, lookup, financial, engineering"
+ 
+ [lints]
+diff --git a/crates/base/numfmt/Cargo.toml b/crates/base/numfmt/Cargo.toml
+index 01a059d..3d72f61 100644
+--- a/crates/base/numfmt/Cargo.toml
++++ b/crates/base/numfmt/Cargo.toml
+@@ -3,6 +3,7 @@ name = "gridcraft-numfmt"
+ version.workspace = true
+ edition.workspace = true
+ license.workspace = true
++publish = false
+ description = "GridCraft number formats: Excel format codes, General display, TEXT()"
+ 
+ [lints]
+diff --git a/crates/book/calc/Cargo.toml b/crates/book/calc/Cargo.toml
+index 8f1bd12..7d1b773 100644
+--- a/crates/book/calc/Cargo.toml
++++ b/crates/book/calc/Cargo.toml
+@@ -3,6 +3,7 @@ name = "gridcraft-calc"
+ version.workspace = true
+ edition.workspace = true
+ license.workspace = true
++publish = false
+ description = "GridCraft calculation engine: dependency graph, recalculation, evaluator, dynamic arrays"
+ 
+ [lints]
+diff --git a/crates/book/model/Cargo.toml b/crates/book/model/Cargo.toml
+index 761cf00..8bf06fb 100644
+--- a/crates/book/model/Cargo.toml
++++ b/crates/book/model/Cargo.toml
+@@ -3,6 +3,7 @@ name = "gridcraft-model"
+ version.workspace = true
+ edition.workspace = true
+ license.workspace = true
++publish = false
+ description = "GridCraft document model: workbooks, sheets, cells, styles, tables, charts"
+ 
+ [lints]
+diff --git a/crates/draw/chart/Cargo.toml b/crates/draw/chart/Cargo.toml
+index 7b1976c..11902d8 100644
+--- a/crates/draw/chart/Cargo.toml
++++ b/crates/draw/chart/Cargo.toml
+@@ -3,6 +3,7 @@ name = "gridcraft-chart"
+ version.workspace = true
+ edition.workspace = true
+ license.workspace = true
++publish = false
+ description = "GridCraft charts: data resolution, layout into toolkit-free primitives, sparklines and a small rasteriser"
+ 
+ [lints]
+diff --git a/crates/draw/pdf/Cargo.toml b/crates/draw/pdf/Cargo.toml
+index 6cb0d2e..21b3e17 100644
+--- a/crates/draw/pdf/Cargo.toml
++++ b/crates/draw/pdf/Cargo.toml
+@@ -3,6 +3,7 @@ name = "gridcraft-pdf"
+ version.workspace = true
+ edition.workspace = true
+ license.workspace = true
++publish = false
+ description = "GridCraft's tiny self-contained PDF 1.7 writer (standard 14 fonts, vector drawing, RGBA images)"
+ 
+ [lints]
+diff --git a/crates/engine/Cargo.toml b/crates/engine/Cargo.toml
+index e8ea91c..d3d8695 100644
+--- a/crates/engine/Cargo.toml
++++ b/crates/engine/Cargo.toml
+@@ -3,6 +3,7 @@ name = "gridcraft-engine"
+ version.workspace = true
+ edition.workspace = true
+ license.workspace = true
++publish = false
+ description = "GridCraft engine: sessions, commands, history, clipboard, fill, sort, filter"
+ 
+ [lints]
+diff --git a/crates/xlsx/Cargo.toml b/crates/xlsx/Cargo.toml
+index b53a448..f57c229 100644
+--- a/crates/xlsx/Cargo.toml
++++ b/crates/xlsx/Cargo.toml
+@@ -3,6 +3,7 @@ name = "gridcraft-xlsx"
+ version.workspace = true
+ edition.workspace = true
+ license.workspace = true
++publish = false
+ description = "GridCraft file formats: XLSX (SpreadsheetML) and CSV import/export"
+ 
+ [lints]
+@@ -20,6 +21,8 @@ gridcraft-model = { workspace = true }
+ thiserror = { workspace = true }
+ quick-xml = { workspace = true }
+ zip = { workspace = true }
++# Carrysheet: zip 9 reads through flate2; pick its pure-Rust backend.
++flate2 = { workspace = true }
+ aes = { workspace = true }
+ sha1 = { workspace = true }
+ sha2 = { workspace = true }

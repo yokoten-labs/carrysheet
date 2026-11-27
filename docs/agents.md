@@ -76,7 +76,7 @@ Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, in PR 88 until it 
 
 | Toolset | Tools | On by default |
 |---|---|---|
-| `core` (`default`) | overview, read, eval, check, edit, convert, feedback; query when built (issue 25) | Yes |
+| `core` (`default`) | overview, read, eval, check, edit, convert, feedback | Yes |
 | `macros` | macros | No |
 | `share` | sanitize | No |
 | `diff` | diff, when built (issue 65) | No |

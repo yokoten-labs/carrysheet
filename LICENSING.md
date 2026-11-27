@@ -11,7 +11,7 @@ Carrysheet uses two licenses in one repository. Each folder says which one appli
 
 Every crate also states its license in the `license` field of its `Cargo.toml`. If a file says otherwise in its header, the header wins.
 
-Third-party test data keeps its own license, noted in a `NOTICE` file next to it: for example, Apache POI samples are under Apache-2.0 and calamine samples under MIT (`crates/carrysheet-biff/tests/data/NOTICE`).
+Third-party test data keeps its own license, noted in a `NOTICE` file next to it: for example, Apache POI samples are under Apache-2.0 and calamine samples under MIT (`crates/carrysheet-kernel/tests/data/formats/biff/NOTICE`).
 
 **Why two licenses.** We want the libraries to be easy to use anywhere, including in closed-source products. The finished programs, Pro features included, stay open: anyone who ships a changed version must share its source under the GPL.
 

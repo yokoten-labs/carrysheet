@@ -2,8 +2,3 @@ target/
 # Generated test files and run output from the kernel bench
 research/kernel-bench/data/
 research/kernel-bench/results/raw/
-# Fuzzing output
-fuzz/artifacts/
-fuzz/corpus/
-# Excel ground-truth workbooks (rebuilt on the owner's Windows machine)
-tools/excel-ground-truth/out/
