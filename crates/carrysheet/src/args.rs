@@ -446,7 +446,7 @@ pub fn validate_args(command: &Command, args: &Value) -> Result<Checked, Command
             None => help,
         };
         // serde repeats a wrong value; keep a long one out of the error.
-        let why: String = why.chars().take(160).collect();
+        let why: String = why.chars().take(300).collect();
         return Err(invalid(&name, why, fix));
     }
     for (name, value) in &given {

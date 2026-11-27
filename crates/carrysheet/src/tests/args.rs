@@ -574,7 +574,13 @@ fn deleting_and_overwriting_need_confirm() {
 
 #[test]
 fn long_text_is_not_echoed_back() {
-    let long = "y".repeat(500);
+    let long = "y".repeat(5_000);
     let e = validate_args(read(), &json!({ "path": "a", "mode": long })).unwrap_err();
-    assert!(e.why.len() < 200, "{}", e.why);
+    assert!(e.why.chars().count() <= 300, "{}", e.why);
+    // The cut leaves room for the full list of operations.
+    let edit = command("edit").unwrap();
+    let ops = json!([{ "op": "nope", "target": "A1" }]);
+    let e = validate_args(edit, &json!({ "path": "a", "ops": ops })).unwrap_err();
+    assert!(e.what.contains("`ops[0]`"), "{}", e.what);
+    assert!(e.why.ends_with("`delete_sheet`"), "{}", e.why);
 }
