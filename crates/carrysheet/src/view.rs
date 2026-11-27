@@ -13,7 +13,7 @@ use crate::args::{detailed, input, number, shown, text};
 use crate::commands::limits::{MAX_CELL_TEXT_CHARS, MAX_LISTED_SHEETS, MAX_RESPONSE_TEXT_CHARS};
 use crate::error::{CommandError, ErrorCode};
 use crate::open::{Book, SourceKind};
-use crate::range::{Shape, SheetRange, format_sheet_name};
+use crate::range::{SheetRange, format_sheet_name};
 use crate::text::escape;
 use crate::{Kernel, internal};
 
@@ -336,14 +336,9 @@ fn cut_value(v: &CellValue, max: usize, cut: &mut u64) -> CellValue {
 /// rows above the data, and whole rows the empty columns left of it.
 pub fn clip_to_used(wanted: &SheetRange, used: RangeRef) -> Option<RangeRef> {
     let (start, end) = (wanted.range.start, wanted.range.end);
-    let top = match wanted.shape {
-        Shape::Columns => start.row.max(used.start.row),
-        Shape::Rows | Shape::Cells => start.row,
-    };
-    let left = match wanted.shape {
-        Shape::Rows => start.col.max(used.start.col),
-        Shape::Columns | Shape::Cells => start.col,
-    };
+    let (is_cols, is_rows) = (wanted.range.is_full_cols(), wanted.range.is_full_rows());
+    let top = if is_cols && !is_rows { start.row.max(used.start.row) } else { start.row };
+    let left = if is_rows && !is_cols { start.col.max(used.start.col) } else { start.col };
     let bottom = end.row.min(used.end.row);
     let right = end.col.min(used.end.col);
     (top <= bottom && left <= right)
