@@ -1,3 +1,0 @@
-Changed
-
-`carrysheet-cli mcp serve` no longer forwards rmcp's internal tracing messages to stderr (record 0010, decision 2, step 6). Carrysheet's own log lines are the same: start, stop, failed calls, the `--root` warning and panics, all on stderr. stdout still carries only JSON-RPC, and `tools/list` is the same text. A stop for a reason other than a closed stdin is logged in rmcp's words, such as `Cancelled`. On the command line, an `@file` argument that cannot be read has one fix for a missing file and for an unreadable one: "Check the file path after @ and that you can read it, or pass the JSON itself to --ops." The codes `file_not_found` and `io` are the same. The forwarder stays in the history of `main`, for example in `deca503` (`apps/carrysheet-cli/src/mcp.rs`).

@@ -55,9 +55,9 @@ jobs:
         run: |
           mkdir -p dist
           section() { awk -v h="$1" '/^## /{p = index($0, "## " h) == 1; next} p' CHANGELOG.md; }
-          section "v$VERSION" > dist/notes.md
+          section "[$VERSION]" > dist/notes.md
           if [ ! -s dist/notes.md ]; then
-            [ "$DRY_RUN" = true ] || { echo "CHANGELOG.md has no section v$VERSION"; exit 1; }
+            [ "$DRY_RUN" = true ] || { echo "CHANGELOG.md has no section [$VERSION]"; exit 1; }
             section Unreleased > dist/notes.md
           fi
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
