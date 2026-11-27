@@ -112,7 +112,10 @@ fn every_way_of_showing_hides_the_home_folder() {
     let e: CommandError = carrysheet::range::SheetRange::parse(&typed)
         .unwrap_err()
         .into();
-    assert!(e.what.contains(&home), "the field keeps the text");
+    // The name is quoted, which shows each `\` of a Windows home as `\\`.
+    let quoted = home.replace('\\', r"\\");
+    assert!(e.what.contains(&quoted), "the field keeps the text");
+    assert!(!redact_error(&e).what.contains(&quoted));
     assert!(!redact_error(&e).to_json().to_string().contains(&home));
 }
 
