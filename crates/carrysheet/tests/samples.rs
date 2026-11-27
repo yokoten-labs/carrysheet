@@ -4,9 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-use carrysheet::commands::engine::run;
 use carrysheet::commands::{COMMANDS, CommandError, ErrorCode, validate_args};
-use carrysheet::kernel::Kernel;
+use carrysheet::{Kernel, run, run_within};
 use serde_json::{Map, Value, json};
 
 fn data(name: &str) -> PathBuf {
@@ -26,7 +25,7 @@ fn scratch(name: &str) -> PathBuf {
 fn call(name: &str, args: Value) -> Result<Map<String, Value>, CommandError> {
     let command = COMMANDS.iter().find(|c| c.name == name).unwrap();
     let args = validate_args(command, &args)?;
-    run::run(&Kernel::new(), command, &args)
+    run(&Kernel::new(), command, &args)
 }
 
 fn p(path: &Path) -> String {
@@ -556,9 +555,9 @@ fn csv_open_keeps_the_time_limit() {
     let command = COMMANDS.iter().find(|c| c.name == "overview").unwrap();
     let args = validate_args(command, &json!({ "path": p(&path) })).unwrap();
     let kernel = Kernel::new();
-    let e = run::run_within(&kernel, command, &args, Some(0.0)).unwrap_err();
+    let e = run_within(&kernel, command, &args, Some(0.0)).unwrap_err();
     assert_eq!(e.code, ErrorCode::LimitExceeded, "{e:?}");
     assert!(e.what.contains("took longer"), "{}", e.what);
-    run::run_within(&kernel, command, &args, None).unwrap();
+    run_within(&kernel, command, &args, None).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }

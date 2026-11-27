@@ -6,9 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-use carrysheet::commands::engine::run;
 use carrysheet::commands::{COMMANDS, CommandError, validate_args};
-use carrysheet::kernel::{Kernel, Limits};
+use carrysheet::{Kernel, Limits, run};
 use serde_json::{Map, Value};
 
 pub const NS: &str = r#"xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#;
@@ -288,7 +287,7 @@ pub fn call_with(
 ) -> Result<Map<String, Value>, CommandError> {
     let command = COMMANDS.iter().find(|c| c.name == name).unwrap();
     let args = validate_args(command, &args)?;
-    run::run(kernel, command, &args)
+    run(kernel, command, &args)
 }
 
 pub fn lowered(f: impl FnOnce(&mut Limits)) -> Kernel {

@@ -2,9 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use carrysheet::commands::engine::run;
 use carrysheet::commands::{COMMANDS, CommandError, ErrorCode, validate_args};
-use carrysheet::kernel::Kernel;
+use carrysheet::{Kernel, run};
 use serde_json::{Map, Value, json};
 
 fn scratch(name: &str) -> PathBuf {
@@ -19,7 +18,7 @@ fn scratch(name: &str) -> PathBuf {
 fn call(name: &str, args: Value) -> Result<Map<String, Value>, CommandError> {
     let command = COMMANDS.iter().find(|c| c.name == name).unwrap();
     let args = validate_args(command, &args)?;
-    run::run(&Kernel::new(), command, &args)
+    run(&Kernel::new(), command, &args)
 }
 
 fn p(path: &Path) -> String {

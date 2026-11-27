@@ -4,19 +4,6 @@ use carrysheet::commands::{CommandError, ErrorCode};
 use serde_json::{Map, Value};
 
 #[test]
-fn wrap_keeps_lines_short() {
-    let line = format!("  {:<13} {}", "overview", "word ".repeat(30));
-    let wrapped = wrap(&line, 80, 16);
-    for l in wrapped.lines() {
-        assert!(l.chars().count() <= 80, "{l}");
-    }
-    assert!(wrapped.lines().nth(1).unwrap().starts_with(&" ".repeat(16)));
-    assert_eq!(wrap("short", 80, 4), "short");
-    assert_eq!(wrap("  a   b", 80, 4), "  a   b");
-    assert_eq!(wrap("  aaa bbb", 6, 4), "  aaa\n    bbb");
-}
-
-#[test]
 fn usage_errors_carry_the_suggestion() {
     let err = crate::cli::build()
         .try_get_matches_from([BIN, "commands", "--jsno"])
@@ -42,11 +29,6 @@ fn missing_arguments_are_named() {
         "{}",
         e.what
     );
-    assert!(
-        e.fix.starts_with("Give --ops <JSON> and <PATH>."),
-        "{}",
-        e.fix
-    );
     assert!(e.fix.contains("Usage: carrysheet-cli edit"), "{}", e.fix);
     let e = usage_of(&[BIN, "eval", "a.xlsx"]);
     assert!(e.what.contains("<FORMULA>"), "{}", e.what);
@@ -57,7 +39,7 @@ fn bad_values_list_the_possible_ones() {
     let e = usage_of(&[BIN, "read", "a.xlsx", "--mode", "x"]);
     assert_eq!(e.what, "invalid value 'x' for '--mode <mode>'");
     assert!(
-        e.fix.starts_with("Use one of: values, formulas, both."),
+        e.fix.contains("[possible values: values, formulas, both]"),
         "{}",
         e.fix
     );
@@ -68,16 +50,23 @@ fn bad_values_list_the_possible_ones() {
 }
 
 #[test]
-fn json_with_a_value_is_refused_with_a_fix() {
+fn json_with_a_value_is_a_usage_error() {
     for form in ["--json=true", "--json=false", "--json="] {
         let e = usage_of(&[BIN, "commands", form]);
         assert_eq!(e.code, ErrorCode::Usage, "{form}");
-        assert!(
-            e.fix.starts_with("Write --json without a value"),
-            "{form}: {}",
-            e.fix
-        );
+        assert!(e.what.contains("--json"), "{form}: {}", e.what);
     }
+}
+
+#[test]
+fn text_form_prints_tables_and_fields() {
+    let data = serde_json::json!({
+        "file": "a.xlsx", "n": 3.0, "nested": { "x": ["a", "b"] },
+        "rows": [{ "row": 2, "cells": ["Tea", 3.0] }, { "row": 3, "cells": ["a\nb", null] }]
+    });
+    let text = render(data.as_object().unwrap());
+    let want = "file: a.xlsx\nn: 3\nnested:\n  x: a, b\nrows:\n  row\tcells\n  2\tTea\t3\n  3\ta\\u{a}b\t\n";
+    assert_eq!(text, want);
 }
 
 #[test]

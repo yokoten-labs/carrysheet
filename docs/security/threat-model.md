@@ -4,7 +4,7 @@ Who could harm a Carrysheet user, through what, and what we do about it. To
 report a problem, see [SECURITY.md](../../SECURITY.md).
 
 **Where things stand (2026-11-27).** Workbook files are read by the vendored
-GridCraft kernel, through `carrysheet::kernel`; the save check lists package
+GridCraft kernel, through `carrysheet::Kernel`; the save check lists package
 parts through carrysheet-zip. `carrysheet-cli` runs its MCP server over stdio
 only and holds no network code (record 0010). Every command in the table is
 built. Some defences below are not built yet; they are marked **planned**.
@@ -76,9 +76,9 @@ characters; XML with a DOCTYPE and entities.
 
 **Open:**
 - Use carrysheet-zip for every reader ([issue 40][i40], partly done).
-  carrysheet::kernel lists and unpacks package parts through carrysheet-zip,
-  but the vendored GridCraft `.xlsx` and engine crates still use the `zip`
-  crate.
+  The save check (`crates/carrysheet/src/kernel/package.rs`) lists and
+  unpacks package parts through carrysheet-zip, but the vendored GridCraft
+  `.xlsx` and engine crates still use the `zip` crate.
 - On wasm32 a panic aborts (`docs/web-build.md`). The readers return errors
   instead of panicking, but a Web Worker should still run the parsing.
 - One shared work budget with a deadline ([issue 56][i56]).
@@ -226,7 +226,7 @@ modules and flagged risky code, left with record 0010. Running macros is
 undecided and lowest priority ([issue 21][i21]); so is refreshing external
 data ([issue 27][i27]).
 
-**CSV formula injection:** carrysheet::kernel's csv writer puts an apostrophe
+**CSV formula injection:** the `carrysheet::save` csv writer puts an apostrophe
 before text that starts with `=`, `+`, `-`, `@`, a tab or a carriage return
 (OWASP advice), on by default, so a CSV we write does not run formulas when
 opened elsewhere. Numbers are never changed. `csv_raw` (`--csv-raw`) turns

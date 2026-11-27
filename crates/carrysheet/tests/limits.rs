@@ -448,13 +448,13 @@ fn slow_unpacking_counts_against_the_time_limit() {
 
 #[test]
 fn one_time_budget_covers_the_whole_command() {
-    use carrysheet::commands::engine::run::run_within;
     use carrysheet::commands::{COMMANDS, validate_args};
+    use carrysheet::run_within;
     // Round 2, N5: opening alone, with no calculation, counts as well.
     let dir = scratch("budget");
     let path = dir.join("num.xlsx");
     std::fs::write(&path, Book::new(&numbers(10)).bytes()).unwrap();
-    let kernel = carrysheet::kernel::Kernel::new();
+    let kernel = carrysheet::Kernel::new();
     let command = COMMANDS.iter().find(|c| c.name == "overview").unwrap();
     let args = validate_args(command, &json!({ "path": p(&path) })).unwrap();
     let e = run_within(&kernel, command, &args, Some(0.0)).unwrap_err();

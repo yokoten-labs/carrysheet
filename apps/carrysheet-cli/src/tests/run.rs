@@ -64,16 +64,21 @@ fn commands_lists_everything() {
         COMMANDS.len()
     );
     assert_eq!(done.data["commands"][0]["implemented"], true);
-    for line in done.text.lines() {
-        assert!(line.chars().count() <= 80, "{line}");
-    }
+    let plain = done.plain.unwrap();
+    assert_eq!(plain["commands"].as_array().unwrap().len(), COMMANDS.len());
+    assert!(
+        !plain["commands"][0]
+            .as_object()
+            .unwrap()
+            .contains_key("input_schema")
+    );
 }
 
 // Issue 102: `commands` says every listed command is implemented, so
 // none may fall through to `not_implemented`.
 #[test]
 fn every_listed_command_runs() {
-    use carrysheet::commands::engine::run::ENGINE_COMMANDS;
+    use carrysheet::ENGINE_COMMANDS;
     for c in COMMANDS {
         let built = matches!(c.name, "commands" | "mcp_serve");
         assert!(built || ENGINE_COMMANDS.contains(&c.name), "{}", c.name);

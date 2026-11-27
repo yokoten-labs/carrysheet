@@ -19,10 +19,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Once;
 use std::time::{Duration, Instant};
 
-use carrysheet::commands::engine::{Engine, FileFormat, ReadRequest};
+use carrysheet::Kernel;
 use carrysheet::commands::{CommandError, ErrorCode};
-use carrysheet::kernel::Kernel;
-use carrysheet::model::{SheetRange, format_sheet_name};
+use carrysheet::range::{SheetRange, format_sheet_name};
+use carrysheet::save::{EncodeOptions, FileFormat};
+use carrysheet::view::ReadRequest;
 
 /// The budget of one command (`carrysheet::commands::limits::MAX_CALL_SECONDS`).
 ///
@@ -287,8 +288,9 @@ fn exercise(kernel: &Kernel, input: Input<'_>, depth: Depth) -> Result<(), Comma
     }
     if depth == Depth::Save {
         kernel.evaluate(&book, None, "SUM(A1:Z50)")?;
-        kernel.encode(&book, Path::new("out.xlsx"), FileFormat::Xlsx, None)?;
-        kernel.encode(&book, Path::new("out.csv"), FileFormat::Csv, None)?;
+        let options = EncodeOptions::default();
+        kernel.encode(&book, Path::new("out.xlsx"), FileFormat::Xlsx, &options)?;
+        kernel.encode(&book, Path::new("out.csv"), FileFormat::Csv, &options)?;
     }
     Ok(())
 }

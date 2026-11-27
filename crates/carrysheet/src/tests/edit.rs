@@ -1,5 +1,5 @@
-use crate::commands::engine::edit::*;
-use crate::commands::error::ErrorCode;
+use crate::edit::*;
+use crate::error::ErrorCode;
 use serde_json::Value;
 use serde_json::json;
 
