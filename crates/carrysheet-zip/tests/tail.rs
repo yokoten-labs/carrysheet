@@ -13,7 +13,7 @@
 //!   cargo test -p carrysheet-zip --features test-miniz
 //!   cargo test -p carrysheet-zip --features test-zlib-rs
 //!
-//! (CI runs both, in the `zip-inflaters` step of the `checks` job.)
+//! (CI runs both, in the `zip-inflaters` step of the `test` job.)
 
 mod common;
 

@@ -25,7 +25,7 @@ Carrysheet 1.0 is ready when you can open a real `.xlsx` file, edit it, and save
 
 ## Build from source
 
-You need [Rust](https://rustup.rs) 1.90 or later (the repository pins 1.99.1 in `rust-toolchain.toml`) and Node.js (for the line-cap check).
+You need [Rust](https://rustup.rs) 1.90 or later (`rust-toolchain.toml` picks the exact version) and Node.js (for the line-cap check).
 
 ```sh
 cargo build -p carrysheet-cli
