@@ -148,7 +148,7 @@ The CLI and MCP server ship for three tiers of platforms from the first release.
 
 ## Installing into clients
 
-Planned, not built. The `mcp install` and `mcp doctor` placeholders left the command table with record 0010 (issue 102); they come back only under the line cap. The plan:
+Planned, not built. The `mcp install` and `mcp doctor` placeholders were removed with record 0010 (issue 102); they come back only under the line cap. The plan:
 
 - `carrysheet-cli mcp install <client>` and `uninstall <client>`, for every client in the research table.
   - Changes only our own entry and keeps everything else.
