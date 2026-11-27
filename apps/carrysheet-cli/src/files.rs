@@ -511,6 +511,8 @@ pub fn redact_home_text(text: &str, home: &str, windows: bool) -> String {
     let Some(home) = usable_home(home, windows) else {
         return text.to_owned();
     };
+    // `carrysheet::text` shows `\` as `\\`, so look for that form too.
+    let escaped = home.replace('\\', r"\\");
     let (mut out, mut i) = (String::with_capacity(text.len()), 0);
     while let Some(c) = text[i..].chars().next() {
         let rest = &text[i..];
@@ -518,7 +520,9 @@ pub fn redact_home_text(text: &str, home: &str, windows: bool) -> String {
             .iter()
             .find(|p| windows && starts_with_ignore_case(rest, p));
         let skip = verbatim.map_or(0, |p| p.len());
-        if let Some(len) = match_prefix(&rest[skip..], &home, windows) {
+        let found = match_prefix(&rest[skip..], &home, windows)
+            .or_else(|| match_prefix(&rest[skip..], &escaped, windows));
+        if let Some(len) = found {
             out.push('~');
             i += skip + len;
         } else {

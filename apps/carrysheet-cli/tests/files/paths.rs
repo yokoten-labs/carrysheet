@@ -80,6 +80,11 @@ fn redacts_windows_style_home() {
         redact_home_text(r"x C:\Users\alice\e", r"\\?\C:\Users\alice", true),
         r"x ~\e"
     );
+    // A name escaped by carrysheet::text shows each `\` as `\\`.
+    assert_eq!(
+        redact_home_text(r#""C:\\Users\\alice\\q1.xlsx"!A1"#, home, true),
+        r#""~\\q1.xlsx"!A1"#
+    );
     assert_eq!(redact_home_text(r"C:\a C:\b", r"C:\", true), r"C:\a C:\b");
 }
 
