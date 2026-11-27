@@ -130,7 +130,8 @@ fn huge_array_results_are_errors_not_aborts() {
     let page = call("read", json!({ "path": p(&path), "range": "A1" })).unwrap();
     assert_eq!(page["rows"][0]["cells"][0], "#NUM!", "{page:?}");
     // The same formula set by edit gives the error fast, too.
-    let ops = json!([{ "op": "set_formula", "target": "N1", "value": "ROWS(SEQUENCE(1000000,10))" }]);
+    let ops =
+        json!([{ "op": "set_formula", "target": "N1", "value": "ROWS(SEQUENCE(1000000,10))" }]);
     let e = call("edit", json!({ "path": p(&path), "ops": ops, "dry_run": true })).unwrap();
     assert_eq!(e["changes"][0]["after"]["value"], "#NUM!", "{e:?}");
     assert!(started.elapsed() < QUICK, "{:?}", started.elapsed());

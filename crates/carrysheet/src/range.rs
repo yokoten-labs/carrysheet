@@ -70,6 +70,9 @@ impl SheetRange {
                 }
             }
         };
+        if sheet.as_deref() == Some("") {
+            return Err(invalid(input, "the sheet name is empty"));
+        }
         let is_range_char = |c: char| c.is_ascii_alphanumeric() || c == '$' || c == ':';
         let is_strict = text.chars().all(is_range_char) && !text.contains("$$");
         let range = RangeRef::parse(text).filter(|_| is_strict);

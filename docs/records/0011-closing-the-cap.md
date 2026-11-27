@@ -34,6 +34,7 @@ The owner's options were: format only; format and the sweep; format and cut `eva
 | The `parts` counts in the save report (identical, rewritten, dropped, added) | to 4,993 (-27) |
 | The `recalculated` and `recalculated_total` lists in the `edit` answer | to 4,944 (-49) |
 | `.ods` opens (point 4) | 4,944 (0) |
+| Review fixes: `dry_run` skips the output-exists check, an empty sheet name in a range is refused, `ErrorCode::Formula` leaves | 4,947 (+3) |
 
 What stays: insert and delete of rows and columns, paging across wide ranges, `--ops @file` and `--max-seconds`.
 
@@ -57,7 +58,7 @@ Record 0010's budget assumed `cap-std` and an `eval` in `view.rs`. These are the
 | `error.rs` | 188 | 158 |
 | `text.rs` | 100 | 95 |
 | `open.rs` | 318 | 301 |
-| `range.rs` | 145 | 96 |
+| `range.rs` | 145 | 99 |
 | `view.rs` | 715 | 572 |
 | `edit.rs` | 765 | 691 |
 | `save.rs` | 515 | 449 |
@@ -90,7 +91,7 @@ Decision 3 lists `.ods` among the formats that open, and the README and `docs/ag
 
 ## Consequences
 
-- Easier: the count is 4,944, under the cap, with 56 lines of room. The planning target of 4,500 is still out of reach; above it, `lines.mjs` prints a note.
+- Easier: the count is 4,947, under the cap, with 53 lines of room. The planning target of 4,500 is still out of reach; above it, `lines.mjs` prints a note.
 - Easier: one format change, in its own commit, keeps later diffs short. `cargo fmt --all --check` holds it.
 - Harder: an agent that called `eval` gets `unknown command` and must use `edit` with `dry_run`. `changes/eval-removed.md` says how.
 - Harder: `use_small_heuristics = "Max"` puts more on one line. A reviewer reads denser `if` and struct expressions.
