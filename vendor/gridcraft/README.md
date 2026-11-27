@@ -120,7 +120,7 @@ and nothing else. The CI job `vendor` checks it:
 
 ```
 node scripts/vendor.mjs verify            # fetch the pinned commit, apply the patches, compare
-node --test scripts/vendor.test.mjs       # the script's own tests, no network
+node --test scripts/tests/vendor.test.mjs # the script's own tests, no network
 ```
 
 `verify` fetches the one commit into a temporary folder and needs git and the network. Exit 0 is

@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const CAP = 5000, TARGET = 4500, PATCH_MAX = 0; // PATCH_MAX 0: the patch limit is off.
+export const CAP = 5000, TARGET = 4500, PATCH_MAX = 1081; // The 981 patch lines measured when they landed, plus 100.
 const CODE = /\.(rs|mjs|js|cjs|ts|py|sh|ps1|psm1)$/;
 const DATA = /\.(toml|yml|md|lock|json|txt)$|(^|\/)(LICENSE[^/]*|NOTICE|CODEOWNERS|\.[^/]*)$|^\.github\//;
 const isTestPath = (path) => /(^|\/)(tests|benches)\//.test(path) || path.endsWith(".test.mjs");

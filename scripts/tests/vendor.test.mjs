@@ -1,6 +1,6 @@
 // Self-test for scripts/vendor.mjs: the folder map, left_out, patches and every kind of
 // difference, on a small made-up upstream. No network.
-// Run: node --test scripts/vendor.test.mjs
+// Run: node --test scripts/tests/vendor.test.mjs
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -9,9 +9,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { listFiles, verify } from "./vendor.mjs";
+import { listFiles, verify } from "../vendor.mjs";
 
-const script = join(dirname(fileURLToPath(import.meta.url)), "vendor.mjs");
+const script = join(dirname(fileURLToPath(import.meta.url)), "..", "vendor.mjs");
 
 const PATCH = `diff --git a/crates/base/core/src/lib.rs b/crates/base/core/src/lib.rs
 --- a/crates/base/core/src/lib.rs

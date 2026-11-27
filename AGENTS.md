@@ -123,6 +123,7 @@ Our own source is at most 5,000 lines; the planning target is 4,500. [Record 001
 - A tracked file that is neither code nor on the data list in `scripts/lines.mjs` fails the check.
 - Unit tests go in `src/tests/` behind `#[cfg(test)] mod tests;`. A counted Rust file with `#[path`, `include!(` or an unguarded `mod tests;` fails.
 - Above 4,500 the check prints a note. The pull request then says why.
+- `vendor/gridcraft/` is upstream GridCraft plus the patch files in `patches/`, and nothing else. The `vendor` CI job checks it (`node scripts/vendor.mjs verify`). A patch never carries a Carrysheet feature; the patch files add at most `PATCH_MAX` lines (`scripts/lines.mjs`).
 - During the cut, CI passes `--max` with the ceiling of the current step. A pull request never raises the ceiling or the cap; a new cap needs a new record.
 - Before you push, run the command of the `lines` job in `.github/workflows/ci.yml`. It needs no Rust and takes under a second.
 - A reason that needs more than a few lines goes into a record or `docs/`, not into a code comment.

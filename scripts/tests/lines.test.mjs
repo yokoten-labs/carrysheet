@@ -92,8 +92,16 @@ test("patch files: counts added lines and prints the number", () => {
   const patch = "--- a/x.rs\n+++ b/x.rs\n@@ -1 +1,2 @@\n-old\n+new\n+more\n ctx\n";
   const result = checkFiles({ "vendor/gridcraft/patches/0001-a.patch": patch, "vendor/gridcraft/patches/0002-b.patch": "+one\n" });
   assert.ok(result.out.includes("patches: 3 added lines in vendor/gridcraft/patches"));
-  assert.equal(result.code, 0, `PATCH_MAX is ${PATCH_MAX}: 0 means off`);
+  assert.equal(result.code, 0);
   assert.ok(!checkFiles({ "a.rs": "x\n" }).out.some((line) => line.startsWith("patches:")));
+});
+
+test("patch files: above PATCH_MAX added lines fails with three parts", () => {
+  const patch = (n) => ({ "vendor/gridcraft/patches/0001-a.patch": "+x\n".repeat(n) });
+  assert.equal(checkFiles(patch(PATCH_MAX)).code, 0);
+  const over = checkFiles(patch(PATCH_MAX + 1));
+  assert.equal(over.code, 1);
+  assert.match(over.out.find((line) => line.startsWith("error:")), /above PATCH_MAX .*\n {2}Why: .*\n {2}Fix: /);
 });
 
 test("the command line: a git tree, exit codes and usage", (t) => {

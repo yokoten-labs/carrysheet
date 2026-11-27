@@ -22,3 +22,8 @@
 /scripts/lines.mjs  @coo1white
 /rustfmt.toml       @coo1white
 /deny.toml          @coo1white
+
+# Record 0010 decision 8: the vendor proof. Its manifest and patches are the real gate.
+/vendor/gridcraft/upstream.json   @coo1white
+/vendor/gridcraft/patches/        @coo1white
+/scripts/vendor.mjs               @coo1white
