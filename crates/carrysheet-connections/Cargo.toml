@@ -13,7 +13,7 @@ publish = false
 # Inflate for the zip inside a Power Query DataMashup. The zlib-rs backend is
 # pure Rust and already in Cargo.lock; no C compiler, builds for wasm32.
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
-quick-xml = { version = "0.41.0", default-features = false }
+quick-xml = { version = "0.42.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

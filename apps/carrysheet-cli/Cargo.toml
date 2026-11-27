@@ -27,7 +27,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 # MCP server over stdio and streamable HTTP. Exact pin: the Rust SDK is beta
 # for the 2026-07-28 spec.
-rmcp = { version = "=3.9.0", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
+rmcp = { version = "=3.11.0", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
 # `mcp serve --http`: a plain HTTP/1.1 server on loopback in front of rmcp's
 # streamable-HTTP service. Only the server half of hyper, no TLS, no HTTP/2.
 hyper = { version = "1", default-features = false, features = ["server", "http1"] }

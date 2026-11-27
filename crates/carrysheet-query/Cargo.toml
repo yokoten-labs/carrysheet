@@ -17,7 +17,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # The web (wasm32) build leaves it out: there the crate has the input types,
 # header naming and date helper, but no QueryEngine.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-rusqlite = { version = "0.41.1", default-features = false, features = [
+rusqlite = { version = "0.43.0", default-features = false, features = [
     "bundled",
     "column_decltype",
     "functions",

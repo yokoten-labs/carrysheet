@@ -19,7 +19,7 @@ carrysheet-csv = { path = "../../crates/carrysheet-csv", version = "0.1.0" }
 carrysheet-vba = { path = "../../crates/carrysheet-vba", version = "0.1.0" }
 # Rebuilds compound files after a format-aware mutation. The readers use the
 # same version, so this adds nothing to Cargo.lock.
-cfb = "0.15"
+cfb = "0.16"
 
 [lints]
 workspace = true
