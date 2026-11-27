@@ -104,7 +104,7 @@ Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, in PR 88 until it 
 - **Folder confinement.** `--root` (default: the current folder). Paths are checked as text first, before any file is touched: network paths (`\\host\share`, WebDAV), device paths (`\\.\`, `\\?\GLOBALROOT`), other drives, reserved names (`NUL`, `COM1`) and `..` above the root are refused at once, so a path can never make Windows send credentials to another machine. Then links and junctions are followed one by one, each checked again. A refusal is `outside_root`.
 - Without `--root`, a drive root, `/` or the home folder is too wide: the server refuses to start and asks for `--root`. An explicit `--root /` starts with a warning in the log.
 - **Read-only mode.** `--read-only` hides every tool that changes files or is not marked read-only, and refuses them by name, whatever `--toolsets` and `--tools` say. It is set in the server's own arguments, not an env variable, because several clients strip env.
-- **Never overwrite by default.** `edit` writes to the original only with `overwrite: true`; otherwise to a new version beside it. Saves are atomic (temp file in the same folder, then replace).
+- **Never overwrite by default.** `edit` writes to the original only with `overwrite: true`; otherwise to `name-edited.xlsx` beside it, and never over an existing one. Saves are atomic (temp file in the same folder, then replace).
 - **Snapshots** before every change make `undo` cheap.
 - **Confirmation**, in two separate kinds, so agreeing to delete rows never also agrees to drop macros:
   - `confirm: true` (`--confirm`) for destructive edits: deleting sheets, rows or columns, and overwriting a file.

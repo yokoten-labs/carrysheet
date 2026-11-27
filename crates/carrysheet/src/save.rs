@@ -140,33 +140,11 @@ pub struct Encoded {
     pub report: SaveReport,
 }
 
-/// Where `edit` writes when no output is given: beside the original, as
-/// `name-edited.xlsx`, or `name-edited-2.xlsx` and so on when taken.
-/// `exists` says whether a path is taken.
-pub fn default_output(
-    input: &Path,
-    exists: &dyn Fn(&Path) -> bool,
-) -> Result<PathBuf, CommandError> {
-    let stem = input
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "book".to_owned());
+/// Where `edit` writes when no output is given: `name-edited.xlsx` beside the original.
+pub fn default_output(input: &Path) -> PathBuf {
+    let stem = input.file_stem().map_or_else(|| "book".into(), |s| s.to_string_lossy());
     let ext = input.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
-    let dir = input.parent().unwrap_or(Path::new(""));
-    for n in 1..=99 {
-        let name =
-            if n == 1 { format!("{stem}-edited{ext}") } else { format!("{stem}-edited-{n}{ext}") };
-        let candidate = dir.join(name);
-        if !exists(&candidate) {
-            return Ok(candidate);
-        }
-    }
-    Err(CommandError::new(
-        ErrorCode::FileExists,
-        format!("no free name beside {}", input.display()),
-        "the names name-edited.xlsx to name-edited-99.xlsx are all taken",
-        "Pass output with the file to write.",
-    ))
+    input.with_file_name(format!("{stem}-edited{ext}"))
 }
 
 /// Refuses to replace an existing file unless `overwrite` is set.
@@ -202,7 +180,7 @@ pub fn prepare_output(
     let output = match text(args, "output") {
         Some(o) => PathBuf::from(o),
         None if overwrite => path,
-        None => default_output(&path, exists)?,
+        None => default_output(&path),
     };
     output_format(&output, text(args, "format"))?;
     check_output(&output, overwrite, exists)?;

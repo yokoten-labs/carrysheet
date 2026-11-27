@@ -15,9 +15,8 @@ fn reports_say_what_is_lost() {
 fn outputs_never_replace_a_file_unless_asked() {
     let taken = |p: &Path| p.ends_with("book.xlsx") || p.ends_with("book-edited.xlsx");
     let book = Path::new("dir/book.xlsx");
-    let free = |_: &Path| false;
-    assert_eq!(default_output(book, &free).unwrap(), Path::new("dir/book-edited.xlsx"));
-    assert_eq!(default_output(book, &taken).unwrap(), Path::new("dir/book-edited-2.xlsx"));
+    assert_eq!(default_output(book), Path::new("dir/book-edited.xlsx"));
+    assert!(check_output(&default_output(book), false, &taken).is_err());
     assert_eq!(check_output(book, false, &taken).unwrap_err().code, ErrorCode::FileExists);
     assert!(check_output(book, true, &taken).is_ok());
 }
