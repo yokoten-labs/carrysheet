@@ -3,8 +3,7 @@
 mod lint;
 
 use crate::lint::*;
-use carrysheet::commands::schema::{input_schema, tool_definition};
-use carrysheet::commands::table::{COMMANDS, mcp_tools};
+use carrysheet::args::{COMMANDS, input_schema, mcp_tools, tool_definition};
 use serde_json::{Value, json};
 
 fn rules(schema: Value) -> Vec<Rule> {

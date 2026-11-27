@@ -2,14 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
-use carrysheet::commands::schema::command_json;
-use carrysheet::commands::table::{COMMANDS, Command};
-use carrysheet::commands::{CommandError, ErrorCode, check_confirmation};
+use carrysheet::commands::{COMMANDS, Command, CommandError, ErrorCode, check_confirmation};
 use carrysheet::open::{MAX_FILE_BYTES, check_opens};
 use carrysheet::save::prepare_output;
 use carrysheet::{Kernel, run_within};
 use serde_json::{Map, Value, json};
 
+use crate::cli::command_json;
 use crate::files::{display_path, exists, read_bounded, write_atomic};
 
 /// How the program was started. Nobody is ever asked a question: a
@@ -51,10 +50,10 @@ pub fn run(
             "Start it with `carrysheet-cli mcp serve`.",
         )),
         _ => {
-            check_input_exists(command, args)?;
+            check_input_exists(args)?;
             let mut args = args.clone();
             for name in ["confirm", "confirm_loss"] {
-                if ctx.yes && command.arg(name).is_some() {
+                if ctx.yes && args.contains_key(name) {
                     args.insert(name.into(), Value::Bool(true));
                 }
             }
@@ -81,10 +80,7 @@ pub fn run(
 }
 
 /// Fails early with a clear error when the input workbook is missing.
-fn check_input_exists(command: &Command, args: &Map<String, Value>) -> Result<(), CommandError> {
-    if command.arg("path").is_none() {
-        return Ok(());
-    }
+fn check_input_exists(args: &Map<String, Value>) -> Result<(), CommandError> {
     let Some(path) = args.get("path").and_then(Value::as_str) else {
         return Ok(());
     };
@@ -111,7 +107,7 @@ fn commands() -> Done {
         .collect();
     let rows: Vec<Value> = COMMANDS
         .iter()
-        .map(|c| json!({ "command": c.cli_name(), "summary": c.summary }))
+        .map(|c| json!({ "command": c.cli_name(), "summary": c.doc().0 }))
         .collect();
     let mut plain = Map::new();
     plain.insert("commands".into(), Value::Array(rows));

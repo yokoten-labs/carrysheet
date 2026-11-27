@@ -8,7 +8,7 @@ Evidence: [research/mcp-client-compat.md](../research/mcp-client-compat.md), the
 
 Carrysheet aims to be **AI-friendly, human-friendly and MCP-friendly**. The rules below are what that means in practice.
 
-1. **One command layer.** The CLI, the MCP server and the desktop app call the same validated commands. CLI help, the JSON schemas and the MCP tool list are generated from one table, so they can't drift.
+1. **One command layer.** The CLI, the MCP server and the desktop app call the same validated commands. CLI help, the JSON schemas and the MCP tool list are generated from one struct per command, so they can't drift.
 2. **Docs are not proof.** A client is supported only after a real tool call worked in it. We publish a support table with client version, date and model, and re-check it, because clients change monthly.
 3. **Design with each model, not around one.** Before a release, ask each agent what it can do with the interface, run a cheap small test, then the full run.
 4. **Assume clients fail quietly.** They skip untrusted config without a word, drop results, strip env variables and truncate output. Our side must be the one that is loud and clear.
@@ -38,7 +38,7 @@ Carrysheet aims to be **AI-friendly, human-friendly and MCP-friendly**. The rule
 
 ### Tools
 
-Few, workflow-level tools. Names of built tools match the command table in `crates/carrysheet/src/commands/table.rs`.
+Few, workflow-level tools. Names of built tools match `COMMANDS` in `crates/carrysheet/src/args.rs`, which holds one struct per command.
 
 | Tool | Does | Changes files | Toolset |
 |---|---|---|---|

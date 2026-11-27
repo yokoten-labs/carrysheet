@@ -10,7 +10,8 @@
 //! - [`range`]: A1 ranges with a sheet name.
 //! - [`text`]: text from a file, made safe to show.
 //! - [`error`]: errors with a code, what, why and fix, and exit codes.
-//! - [`commands`]: the command table, its schemas, the limit values.
+//! - [`args`]: one struct per command: its flags, schema and checks.
+//! - [`commands`]: the names a caller needs, and the limit values.
 //!
 //! The program reads and writes the files (record 0010, decision 2).
 
@@ -36,7 +37,7 @@ use gridcraft_engine::core::limits::{self as gc, Exceeded};
 use serde_json::{Map, Value};
 
 use crate::commands::limits as values;
-use crate::commands::table::Command;
+use crate::args::Command;
 use crate::edit::{EditOp, EditResult};
 use crate::error::{CommandError, ErrorCode};
 use crate::open::{Book, MAX_FILE_BYTES};

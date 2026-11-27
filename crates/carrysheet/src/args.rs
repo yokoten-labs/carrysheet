@@ -16,8 +16,11 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
+use crate::edit::EditKind;
 use crate::error::{CommandError, ErrorCode};
 use crate::range::SheetRange;
+use crate::save::FileFormat;
+use crate::view::ReadMode;
 
 /// The most items a list argument may hold.
 pub const MAX_LIST_ITEMS: usize = 10_000;
@@ -63,7 +66,7 @@ pub struct Read {
     pub range: Option<String>,
     /// values (default), formulas, or both.
     #[cfg_attr(feature = "cli", arg(long))]
-    pub mode: Option<Mode>,
+    pub mode: Option<ReadMode>,
     /// Rows per page, 1 to 10000. Default: 200.
     #[cfg_attr(feature = "cli", arg(long))]
     pub max_rows: Option<u32>,
@@ -105,7 +108,7 @@ pub struct Convert {
     pub output: String,
     /// Default: taken from the output file's extension.
     #[cfg_attr(feature = "cli", arg(long))]
-    pub format: Option<Format>,
+    pub format: Option<FileFormat>,
     /// For csv, the sheet to write. Default: the first sheet.
     #[cfg_attr(feature = "cli", arg(long))]
     pub sheet: Option<String>,
@@ -172,7 +175,7 @@ pub type Operations = Vec<Operation>;
 #[serde(deny_unknown_fields)]
 pub struct Operation {
     /// What to do.
-    pub op: OperationKind,
+    pub op: EditKind,
     /// A range like Sheet1!B2:B9, or a sheet name for sheet ops.
     pub target: String,
     /// Text, a number or true/false, kept as typed ("3" is text, 3 a number). For set_formula, the formula without =; for sheet ops, the new name.
@@ -191,44 +194,11 @@ pub enum Scalar {
 }
 
 #[derive(Clone, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum OperationKind {
-    SetValue,
-    SetFormula,
-    Clear,
-    InsertRows,
-    DeleteRows,
-    InsertColumns,
-    DeleteColumns,
-    AddSheet,
-    RenameSheet,
-    DeleteSheet,
-}
-
-#[derive(Clone, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseFormat {
     Concise,
     Detailed,
-}
-
-#[derive(Clone, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
-#[serde(rename_all = "snake_case")]
-pub enum Mode {
-    Values,
-    Formulas,
-    Both,
-}
-
-#[derive(Clone, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
-#[serde(rename_all = "snake_case")]
-pub enum Format {
-    Xlsx,
-    Xls,
-    Csv,
 }
 
 /// Run the MCP server for AI agents, over stdio
@@ -260,8 +230,7 @@ pub struct Command {
     pub name: &'static str,
     /// Offered as a tool by the MCP server.
     pub mcp_tool: bool,
-    /// The four MCP annotations, all set: `readOnlyHint`, `destructiveHint`,
-    /// `idempotentHint`, `openWorldHint`.
+    /// The MCP annotations, all four set, in the order of [`HINTS`].
     pub hints: [bool; 4],
     schema: fn() -> Value,
     check: fn(Value) -> Result<(), String>,
@@ -287,6 +256,9 @@ macro_rules! command {
         }
     };
 }
+
+/// The names of the four MCP annotations.
+pub const HINTS: [&str; 4] = ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"];
 
 /// Never changes anything, and calling it again gives the same answer.
 const READS: [bool; 4] = [true, false, true, false];
@@ -332,6 +304,11 @@ impl Command {
         input_schema(self)["properties"].get(name).is_some()
     }
 
+    /// Never changes anything (`readOnlyHint`).
+    pub fn is_read_only(&self) -> bool {
+        self.hints[0]
+    }
+
     /// Writes or replaces files. Such commands take `dry_run`.
     pub fn changes_files(&self) -> bool {
         self.has_arg("dry_run")
@@ -339,13 +316,7 @@ impl Command {
 
     /// The four MCP annotations under their protocol names.
     pub fn annotations(&self) -> Value {
-        let [read_only, destructive, idempotent, open_world] = self.hints;
-        json!({
-            "readOnlyHint": read_only,
-            "destructiveHint": destructive,
-            "idempotentHint": idempotent,
-            "openWorldHint": open_world,
-        })
+        HINTS.into_iter().zip(self.hints).collect()
     }
 }
 
@@ -376,8 +347,9 @@ fn branches(node: &Value) -> Vec<Value> {
             let properties: Map<String, Value> = fields
                 .map(|(name, field)| (name.clone(), property(field, is_optional(name))))
                 .collect();
-            out["required"] = properties.keys().cloned().collect();
+            let names: Value = properties.keys().cloned().collect();
             out["properties"] = Value::Object(properties);
+            out["required"] = names;
             out["additionalProperties"] = json!(false);
         }
         out
@@ -406,7 +378,9 @@ fn property(node: &Value, optional: bool) -> Value {
 pub fn input_schema(command: &Command) -> Value {
     let mut schema = property(&(command.schema)(), false);
     // The struct's doc comment is the tool description, not part of this.
-    schema.as_object_mut().and_then(|s| s.remove("description"));
+    if let Some(root) = schema.as_object_mut() {
+        root.remove("description");
+    }
     schema
 }
 
@@ -464,7 +438,7 @@ pub fn validate_args(command: &Command, args: &Value) -> Result<Map<String, Valu
             None => format!("Run `carrysheet-cli {cli} --help` for the arguments."),
         };
         // serde repeats a wrong value; keep a long one out of the error.
-        return Err(invalid(&name, why.chars().take(200).collect(), fix));
+        return Err(invalid(&name, why.chars().take(160).collect(), fix));
     }
     for (name, value) in &given {
         check_limits(name, name, value)?;

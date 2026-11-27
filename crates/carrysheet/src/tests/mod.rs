@@ -1,6 +1,4 @@
-mod commands_schema;
-mod commands_schema_validate;
-mod commands_table;
+mod args;
 mod edit;
 mod error;
 mod kernel;

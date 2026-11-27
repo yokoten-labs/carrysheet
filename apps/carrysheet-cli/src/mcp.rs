@@ -1,6 +1,6 @@
 //! `mcp serve`: the MCP server over stdio, built on rmcp.
 //!
-//! - Tools come from the command table, in its fixed order, with all four
+//! - Tools come from `carrysheet::args`, in its fixed order, with all four
 //!   annotations set. `--read-only` leaves out every tool that changes files.
 //! - A tool call goes through the same `validate_args` and [`run::run`] as
 //!   the command line. Its result carries the same JSON as compact text and
@@ -20,9 +20,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use carrysheet::commands::schema::tool_definition;
-use carrysheet::commands::table::{ArgType, Command, mcp_tools};
-use carrysheet::commands::{CommandError, ErrorCode, validate_args};
+use carrysheet::args::{Command, PATHS, mcp_tools, tool_definition, validate_args};
+use carrysheet::commands::{CommandError, ErrorCode};
 use carrysheet::text::escape;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, ListToolsResult,
@@ -101,14 +100,14 @@ pub fn offered(read_only: bool) -> Vec<&'static Command> {
 
 /// Offered in read-only mode: never changes files and is marked read-only.
 fn is_read_only(command: &Command) -> bool {
-    !command.changes_files && command.annotations.read_only
+    !command.changes_files() && command.is_read_only()
 }
 
-/// A command's tool definition as rmcp's type. The JSON comes from the
-/// table, so nothing here can drift from `commands --json`.
+/// A command's tool definition as rmcp's type. The JSON comes from its
+/// argument struct, so nothing here can drift from `commands --json`.
 fn tool(command: &Command) -> Tool {
     serde_json::from_value(tool_definition(command))
-        .expect("tool definitions from the table are valid MCP tools")
+        .expect("tool definitions from the argument structs are valid MCP tools")
 }
 
 impl Server {
@@ -162,7 +161,7 @@ impl Server {
         };
         let args = Value::Object(arguments.unwrap_or_default());
         let mut args = validate_args(command, &args)?;
-        self.confine(command, &mut args)?;
+        self.confine(&mut args)?;
         // An agent is reading: never ask, never wait for a terminal.
         // MCP calls keep the default time limit (limits::MAX_CALL_SECONDS).
         // Writes stay inside the root even if a link changes meanwhile.
@@ -176,37 +175,11 @@ impl Server {
 
     /// Replaces every path argument with the same path resolved inside the
     /// root, or refuses the call.
-    fn confine(
-        &self,
-        command: &Command,
-        args: &mut Map<String, Value>,
-    ) -> Result<(), CommandError> {
-        for arg in command.all_args() {
-            match arg.ty {
-                ArgType::Path => {
-                    if let Some(Value::String(given)) = args.get(arg.name) {
-                        let resolved = self.resolve(given)?;
-                        args.insert(arg.name.into(), Value::String(resolved));
-                    }
-                }
-                ArgType::ObjectList(fields) => {
-                    let paths: Vec<_> = fields.iter().filter(|f| f.ty == ArgType::Path).collect();
-                    if paths.is_empty() {
-                        continue;
-                    }
-                    let Some(Value::Array(items)) = args.get_mut(arg.name) else {
-                        continue;
-                    };
-                    for item in items.iter_mut().filter_map(Value::as_object_mut) {
-                        for field in &paths {
-                            if let Some(Value::String(given)) = item.get(field.name) {
-                                let resolved = self.resolve(given)?;
-                                item.insert(field.name.into(), Value::String(resolved));
-                            }
-                        }
-                    }
-                }
-                _ => {}
+    fn confine(&self, args: &mut Map<String, Value>) -> Result<(), CommandError> {
+        for name in PATHS {
+            if let Some(Value::String(given)) = args.get(*name) {
+                let resolved = self.resolve(given)?;
+                args.insert((*name).to_owned(), Value::String(resolved));
             }
         }
         Ok(())
