@@ -44,7 +44,7 @@ fn bad_values_list_the_possible_ones() {
         e.fix
     );
     let e = usage_of(&[BIN, "convert", "a.xlsx", "b.x", "--format", "ods"]);
-    assert!(e.fix.contains("xlsx, xls, csv"), "{}", e.fix);
+    assert!(e.fix.contains("xlsx, csv"), "{}", e.fix);
     let e = usage_of(&[BIN, "read", "a.xlsx", "--mode", "bo"]);
     assert!(e.fix.contains("'both'"), "{}", e.fix);
 }
