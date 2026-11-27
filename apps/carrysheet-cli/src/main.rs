@@ -69,7 +69,7 @@ fn flag_names(mut err: CommandError, command: &Command) -> CommandError {
     for arg in cli::clap_command("", command).get_arguments() {
         let Some(long) = arg.get_long() else { continue };
         let (id, flag) = (format!("`{}`", arg.get_id()), format!("`--{long}`"));
-        [&mut err.what, &mut err.why, &mut err.fix].map(|text| *text = text.replace(&id, &flag));
+        let _ = [&mut err.what, &mut err.why, &mut err.fix].map(|t| *t = t.replace(&id, &flag));
     }
     err
 }
