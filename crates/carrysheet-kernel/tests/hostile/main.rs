@@ -2,6 +2,25 @@
 //! bench's fuzz check: files cut short and files with bytes changed, from a
 //! fixed seed. A panic caught by the kernel comes back as `internal_error`,
 //! which these tests count as a failure (record 0003, point 1).
+//!
+//! The modules test the open path with the files and the builders of the
+//! readers that left with the cut (record 0010, decision 3): `samples`
+//! opens and damages every file in `tests/data/formats`, `built` opens the
+//! hostile shapes those readers were tested with.
+
+// The tests print what they tried with --nocapture; the workspace denies
+// println! only so that library and MCP code never write to stdout.
+#![allow(clippy::print_stdout)]
+
+#[path = "../common/mod.rs"]
+mod common;
+
+mod biff;
+mod built;
+mod cfb;
+mod samples;
+mod support;
+mod xlsb;
 
 use std::path::{Path, PathBuf};
 
