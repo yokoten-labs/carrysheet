@@ -1,0 +1,1148 @@
+diff --git a/crates/xlsx/src/csv.rs b/crates/xlsx/src/csv.rs
+index 47486bf..fd54a42 100644
+--- a/crates/xlsx/src/csv.rs
++++ b/crates/xlsx/src/csv.rs
+@@ -228,6 +228,10 @@ pub fn write_csv_limited(sheet: &Sheet, delimiter: u8, limit: usize, mut cell_te
+             } else {
+                 out.push_str(&t);
+             }
++            // Carrysheet patch: checked per field too, so one row of huge cells stops early.
++            if out.len() > limit {
++                return Err(too_large(format!("more than {} MiB (stopped at row {})", limit >> 20, row + 1)));
++            }
+         }
+         out.push_str("\r\n");
+         if out.len() > limit {
+diff --git a/crates/xlsx/src/fmla.rs b/crates/xlsx/src/fmla.rs
+index ef26387..1238291 100644
+--- a/crates/xlsx/src/fmla.rs
++++ b/crates/xlsx/src/fmla.rs
+@@ -1,8 +1,56 @@
+ //! Formula text conversion between the model (canonical text, no `=`) and files (`_xlfn.`
+ //! prefixes for newer functions).
+ 
++use std::cell::RefCell;
++use std::collections::HashMap;
++
+ use gridcraft_formula::Expr;
+-use gridcraft_model::Formula;
++use gridcraft_model::{Formula, Workbook};
++
++thread_local! {
++    /// While a workbook is written: the functions it read with a `_xlfn.` prefix that GridCraft
++    /// has no file name for, by upper-case name, with that prefix (Carrysheet patch).
++    static UNKNOWN_PREFIXED: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
++}
++
++/// Functions in formula text read from a file that carry Excel's `_xlfn.` prefix but that
++/// GridCraft would write without it: (upper-case name, prefix as written).
++pub fn unknown_prefixed(text: &str) -> Vec<(String, String)> {
++    let mut out = vec![];
++    let lower = text.to_ascii_lowercase();
++    let mut from = 0;
++    while let Some(i) = lower.get(from..).and_then(|s| s.find("_xlfn.")) {
++        let start = from + i;
++        let mut name_at = start + 6;
++        if lower.get(name_at..).is_some_and(|s| s.starts_with("_xlws.")) {
++            name_at += 6;
++        }
++        let end = text
++            .get(name_at..)
++            .map_or(name_at, |s| name_at + s.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.')).unwrap_or(s.len()));
++        let name = text.get(name_at..end).unwrap_or("").to_ascii_uppercase();
++        let called = text.get(end..).is_some_and(|s| s.trim_start().starts_with('('));
++        let builtin = matches!(name.as_str(), "ANCHORARRAY" | "SINGLE") || name.starts_with("_TRO_");
++        if called && !name.is_empty() && !builtin && crate::tables::file_function_name(&name).is_none() {
++            out.push((name, text.get(start..name_at).unwrap_or("_xlfn.").to_string()));
++        }
++        from = end.max(start + 6);
++    }
++    out
++}
++
++/// Runs `f` with the workbook's kept `_xlfn.` functions known to [`to_file`] (Carrysheet patch).
++pub fn with_kept_prefixes<T>(wb: &Workbook, f: impl FnOnce() -> T) -> T {
++    let kept: HashMap<String, String> = wb
++        .preserved
++        .as_deref()
++        .map(|p| p.elements.iter().filter_map(|e| Some((e.slot.strip_prefix("xlfn:")?.to_string(), e.xml.clone()))).collect())
++        .unwrap_or_default();
++    UNKNOWN_PREFIXED.with(|m| *m.borrow_mut() = kept);
++    let out = f();
++    UNKNOWN_PREFIXED.with(|m| m.borrow_mut().clear());
++    out
++}
+ 
+ /// Formula text for a file.
+ pub fn to_file(f: &Formula) -> String {
+@@ -74,7 +122,10 @@ fn expr_to_file(e: Expr) -> String {
+     let e = e.map(&mut |x| match x {
+         Expr::Call(name, args) => match crate::tables::file_function_name(&name) {
+             Some(n) => Expr::Call(n, args),
+-            None => Expr::Call(name, args),
++            None => match UNKNOWN_PREFIXED.with(|m| m.borrow().get(&name.to_ascii_uppercase()).cloned()) {
++                Some(prefix) => Expr::Call(format!("{prefix}{name}"), args),
++                None => Expr::Call(name, args),
++            },
+         },
+         // Files have no `#` operator: Excel writes `A1#` as `_xlfn.ANCHORARRAY(A1)`, and a spill
+         // reference that became `#REF!` (its cell was deleted) as plain `#REF!`.
+diff --git a/crates/xlsx/src/ods.rs b/crates/xlsx/src/ods.rs
+index 8415ce3..3fb9add 100644
+--- a/crates/xlsx/src/ods.rs
++++ b/crates/xlsx/src/ods.rs
+@@ -280,7 +280,7 @@ impl Import {
+                 Event::GeneralRef(r) => {
+                     let ch = match r.resolve_char_ref().map_err(xml_error)? {
+                         Some(c) => c,
+-                        None => match r.as_ref() {
++                        None => match &*r {
+                             b"amp" => '&',
+                             b"lt" => '<',
+                             b"gt" => '>',
+diff --git a/crates/xlsx/src/package.rs b/crates/xlsx/src/package.rs
+index 9a28999..93a30fb 100644
+--- a/crates/xlsx/src/package.rs
++++ b/crates/xlsx/src/package.rs
+@@ -1,8 +1,10 @@
+ //! OPC package access: reading zip parts with decompression limits, relationships and part-name
+ //! resolution; writing a zip package deterministically.
+ 
++use std::cell::Cell;
+ use std::collections::HashMap;
+-use std::io::{Cursor, Read, Write};
++use std::io::{Cursor, Read, Seek, SeekFrom, Write};
++use std::rc::Rc;
+ 
+ use crate::IoError;
+ use crate::xml::{self, El};
+@@ -14,8 +16,52 @@ pub const MAX_TOTAL: u64 = 1024 * 1024 * 1024;
+ /// Most entries accepted in the zip directory.
+ pub const MAX_ENTRIES: usize = 200_000;
+ 
++/// Packed bytes an entry may read before it has unpacked anything (Carrysheet patch).
++const FIRST_READ: u64 = 256 * 1024;
++
++/// How many packed bytes the zip reader may still read: unpacking is checked as it goes, so an
++/// entry that reads a lot and gives little (empty compressed blocks, seconds per megabyte) stops
++/// early (Carrysheet patch).
++#[derive(Default)]
++struct Allowance {
++    /// Packed bytes read so far.
++    read: Cell<u64>,
++    /// The most `read` may reach; `u64::MAX` outside part reads.
++    until: Cell<u64>,
++    /// Set when a read was refused.
++    refused: Cell<bool>,
++}
++
++/// The package bytes, read through an [`Allowance`].
++struct Counted<'a> {
++    inner: Cursor<&'a [u8]>,
++    allowance: Rc<Allowance>,
++}
++
++impl Read for Counted<'_> {
++    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
++        let a = &self.allowance;
++        let left = a.until.get().saturating_sub(a.read.get());
++        if left == 0 && !buf.is_empty() {
++            a.refused.set(true);
++            return Err(std::io::Error::other("the entry unpacks to far less than it reads"));
++        }
++        let n = buf.len().min(usize::try_from(left).unwrap_or(usize::MAX));
++        let got = self.inner.read(buf.get_mut(..n).unwrap_or_default())?;
++        a.read.set(a.read.get().saturating_add(got as u64));
++        Ok(got)
++    }
++}
++
++impl Seek for Counted<'_> {
++    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
++        self.inner.seek(pos)
++    }
++}
++
+ pub struct Package<'a> {
+-    zip: zip::ZipArchive<Cursor<&'a [u8]>>,
++    zip: zip::ZipArchive<Counted<'a>>,
++    allowance: Rc<Allowance>,
+     /// Lower-case normalized part name → zip index.
+     names: HashMap<String, usize>,
+     total: u64,
+@@ -39,17 +85,19 @@ pub fn normalize(name: &str) -> String {
+ 
+ impl<'a> Package<'a> {
+     pub fn open(bytes: &'a [u8]) -> Result<Package<'a>, IoError> {
+-        let zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| IoError::Zip(e.to_string()))?;
++        let allowance = Rc::new(Allowance { until: Cell::new(u64::MAX), ..Allowance::default() });
++        let reader = Counted { inner: Cursor::new(bytes), allowance: Rc::clone(&allowance) };
++        let zip = zip::ZipArchive::new(reader).map_err(|e| IoError::Zip(e.to_string()))?;
+         if zip.len() > MAX_ENTRIES {
+             return Err(IoError::TooLarge(format!("{} zip entries", zip.len())));
+         }
+         let mut names = HashMap::new();
+         for i in 0..zip.len() {
+-            if let Some(n) = zip.name_for_index(i) {
+-                names.entry(normalize(n)).or_insert(i);
++            if let Some(Ok(n)) = zip.name_for_index(i) {
++                names.entry(normalize(&n)).or_insert(i);
+             }
+         }
+-        Ok(Package { zip, names, total: 0 })
++        Ok(Package { zip, allowance, names, total: 0 })
+     }
+ 
+     pub fn has(&self, part: &str) -> bool {
+@@ -63,18 +111,61 @@ impl<'a> Package<'a> {
+ 
+     /// Reads a small metadata part without allowing it to expand to the general part limit.
+     pub fn read_limited(&mut self, part: &str, maximum: u64) -> Result<Option<Vec<u8>>, IoError> {
+-        let maximum = maximum.min(MAX_PART);
++        let limits = gridcraft_core::limits::get();
++        let maximum = maximum.min(MAX_PART).min(limits.entry_bytes);
+         let Some(&idx) = self.names.get(&normalize(part)) else {
+             return Ok(None);
+         };
++        let allowance = Rc::clone(&self.allowance);
+         let mut f = self.zip.by_index(idx).map_err(|e| IoError::Zip(format!("{part}: {e}")))?;
+         if f.size() > maximum {
+             return Err(IoError::TooLarge(format!("{part} expands to {} bytes", f.size())));
+         }
++        if f.compressed_size() > limits.entry_bytes {
++            return Err(IoError::TooLarge(format!("{part} is {} bytes packed", f.compressed_size())));
++        }
+         let remaining = MAX_TOTAL.saturating_sub(self.total);
+         let limit = maximum.min(remaining);
+         let mut out = Vec::with_capacity(f.size().min(16 * 1024 * 1024) as usize);
+-        (&mut f).take(limit + 1).read_to_end(&mut out).map_err(|e| IoError::Zip(format!("{part}: {e}")))?;
++        // Read in small steps; each step may read packed bytes in proportion to what came out.
++        let ratio = u64::from(limits.min_inflate_ratio);
++        let start = allowance.read.get();
++        allowance.refused.set(false);
++        let mut step = [0u8; 16 * 1024];
++        let mut out_of_time = false;
++        let result = loop {
++            // Carrysheet patch: unpacking counts against the call's time (a stream of tiny
++            // blocks passes the ratio and still unpacks slowly).
++            if !gridcraft_core::limits::check_time() {
++                out_of_time = true;
++                break Ok(());
++            }
++            let allowed = FIRST_READ.saturating_add((out.len() as u64).saturating_mul(ratio));
++            allowance.until.set(if ratio == u64::from(u32::MAX) { u64::MAX } else { start.saturating_add(allowed) });
++            match f.read(&mut step) {
++                Ok(0) => break Ok(()),
++                Ok(n) => {
++                    out.extend_from_slice(step.get(..n).unwrap_or_default());
++                    if out.len() as u64 > limit {
++                        break Ok(());
++                    }
++                }
++                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
++                Err(e) => break Err(e),
++            }
++        };
++        allowance.until.set(u64::MAX);
++        if out_of_time {
++            return Err(IoError::TooLarge(format!("the time limit ran out while unpacking {part}")));
++        }
++        if allowance.refused.get() {
++            return Err(IoError::TooLarge(format!(
++                "{part} reads {} packed bytes and gives only {} (at least 1 byte for every {ratio} is expected)",
++                allowance.read.get().saturating_sub(start),
++                out.len()
++            )));
++        }
++        result.map_err(|e| IoError::Zip(format!("{part}: {e}")))?;
+         if out.len() as u64 > limit {
+             return Err(IoError::TooLarge(if remaining < maximum {
+                 "package expands to more than 1 GB".into()
+diff --git a/crates/xlsx/src/passthrough.rs b/crates/xlsx/src/passthrough.rs
+index dd881c1..7ed2124 100644
+--- a/crates/xlsx/src/passthrough.rs
++++ b/crates/xlsx/src/passthrough.rs
+@@ -1233,22 +1233,29 @@ fn rebase(target: &str, from: &Folder, to: &Folder) -> Option<String> {
+     // Each name as the file system knows it, and as it is written in a target. Names taken from
+     // the original target keep their spelling.
+     let mut path: Vec<(String, String)> = from.names.iter().map(|n| (n.clone(), encode_name(n))).collect();
++    // How many names at the start of `path` come from the source folder, not from the target.
++    let mut from_source = path.len();
+     for seg in target.split(['/', '\\']) {
+         match seg {
+             "" | "." => {}
+             ".." => {
+                 path.pop()?;
++                from_source = from_source.min(path.len());
+             }
+             _ => path.push((decode_name(seg), seg.to_string())),
+         }
+     }
+     let folders = path.len().checked_sub(1)?;
++    // Carrysheet patch: a saved file never names the folders it was read from (a home folder, a
++    // user name). Another drive would need an absolute path, and some destinations would need
++    // names from the source folder's path: then the link is kept as it was written.
+     if !from.root.eq_ignore_ascii_case(&to.root) {
+-        let sep = if from.root.contains('\\') { "\\" } else { "/" };
+-        let names: Vec<&str> = path.iter().map(|(name, _)| name.as_str()).collect();
+-        return Some(format!("file:///{}{}", from.root, names.join(sep)));
++        return None;
+     }
+     let common = to.names.iter().zip(&path).take(folders).take_while(|(a, (b, _))| *a == b).count();
++    if common < from_source {
++        return None;
++    }
+     let up = "../".repeat(to.names.len().saturating_sub(common));
+     let down: Vec<&str> = path.iter().skip(common).map(|(_, written)| written.as_str()).collect();
+     Some(format!("{up}{}", down.join("/")))
+diff --git a/crates/xlsx/src/read.rs b/crates/xlsx/src/read.rs
+index 1a47908..e683f12 100644
+--- a/crates/xlsx/src/read.rs
++++ b/crates/xlsx/src/read.rs
+@@ -30,6 +30,9 @@ pub struct Ctx<'a> {
+     pub cell_pictures: Vec<Option<Arc<CellPicture>>>,
+     /// x14 conditional-format ids of the current sheet's data bars, with the index of the rule in `cond_formats`.
+     pub cf_ext_ids: Vec<(String, usize)>,
++    /// Functions read with Excel's `_xlfn.` prefix that GridCraft has no file name for, upper
++    /// case, with the prefix as written (Carrysheet patch; see `fmla::unknown_prefixed`).
++    pub xlfn_unknown: std::collections::BTreeMap<String, String>,
+ }
+ 
+ impl Ctx<'_> {
+@@ -82,6 +85,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
+         num_fmts: Default::default(),
+         cell_pictures: vec![],
+         cf_ext_ids: vec![],
++        xlfn_unknown: Default::default(),
+     };
+     let root_rels = cx.pkg.rels("")?;
+     let wb_part = find_rel(&root_rels, "officeDocument").map(|r| r.target.clone()).unwrap_or_else(|| "xl/workbook.xml".into());
+@@ -120,7 +124,20 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
+         checkboxes = crate::feature_bags::checkbox_complements(&x);
+     }
+     if let Some(r) = find_rel(&wb_rels, "styles").cloned() {
+-        if let Some(x) = cx.optional_xml(&r.target)? {
++        // Carrysheet patch: damaged styles are an error (every cell's format would be lost), and
++        // their lists are bounded.
++        let styles = cx.pkg.read_xml(&r.target)?;
++        if styles.is_none() {
++            cx.warn(format!("missing part {}", r.target));
++        }
++        if let Some(x) = styles {
++            let max = gridcraft_core::limits::get().styles;
++            for list in ["cellXfs", "cellStyleXfs", "fonts", "fills", "borders", "numFmts", "dxfs", "cellStyles"] {
++                let n = x.child(list).map_or(0, |l| l.children.len());
++                if n > max {
++                    return Err(IoError::TooLarge(format!("{n} entries in the styles list <{list}>, more than {max}")));
++                }
++            }
+             let StylesIn { xfs, dxfs, palette, named, num_fmts } = read_styles(&x, &checkboxes);
+             cx.num_fmts = num_fmts;
+             // Cell format 0 is the Normal style: its font is what every unformatted cell shows.
+@@ -140,30 +157,53 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
+     {
+         wb.theme = crate::theme::read_theme(&x);
+     }
+-    // Shared strings, streamed item by item.
++    // Shared strings, streamed item by item. Carrysheet patch: rich text and phonetic runs are
++    // kept as written, by plain text (`write` puts them back while the text is unchanged).
++    let mut kept_rich = vec![];
+     if let Some(r) = find_rel(&wb_rels, "sharedStrings").cloned() {
+         match cx.pkg.read(&r.target)? {
+             Some(b) => {
+-                let mut sst = Vec::new();
+-                let res = xml::parse_streaming(&b, &["si"], &mut |si| {
+-                    sst.push(Arc::from(xml::rich_text(&si)));
++                // Carrysheet patch: damaged shared strings are an error (cells would lose their
++                // text), their number is bounded, and empty strings share one allocation.
++                let max = gridcraft_core::limits::get().shared_strings;
++                let empty: Arc<str> = Arc::from("");
++                let mut sst: Vec<Arc<str>> = Vec::new();
++                xml::parse_streaming(&b, &["si"], &mut |si| {
++                    if sst.len() >= max {
++                        return Err(IoError::TooLarge(format!("more than {max} shared strings")));
++                    }
++                    let text = xml::rich_text(&si);
++                    if si.children.iter().any(|k| k.name != "t") {
++                        let mut x = String::new();
++                        for k in &si.children {
++                            xml::write_el(k, &mut x);
++                        }
++                        kept_rich.push(gridcraft_model::PreservedXml { slot: "si".into(), xml: format!("{text}\0{x}") });
++                    }
++                    sst.push(if text.is_empty() { Arc::clone(&empty) } else { Arc::from(text) });
+                     Ok(())
+-                });
+-                if let Err(e) = res {
+-                    cx.warn(format!("shared strings are damaged ({e}); kept {} strings", sst.len()));
+-                }
++                })?;
+                 cx.sst = sst;
+             }
+             None => cx.warn(format!("missing part {}", r.target)),
+         }
+     }
+ 
++    // Carrysheet patch: each person's userId and providerId are kept, by display name.
++    let mut kept_persons = vec![];
+     if let Some(r) = find_rel(&wb_rels, "person").cloned()
+         && let Ok(Some(x)) = cx.pkg.read_xml(&r.target)
+     {
+         for p in x.kids("person") {
+             if let (Some(id), Some(n)) = (p.attr("id"), p.attr("displayName")) {
+                 cx.persons.insert(id.to_string(), n.to_string());
++                let mut attrs = String::new();
++                for k in ["userId", "providerId"] {
++                    if let Some(v) = p.attr(k) {
++                        let _ = std::fmt::Write::write_fmt(&mut attrs, format_args!(" {k}=\"{}\"", xml::esc_attr(v)));
++                    }
++                }
++                kept_persons.push(gridcraft_model::PreservedXml { slot: format!("person:{n}"), xml: attrs });
+             }
+         }
+     }
+@@ -219,20 +259,22 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
+             continue;
+         }
+         let name = unique_name(&wb, &name, i);
+-        let mut sheet = match crate::sheet_read::read_sheet(&mut cx, &rel.target, &name) {
+-            Ok(s) => s,
+-            Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
+-            Err(e) => {
+-                cx.warn(format!("sheet \"{name}\" could not be read: {e}"));
+-                Sheet::new(name.clone())
+-            }
+-        };
++        // Carrysheet patch: a sheet that can't be read is an error, never an empty sheet.
++        let mut sheet = crate::sheet_read::read_sheet(&mut cx, &rel.target, &name)?;
+         match crate::pivot::read_pivots(&mut cx, &mut pivot_caches, &rel.target, &name) {
+             Ok(p) => sheet.pivots = p,
+             Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
+             Err(e) => cx.warn(format!("PivotTables on sheet \"{name}\" could not be read: {e}")),
+         }
+-        sheet.preserved = kept.sheet(&mut cx, &rel.target, &name);
++        // Carrysheet patch: elements kept by `read_sheet` join the kept parts.
++        sheet.preserved = match (sheet.preserved.take(), kept.sheet(&mut cx, &rel.target, &name)) {
++            (Some(mine), Some(theirs)) => {
++                let mut p = Arc::unwrap_or_clone(theirs);
++                p.elements.extend(Arc::unwrap_or_clone(mine).elements);
++                Some(Arc::new(p))
++            }
++            (mine, theirs) => theirs.or(mine),
++        };
+         sheet.visibility = match se.attr("state") {
+             Some("hidden") => Visibility::Hidden,
+             Some("veryHidden") => Visibility::VeryHidden,
+@@ -340,6 +382,32 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
+         }
+     }
+     wb.preserved = kept.workbook(&mut cx, &wb_part, &wb_xml, &file_to_model);
++    // Carrysheet patch: workbook elements and attributes GridCraft does not model, kept as read:
++    // `<fileSharing>` and the `<workbookPr>` attributes other than date1904 (codeName…).
++    let mut mine = kept_persons;
++    for (name, prefix) in std::mem::take(&mut cx.xlfn_unknown) {
++        mine.push(gridcraft_model::PreservedXml { slot: format!("xlfn:{name}"), xml: prefix });
++    }
++    mine.extend(kept_rich);
++    if let Some(e) = wb_xml.child("fileSharing") {
++        let mut x = String::new();
++        xml::write_el(e, &mut x);
++        mine.push(gridcraft_model::PreservedXml { slot: "fileSharing".into(), xml: x });
++    }
++    if let Some(e) = wb_xml.child("workbookPr") {
++        let mut x = String::new();
++        for (k, v) in e.attrs.iter().filter(|(k, _)| k != "date1904") {
++            let _ = std::fmt::Write::write_fmt(&mut x, format_args!(" {k}=\"{}\"", xml::esc_attr(v)));
++        }
++        if !x.is_empty() {
++            mine.push(gridcraft_model::PreservedXml { slot: "workbookPr".into(), xml: x });
++        }
++    }
++    if !mine.is_empty() {
++        let mut p = wb.preserved.take().map(Arc::unwrap_or_clone).unwrap_or_default();
++        p.elements.extend(mine);
++        wb.preserved = Some(Arc::new(p));
++    }
+     // Calls of LAMBDA names are spelled like the names (the parser upper-cases them).
+     wb.apply_name_call_case();
+     wb.styles = cx.styles;
+diff --git a/crates/xlsx/src/sheet_read.rs b/crates/xlsx/src/sheet_read.rs
+index 0194d22..fb03d2a 100644
+--- a/crates/xlsx/src/sheet_read.rs
++++ b/crates/xlsx/src/sheet_read.rs
+@@ -8,8 +8,8 @@ use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRe
+ use gridcraft_formula::Expr;
+ use gridcraft_model::{
+     AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Comment, CondFormat, EditRange, ErrorStyle, FilterCriterion, Formula, Hyperlink, LineInfo,
+-    Orientation, PasswordHash, Sheet, SheetProtection, Sparkline, SparklineKind, Table, TableColumn, TotalsFn, Validation, ValidationKind,
+-    XmlColumnPr,
++    Orientation, PasswordHash, Preserved, PreservedXml, Sheet, SheetProtection, Sparkline, SparklineKind, Table, TableColumn, TotalsFn, Validation,
++    ValidationKind, XmlColumnPr,
+ };
+ 
+ use crate::IoError;
+@@ -35,8 +35,14 @@ struct RowState {
+     dynamic: Vec<RangeRef>,
+     dropped: u64,
+     rows: u64,
++    /// What-if data table formulas (`<f t="dataTable">`) by anchor, as written (Carrysheet patch).
++    data_tables: Vec<(CellRef, String)>,
+ }
+ 
++/// Sheet elements kept as written (Carrysheet patch): GridCraft does not model them, and saving
++/// must not drop them. Written back in schema order by `sheet_write`.
++pub const KEPT_SHEET_ELEMENTS: &[&str] = &["scenarios", "phoneticPr", "ignoredErrors"];
++
+ const MAX_HYPERLINK_CELLS: u64 = 10_000;
+ 
+ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoError> {
+@@ -48,13 +54,8 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
+         read_row(cx, &mut sheet, &mut st, &row);
+         Ok(())
+     });
+-    let root = match res {
+-        Ok(r) => r,
+-        Err(e) => {
+-            cx.warn(format!("sheet \"{name}\" is damaged ({e}); kept {} rows", st.rows));
+-            El::default()
+-        }
+-    };
++    // Carrysheet patch: a damaged sheet is an error, not a sheet with the rows read so far.
++    let root = res?;
+     if st.dropped > 0 {
+         cx.warn(format!("sheet \"{name}\": {} cells or rows outside the 1,048,576 × 16,384 grid were dropped", st.dropped));
+     }
+@@ -62,9 +63,24 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
+ 
+     let mut fit_to_page = false;
+     cx.cf_ext_ids.clear();
++    let mut kept: Vec<PreservedXml> =
++        std::mem::take(&mut st.data_tables).into_iter().map(|(c, f)| PreservedXml { slot: format!("dataTable:{}", c.a1()), xml: f }).collect();
+     for e in &root.children {
++        if KEPT_SHEET_ELEMENTS.contains(&e.name.as_str()) {
++            let mut x = String::new();
++            xml::write_el(e, &mut x);
++            kept.push(PreservedXml { slot: e.name.clone(), xml: x });
++        }
+         match e.name.as_str() {
+             "sheetPr" => {
++                // codeName and the other attributes GridCraft does not model (Carrysheet patch).
++                let mut attrs = String::new();
++                for (k, v) in &e.attrs {
++                    let _ = std::fmt::Write::write_fmt(&mut attrs, format_args!(" {k}=\"{}\"", xml::esc_attr(v)));
++                }
++                if !attrs.is_empty() {
++                    kept.push(PreservedXml { slot: "sheetPr".into(), xml: attrs });
++                }
+                 if let Some(t) = e.child("tabColor") {
+                     sheet.tab_color = Some(read_color(t, &cx.palette));
+                 }
+@@ -173,6 +189,9 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
+                     delete_rows: !e.flag("deleteRows", true),
+                     sort: !e.flag("sort", true),
+                     autofilter: !e.flag("autoFilter", true),
++                    // Carrysheet patch: kept as read (both default to 0).
++                    objects_editable: !e.flag("objects", false),
++                    scenarios_editable: !e.flag("scenarios", false),
+                 });
+             }
+             "drawing" => {
+@@ -202,9 +221,12 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
+     // Comments are related to the sheet without an element in it.
+     for rel in rels.iter().filter(|r| r.kind == "comments") {
+         if let Some(x) = cx.optional_xml(&rel.target)? {
+-            read_comments(&x, &mut sheet);
++            read_comments(&x, &mut sheet, &mut kept);
+         }
+     }
++    if !kept.is_empty() {
++        sheet.preserved = Some(Arc::new(Preserved { elements: kept, ..Preserved::default() }));
++    }
+     for rel in rels.iter().filter(|r| r.kind == "threadedComment") {
+         if let Some(x) = cx.optional_xml(&rel.target)? {
+             read_threaded(cx, &x, &mut sheet);
+@@ -301,7 +323,27 @@ fn read_views(e: &El, sheet: &mut Sheet) {
+ }
+ 
+ fn read_cols(cx: &Ctx<'_>, e: &El, sheet: &mut Sheet) {
+-    for c in e.kids("col") {
++    // Carrysheet patch: a later `<col>` wins over an earlier one for the same columns, so they
++    // are applied last to first, and each column is set once: the work is the number of entries
++    // plus the width of the grid, however much the ranges overlap (100,000 entries of A:XFD
++    // took minutes). `next[c]` is the first column at or after `c` that is not set yet.
++    let mut next: Vec<u32> = (0..=MAX_COLS).collect();
++    fn find(next: &mut [u32], c: u32) -> u32 {
++        let mut root = c;
++        while let Some(&n) = next.get(root as usize).filter(|n| **n != root) {
++            root = n;
++        }
++        let mut at = c;
++        while let Some(n) = next.get(at as usize).copied().filter(|n| *n != root) {
++            if let Some(slot) = next.get_mut(at as usize) {
++                *slot = root;
++            }
++            at = n;
++        }
++        root
++    }
++    let entries: Vec<&El> = e.kids("col").collect();
++    for c in entries.into_iter().rev() {
+         let (Some(min), Some(max)) = (c.attr_u32("min"), c.attr_u32("max")) else { continue };
+         if min == 0 || min > MAX_COLS || max < min {
+             continue;
+@@ -328,8 +370,13 @@ fn read_cols(cx: &Ctx<'_>, e: &El, sheet: &mut Sheet) {
+         if info == LineInfo::default() || (info.size == Some(sheet.default_col_width) && LineInfo { size: None, ..info } == LineInfo::default()) {
+             continue;
+         }
+-        for col in (min - 1)..max {
++        let mut col = find(&mut next, min - 1);
++        while col < max {
+             sheet.cols.insert(col, info);
++            if let Some(slot) = next.get_mut(col as usize) {
++                *slot = col + 1;
++            }
++            col = find(&mut next, col + 1);
+         }
+     }
+ }
+@@ -456,6 +503,15 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
+ }
+ 
+ fn read_formula(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, dynamic: bool) -> Option<Formula> {
++    // Carrysheet patch: remember newer functions GridCraft does not know, so the prefix is
++    // written back and the saved value is kept.
++    if f.text.len() >= 6 && f.text.as_bytes().windows(6).any(|w| w.eq_ignore_ascii_case(b"_xlfn.")) {
++        for (name, prefix) in crate::fmla::unknown_prefixed(&f.text) {
++            if cx.xlfn_unknown.len() < 1_000 {
++                cx.xlfn_unknown.entry(name).or_insert(prefix);
++            }
++        }
++    }
+     let model = from_file(f.text.trim());
+     let text = model.as_str();
+     match f.attr("t").unwrap_or("normal") {
+@@ -495,7 +551,11 @@ fn read_formula(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, dynam
+             Some(fm)
+         }
+         "dataTable" => {
+-            cx.warn("what-if data tables are not supported; kept their values");
++            // Kept as written and saved again on the same cell (Carrysheet patch); not calculated.
++            let mut x = String::new();
++            xml::write_el(f, &mut x);
++            st.data_tables.push((pos, x));
++            cx.warn("what-if data tables are not calculated; their values and formulas are kept as they are");
+             None
+         }
+         _ => {
+@@ -734,7 +794,7 @@ fn read_hyperlinks(cx: &mut Ctx<'_>, name: &str, e: &El, rels: &[Rel], sheet: &m
+         if target.is_empty() {
+             continue;
+         }
+-        let link = Hyperlink { target, tooltip: h.attr("tooltip").map(str::to_string), external };
++        let link = Hyperlink { target, tooltip: h.attr("tooltip").map(str::to_string), external, display: h.attr("display").map(str::to_string) };
+         for c in range.iter() {
+             if cells >= MAX_HYPERLINK_CELLS {
+                 cx.warn(format!("sheet \"{name}\": hyperlinks past the first {MAX_HYPERLINK_CELLS} cells were dropped"));
+@@ -869,7 +929,7 @@ pub fn read_table(cx: &mut Ctx<'_>, x: &El) -> Option<Table> {
+     })
+ }
+ 
+-fn read_comments(x: &El, sheet: &mut Sheet) {
++fn read_comments(x: &El, sheet: &mut Sheet, kept: &mut Vec<PreservedXml>) {
+     let authors: Vec<String> = x.child("authors").map(|a| a.kids("author").map(|a| a.text.clone()).collect()).unwrap_or_default();
+     let Some(list) = x.child("commentList") else { return };
+     for c in list.kids("comment") {
+@@ -882,6 +942,17 @@ fn read_comments(x: &El, sheet: &mut Sheet) {
+         {
+             text = rest.strip_prefix('\n').unwrap_or(rest).to_string();
+         }
++        // Carrysheet patch: formatted text (runs with properties) is kept as written, with the
++        // text it reads as; `sheet_write` puts it back while the note's text is unchanged.
++        if let Some(t) = c.child("text")
++            && t.children.iter().any(|k| k.name != "t" && (k.name != "r" || k.child("rPr").is_some()))
++        {
++            let mut x = String::new();
++            for k in &t.children {
++                xml::write_el(k, &mut x);
++            }
++            kept.push(PreservedXml { slot: format!("note:{}", cell.a1()), xml: format!("{text}\0{x}") });
++        }
+         sheet.comments.insert(cell, Comment { author, text, replies: vec![], threaded: false, resolved: false, visible: false, dates: vec![] });
+     }
+ }
+diff --git a/crates/xlsx/src/sheet_write.rs b/crates/xlsx/src/sheet_write.rs
+index 78e1afa..1dfe1cd 100644
+--- a/crates/xlsx/src/sheet_write.rs
++++ b/crates/xlsx/src/sheet_write.rs
+@@ -1,6 +1,6 @@
+ //! Writing worksheet parts and the parts they own (tables, comments, drawings, charts).
+ 
+-use std::collections::{BTreeMap, BTreeSet, HashSet};
++use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+ use std::fmt::Write as _;
+ 
+ use gridcraft_core::{CellError, CellRef, RangeRef, Value};
+@@ -114,8 +114,18 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
+     let mut s = format!("{XML_DECL}<worksheet xmlns=\"{NS_MAIN}\" xmlns:r=\"{NS_REL}\">");
+     // sheetPr
+     let fit = sheet.print.fit_to.is_some();
+-    if sheet.tab_color.is_some() || fit {
+-        s.push_str("<sheetPr>");
++    // Carrysheet patch: elements and attributes kept as read (`sheet_read::KEPT_SHEET_ELEMENTS`).
++    let kept_xml = |slot: &str| -> String {
++        sheet.preserved.as_deref().map(|p| p.elements.iter().filter(|e| e.slot == slot).map(|e| e.xml.as_str()).collect()).unwrap_or_default()
++    };
++    let data_tables: HashMap<String, &str> = sheet
++        .preserved
++        .as_deref()
++        .map(|p| p.elements.iter().filter_map(|e| Some((e.slot.strip_prefix("dataTable:")?.to_string(), e.xml.as_str()))).collect())
++        .unwrap_or_default();
++    let pr_attrs = kept_xml("sheetPr");
++    if sheet.tab_color.is_some() || fit || !pr_attrs.is_empty() {
++        let _ = write!(s, "<sheetPr{pr_attrs}>");
+         if let Some(c) = &sheet.tab_color {
+             let _ = write!(s, "<tabColor {}/>", color_attrs(c));
+         }
+@@ -296,6 +306,11 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
+         }
+         s.push('>');
+         for c in cells {
++            // Carrysheet patch: a sheet's XML is bounded like a part read back.
++            if s.len() as u64 > crate::package::MAX_PART {
++                out.too_large = Some(format!("sheet \"{}\" would be more than {} MB of XML", sheet.name, crate::package::MAX_PART >> 20));
++                return (String::new(), rels);
++            }
+             let cell = sheet.cells.get(*c);
+             let ov = overrides.get(c);
+             let ex = extra.get(c);
+@@ -303,7 +318,8 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
+                 let f = cell?.formula.as_ref()?;
+                 (f.array.is_none() && crate::array_formula::needs_array(wb, si, *c, f)).then_some(RangeRef::cell(*c))
+             });
+-            write_cell(&mut s, *c, cell, sheet.cell_pictures.get(c), ov, ex, array.as_ref(), &sid, out);
++            let data_table = if data_tables.is_empty() { None } else { data_tables.get(&c.a1()).copied() };
++            write_cell(&mut s, *c, cell, sheet.cell_pictures.get(c), ov, ex, array.as_ref(), data_table, &sid, out);
+         }
+         s.push_str("</row>");
+     }
+@@ -311,7 +327,14 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
+ 
+     // sheetProtection
+     if let Some(p) = &sheet.protection {
+-        s.push_str("<sheetProtection sheet=\"1\" objects=\"1\" scenarios=\"1\"");
++        s.push_str("<sheetProtection sheet=\"1\"");
++        // Carrysheet patch: `objects` and `scenarios` as read (default 0).
++        if !p.objects_editable {
++            s.push_str(" objects=\"1\"");
++        }
++        if !p.scenarios_editable {
++            s.push_str(" scenarios=\"1\"");
++        }
+         for (attr, allowed) in [
+             ("formatCells", p.format_cells),
+             ("formatColumns", p.format_columns),
+@@ -339,6 +362,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
+         s.push_str("/>");
+     }
+     s.push_str(&protected_ranges_xml(sheet));
++    s.push_str(&kept_xml("scenarios"));
+     // autoFilter (a sheet filter overlapping a table would be invalid).
+     if let Some(af) = &sheet.autofilter
+         && !sheet.tables.iter().any(|t| t.range.intersects(&af.range))
+@@ -353,6 +377,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
+         }
+         s.push_str("</mergeCells>");
+     }
++    s.push_str(&kept_xml("phoneticPr"));
+     // Conditional formats, priorities renumbered 1..n in priority order.
+     let mut order: Vec<usize> = (0..sheet.cond_formats.len()).collect();
+     order.sort_by_key(|&i| sheet.cond_formats.get(i).map(|c| c.priority).unwrap_or(0));
+@@ -406,8 +431,12 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
+                 if let Some(l) = loc {
+                     let _ = write!(s, " location=\"{}\"", esc_attr(l));
+                 }
++                if let Some(d) = &h.display {
++                    let _ = write!(s, " display=\"{}\"", esc_attr(d));
++                }
+             } else {
+-                let _ = write!(s, " location=\"{}\" display=\"{}\"", esc_attr(t.trim_start_matches('#')), esc_attr(t.trim_start_matches('#')));
++                let loc = t.trim_start_matches('#');
++                let _ = write!(s, " location=\"{}\" display=\"{}\"", esc_attr(loc), esc_attr(h.display.as_deref().unwrap_or(loc)));
+             }
+             if let Some(tt) = &h.tooltip {
+                 let _ = write!(s, " tooltip=\"{}\"", esc_attr(tt));
+@@ -487,6 +516,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
+             let _ = write!(s, "</{tag}>");
+         }
+     }
++    s.push_str(&kept_xml("ignoredErrors"));
+ 
+     // Drawing: pictures, charts, shapes.
+     if !sheet.images.is_empty() || !sheet.charts.is_empty() || !sheet.shapes.is_empty() {
+@@ -637,6 +667,7 @@ fn write_cell(
+     ov: Option<&String>,
+     extra: Option<&Value>,
+     dynamic: Option<&RangeRef>,
++    data_table: Option<&str>,
+     sid: &dyn Fn(gridcraft_model::StyleId) -> u32,
+     out: &mut Out,
+ ) {
+@@ -672,7 +703,7 @@ fn write_cell(
+         s.push_str(" cm=\"1\"");
+         out.dynamic_arrays = true;
+     }
+-    if let Some(f) = formula {
++    if formula.is_some() || data_table.is_some() {
+         let t = match &value {
+             Value::Text(_) => " t=\"str\"",
+             Value::Bool(_) => " t=\"b\"",
+@@ -681,17 +712,23 @@ fn write_cell(
+         };
+         s.push_str(t);
+         s.push('>');
+-        let text = esc(&crate::fmla::to_file(f));
+-        match (f.array, dynamic) {
+-            (Some(r), _) => {
+-                let _ = write!(s, "<f t=\"array\" ref=\"{}\">{text}</f>", r.a1());
+-            }
+-            (None, Some(r)) => {
+-                let _ = write!(s, "<f t=\"array\" ref=\"{}\">{text}</f>", r.a1());
+-            }
+-            _ => {
+-                let _ = write!(s, "<f>{text}</f>");
++        match formula {
++            Some(f) => {
++                let text = esc(&crate::fmla::to_file(f));
++                match (f.array, dynamic) {
++                    (Some(r), _) => {
++                        let _ = write!(s, "<f t=\"array\" ref=\"{}\">{text}</f>", r.a1());
++                    }
++                    (None, Some(r)) => {
++                        let _ = write!(s, "<f t=\"array\" ref=\"{}\">{text}</f>", r.a1());
++                    }
++                    _ => {
++                        let _ = write!(s, "<f>{text}</f>");
++                    }
++                }
+             }
++            // A what-if data table's formula, kept as read (Carrysheet patch).
++            None => s.push_str(data_table.unwrap_or_default()),
+         }
+         match &value {
+             Value::Number(n) => {
+@@ -717,7 +754,7 @@ fn write_cell(
+             let _ = write!(s, "><v>{}</v></c>", num(*n));
+         }
+         Value::Text(t) => {
+-            let i = out.sst.index(t);
++            let i = out.sst.index_arc(t);
+             let _ = write!(s, " t=\"s\"><v>{i}</v></c>");
+         }
+         Value::Bool(b) => {
+@@ -1162,7 +1199,25 @@ fn comments_xml(sheet: &Sheet, ids: &BTreeMap<CellRef, Vec<String>>) -> String {
+             Some(id) => format!(" shapeId=\"0\" xr:uid=\"{id}\""),
+             None => String::new(),
+         };
+-        let _ = write!(s, "<comment ref=\"{}\" authorId=\"{aid}\"{link}><text><r>{}</r></text></comment>", cell.a1(), crate::xml::t_el(&text));
++        // Carrysheet patch: a note's formatted text kept from the file, while its text is the same.
++        let slot = format!("note:{}", cell.a1());
++        let rich = sheet
++            .preserved
++            .as_deref()
++            .filter(|_| link.is_empty() && c.replies.is_empty())
++            .and_then(|p| p.elements.iter().find(|e| e.slot == slot))
++            .and_then(|e| e.xml.rsplit_once('\0'))
++            .filter(|(plain, _)| *plain == c.text)
++            .map(|(_, x)| x);
++        match rich {
++            Some(x) => {
++                let _ = write!(s, "<comment ref=\"{}\" authorId=\"{aid}\"{link}><text>{x}</text></comment>", cell.a1());
++            }
++            None => {
++                let _ =
++                    write!(s, "<comment ref=\"{}\" authorId=\"{aid}\"{link}><text><r>{}</r></text></comment>", cell.a1(), crate::xml::t_el(&text));
++            }
++        }
+     }
+     s.push_str("</commentList></comments>");
+     s
+diff --git a/crates/xlsx/src/tests/roundtrip.rs b/crates/xlsx/src/tests/roundtrip.rs
+index 9018029..9946a8c 100644
+--- a/crates/xlsx/src/tests/roundtrip.rs
++++ b/crates/xlsx/src/tests/roundtrip.rs
+@@ -204,9 +204,10 @@ fn sample() -> Workbook {
+             security_descriptor: None,
+         },
+     ];
+-    s.hyperlinks.insert(at("A2"), Hyperlink { target: "https://example.com/?a=1&b=2".into(), tooltip: Some("go".into()), external: true });
+-    s.hyperlinks.insert(at("A3"), Hyperlink { target: "'Data & Stuff'!B2".into(), tooltip: None, external: false });
+-    s.hyperlinks.insert(at("A4"), Hyperlink { target: "mailto:me@example.com".into(), tooltip: None, external: true });
++    s.hyperlinks
++        .insert(at("A2"), Hyperlink { target: "https://example.com/?a=1&b=2".into(), tooltip: Some("go".into()), external: true, display: None });
++    s.hyperlinks.insert(at("A3"), Hyperlink { target: "'Data & Stuff'!B2".into(), tooltip: None, external: false, display: None });
++    s.hyperlinks.insert(at("A4"), Hyperlink { target: "mailto:me@example.com".into(), tooltip: None, external: true, display: None });
+     s.comments.insert(
+         at("B2"),
+         Comment {
+diff --git a/crates/xlsx/src/write.rs b/crates/xlsx/src/write.rs
+index 06761f0..02cbee6 100644
+--- a/crates/xlsx/src/write.rs
++++ b/crates/xlsx/src/write.rs
+@@ -88,10 +88,26 @@ impl Rels {
+ pub struct Sst {
+     list: Vec<String>,
+     map: HashMap<String, u32>,
++    /// Indexes by the address of a cell's shared text, kept alive here so the address stays its
++    /// own (Carrysheet patch: a 20 MB text in 100,000 cells was hashed 100,000 times).
++    by_ptr: HashMap<usize, (std::sync::Arc<str>, u32)>,
+     pub count: u64,
+ }
+ 
+ impl Sst {
++    /// [`Sst::index`] for a cell's shared text: the text is hashed once however many cells
++    /// share it.
++    pub fn index_arc(&mut self, s: &std::sync::Arc<str>) -> u32 {
++        let key = std::sync::Arc::as_ptr(s).cast::<u8>() as usize;
++        if let Some((_, i)) = self.by_ptr.get(&key) {
++            self.count += 1;
++            return *i;
++        }
++        let i = self.index(s);
++        self.by_ptr.insert(key, (std::sync::Arc::clone(s), i));
++        i
++    }
++
+     pub fn index(&mut self, s: &str) -> u32 {
+         self.count += 1;
+         if let Some(&i) = self.map.get(s) {
+@@ -126,6 +142,8 @@ pub struct Out {
+     pub cell_pictures: crate::richdata::PicturesOut,
+     /// Kept (pass-through) parts written so far.
+     pub kept: crate::passthrough::KeptOut,
++    /// Set when a part grew past [`crate::package::MAX_PART`] (Carrysheet patch).
++    pub too_large: Option<String>,
+ }
+ 
+ impl Out {
+@@ -186,6 +204,11 @@ fn check_sheet_names(wb: &Workbook) -> Result<(), IoError> {
+ }
+ 
+ pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
++    // Carrysheet patch: newer functions read with `_xlfn.` keep the prefix.
++    crate::fmla::with_kept_prefixes(wb, || write_xlsx_inner(wb, kind))
++}
++
++fn write_xlsx_inner(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
+     if wb.sheets.is_empty() {
+         return Err(IoError::Format("a workbook needs at least one sheet".into()));
+     }
+@@ -211,6 +234,7 @@ pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
+         needs_calc: false,
+         cell_pictures: Default::default(),
+         kept: Default::default(),
++        too_large: None,
+     };
+     out.default_type("rels", "application/vnd.openxmlformats-package.relationships+xml");
+     out.default_type("xml", "application/xml");
+@@ -234,6 +258,9 @@ pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
+         sheets_xml.push_str(&before);
+         sheet_id = next;
+         let (xml, mut rels) = crate::sheet_write::write_sheet(wb, i, i == active, &mut out);
++        if let Some(why) = out.too_large.take() {
++            return Err(IoError::TooLarge(why));
++        }
+         pivots.add_sheet(wb, i, &mut out, &mut rels);
+         let name = format!("xl/worksheets/sheet{}.xml", i + 1);
+         out.part(&name, Some(CT_WORKSHEET), xml.into_bytes());
+@@ -315,7 +342,14 @@ pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
+ 
+     let mut w = format!("{XML_DECL}<workbook xmlns=\"{NS_MAIN}\" xmlns:r=\"{NS_REL}\">");
+     w.push_str(&crate::passthrough::workbook_elements(wb, "fileVersion"));
+-    w.push_str(if wb.date_system == gridcraft_core::DateSystem::D1904 { "<workbookPr date1904=\"1\"/>" } else { "<workbookPr/>" });
++    // Carrysheet patch: <fileSharing> and the other <workbookPr> attributes kept as read.
++    w.push_str(&crate::passthrough::workbook_elements(wb, "fileSharing"));
++    let _ = write!(
++        w,
++        "<workbookPr{}{}/>",
++        if wb.date_system == gridcraft_core::DateSystem::D1904 { " date1904=\"1\"" } else { "" },
++        crate::passthrough::workbook_elements(wb, "workbookPr")
++    );
+     if wb.protected_structure {
+         let pw = wb.structure_password.as_ref().map(|h| crate::sheet_write::password_attrs(h, "workbook")).unwrap_or_default();
+         let _ = write!(w, "<workbookProtection{pw} lockStructure=\"1\"/>");
+@@ -374,8 +408,21 @@ pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
+     );
+     wb_rels.add("theme", "theme/theme1.xml");
+     let mut sst = format!("{XML_DECL}<sst xmlns=\"{NS_MAIN}\" count=\"{}\" uniqueCount=\"{}\">", out.sst.count, out.sst.list.len());
++    // Carrysheet patch: rich text kept from the file, while the text is the same.
++    let rich: HashMap<&str, &str> = wb
++        .preserved
++        .as_deref()
++        .map(|p| p.elements.iter().filter(|e| e.slot == "si").filter_map(|e| e.xml.rsplit_once('\0')).collect())
++        .unwrap_or_default();
+     for t in &out.sst.list {
+-        let _ = write!(sst, "<si>{}</si>", crate::xml::t_el(t));
++        match rich.get(t.as_str()) {
++            Some(x) => {
++                let _ = write!(sst, "<si>{x}</si>");
++            }
++            None => {
++                let _ = write!(sst, "<si>{}</si>", crate::xml::t_el(t));
++            }
++        }
+     }
+     sst.push_str("</sst>");
+     out.part("xl/sharedStrings.xml", Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"), sst.into_bytes());
+@@ -394,7 +441,11 @@ pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
+         let mut x = format!("{XML_DECL}<personList xmlns=\"{NS_THREADED}\" xmlns:x=\"{NS_MAIN}\">");
+         for (i, name) in out.persons.iter().enumerate() {
+             let n = esc_attr(name);
+-            let _ = write!(x, "<person displayName=\"{n}\" id=\"{}\" userId=\"{n}\" providerId=\"None\"/>", person_guid(i));
++            // Carrysheet patch: the userId and providerId read with the person, if any.
++            let slot = format!("person:{name}");
++            let kept = wb.preserved.as_deref().and_then(|p| p.elements.iter().find(|e| e.slot == slot));
++            let ids = kept.map_or_else(|| format!(" userId=\"{n}\" providerId=\"None\""), |e| e.xml.clone());
++            let _ = write!(x, "<person displayName=\"{n}\" id=\"{}\"{ids}/>", person_guid(i));
+         }
+         x.push_str("</personList>");
+         out.part("xl/persons/person.xml", Some(CT_PERSONS), x.into_bytes());
+diff --git a/crates/xlsx/src/xml.rs b/crates/xlsx/src/xml.rs
+index 43bb5b5..dad35a3 100644
+--- a/crates/xlsx/src/xml.rs
++++ b/crates/xlsx/src/xml.rs
+@@ -157,8 +157,9 @@ pub fn parse_streaming(xml: &[u8], split: &[&str], cb: &mut dyn FnMut(El) -> Res
+     let mut reader = Reader::from_reader(data.as_ref());
+     {
+         let cfg = reader.config_mut();
+-        cfg.check_end_names = false;
+-        cfg.allow_unmatched_ends = true;
++        // Carrysheet patch: a mismatched or unmatched end tag is an error, not repaired.
++        cfg.check_end_names = true;
++        cfg.allow_unmatched_ends = false;
+         cfg.allow_dangling_amp = true;
+         cfg.trim_text_start = false;
+         cfg.trim_text_end = false;
+@@ -166,7 +167,11 @@ pub fn parse_streaming(xml: &[u8], split: &[&str], cb: &mut dyn FnMut(El) -> Res
+     let mut stack: Vec<El> = Vec::new();
+     let mut root: Option<El> = None;
+     let mut buf = Vec::new();
+-    // Attach a finished element to its parent (or emit it / make it the root).
++    // Elements and attributes kept in the tree (Carrysheet patch: bounded).
++    let max_nodes = gridcraft_core::limits::get().xml_nodes;
++    let mut nodes = 0usize;
++    // Attach a finished element to its parent (or emit it / make it the root). A second root
++    // element is an error (Carrysheet patch).
+     fn finish(stack: &mut [El], root: &mut Option<El>, el: El, split: &[&str], cb: &mut dyn FnMut(El) -> Result<(), IoError>) -> Result<(), IoError> {
+         match stack.last_mut() {
+             Some(parent) => {
+@@ -177,24 +182,57 @@ pub fn parse_streaming(xml: &[u8], split: &[&str], cb: &mut dyn FnMut(El) -> Res
+                 }
+             }
+             None => {
+-                if root.is_none() {
+-                    *root = Some(el);
++                if root.is_some() {
++                    return Err(IoError::Xml(format!("a second root element <{}>", el.name)));
+                 }
++                *root = Some(el);
+             }
+         }
+         Ok(())
+     }
++    // Counts an element's nodes. Elements handed to `cb` (a `<row>`, an `<si>`) are built whole
++    // too, so their nodes count against the same limit until they are handed over (round 2, N3).
++    let split_nodes = std::cell::Cell::new(0usize);
++    let mut events = 0u32;
++    let mut count = |el: &El, stack: &[El]| -> Result<(), IoError> {
++        let in_split = stack.iter().any(|e| split.contains(&e.name.as_str())) || split.contains(&el.name.as_str());
++        let n = if in_split {
++            split_nodes.set(split_nodes.get().saturating_add(1 + el.attrs.len()));
++            split_nodes.get()
++        } else {
++            nodes = nodes.saturating_add(1 + el.attrs.len());
++            nodes
++        };
++        if n > max_nodes {
++            return Err(IoError::TooLarge(format!("more than {max_nodes} XML elements and attributes in one part")));
++        }
++        Ok(())
++    };
++    let mut cb = |el: El| -> Result<(), IoError> {
++        let r = cb(el);
++        split_nodes.set(0);
++        r
++    };
++    let cb: &mut dyn FnMut(El) -> Result<(), IoError> = &mut cb;
+     loop {
++        // Parsing counts against the call's time (Carrysheet patch).
++        events = events.wrapping_add(1);
++        if events.is_multiple_of(4_096) && !gridcraft_core::limits::check_time() {
++            return Err(IoError::TooLarge("the time limit ran out while reading the file".into()));
++        }
+         let ev = reader.read_event_into(&mut buf).map_err(|e| IoError::Xml(format!("{e} at byte {}", reader.buffer_position())))?;
+         match ev {
+             Event::Start(e) => {
+                 if stack.len() >= MAX_DEPTH {
+                     return Err(IoError::Xml("XML nested too deeply".into()));
+                 }
+-                stack.push(start_el(&e));
++                let el = start_el(&e);
++                count(&el, &stack)?;
++                stack.push(el);
+             }
+             Event::Empty(e) => {
+                 let el = start_el(&e);
++                count(&el, &stack)?;
+                 finish(&mut stack, &mut root, el, split, cb)?;
+             }
+             Event::End(_) => {
+@@ -236,15 +274,46 @@ pub fn parse_streaming(xml: &[u8], split: &[&str], cb: &mut dyn FnMut(El) -> Res
+         }
+         buf.clear();
+     }
+-    // Unclosed elements (truncated part): close them so we keep what we have.
+-    while let Some(el) = stack.pop() {
+-        finish(&mut stack, &mut root, el, split, cb)?;
++    // Unclosed elements: the part was cut short (Carrysheet patch: an error, not repaired).
++    if let Some(el) = stack.last() {
++        return Err(IoError::Xml(format!("the part ends inside <{}>; it was cut short", el.name)));
+     }
+     root.ok_or_else(|| IoError::Xml("no root element".into()))
+ }
+ 
+ // ---------------------------------------------------------------- writing helpers
+ 
++/// An element read by [`parse`] written back as XML (Carrysheet patch: keeps elements GridCraft
++/// does not model). Names are local, so this suits elements of the part's default namespace
++/// whose attributes have no prefix, except `xml:space`, which is written back. An element holds
++/// either text or children (mixed content is not kept in the tree).
++pub fn write_el(e: &El, out: &mut String) {
++    out.push('<');
++    out.push_str(&e.name);
++    for (k, v) in &e.attrs {
++        out.push(' ');
++        if k == "space" {
++            out.push_str("xml:");
++        }
++        out.push_str(k);
++        out.push_str("=\"");
++        out.push_str(&esc_attr(v));
++        out.push('"');
++    }
++    if e.children.is_empty() && e.text.is_empty() {
++        out.push_str("/>");
++        return;
++    }
++    out.push('>');
++    for c in &e.children {
++        write_el(c, out);
++    }
++    out.push_str(&esc(&e.text));
++    out.push_str("</");
++    out.push_str(&e.name);
++    out.push('>');
++}
++
+ /// Escapes text content.
+ pub fn esc(s: &str) -> String {
+     let mut o = String::with_capacity(s.len());

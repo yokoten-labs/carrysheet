@@ -37,6 +37,7 @@ folder holds more than seven entries.
 ## What was changed
 
 Items 1 and 2 are what building inside Carrysheet needs; item 3 lists the fixes Carrysheet made here. Each patch is kept small.
+Every change is in a patch file in `patches/`; "Check" below says how CI proves it.
 
 1. Manifests: every crate sets `publish = false`. The workspace in `Cargo.toml` here replaces
    upstream's root manifest: the internal paths follow the folders above and carry a version
@@ -90,6 +91,7 @@ Items 1 and 2 are what building inside Carrysheet needs; item 3 lists the fixes 
 
    | File | Change | Why |
    |---|---|---|
+   | `functions/src/engineering.rs` | `EULER` is the literal for γ, with a unit test that its bits equal `std::f64::consts::EULER_GAMMA` | That constant is newer than `rust-version = 1.90` |
    | `xlsx/src/passthrough.rs` | `rebase` keeps a link's target as written when the new relative path would need another drive or names of the source's folders | A save could write home or user folder names into the file (L3) |
 
    Review round 2 of issue 45 (same tests, plus `crates/carrysheet-kernel/src/package.rs`).
@@ -108,6 +110,34 @@ Items 1 and 2 are what building inside Carrysheet needs; item 3 lists the fixes 
 
 Unit tests in `src/` still use zip 3's API in a few places (for example `engine/src/io.rs`); they
 are not built here.
+
+## Check
+
+`upstream.json` holds the upstream repository, the pinned commit, the folder map, the upstream
+files left out (none today), our own files here (`README.md`, `upstream.json`, `patches/`) and the
+patch files in the order they apply. The folder is upstream at that commit plus those patches,
+and nothing else. The CI job `vendor` checks it:
+
+```
+node scripts/vendor.mjs verify            # fetch the pinned commit, apply the patches, compare
+node --test scripts/vendor.test.mjs       # the script's own tests, no network
+```
+
+`verify` fetches the one commit into a temporary folder and needs git and the network. Exit 0 is
+a match. Exit 1 lists every file that differs, with the reason, and says how to fix it.
+
+Today: 7 patch files, 981 added lines. `manifests.patch` holds every `Cargo.toml`; the others
+hold one crate each (`base-core`, `base-functions`, `book-calc`, `book-model`, `engine`, `xlsx`).
+
+To change the vendored code, edit the folder, then make the patch for that crate again. Use
+upstream at the pinned commit, laid out by the folder map, as `a/`, and the folder as `b/`:
+
+```
+git diff --no-index --no-prefix a/crates/xlsx b/crates/xlsx > patches/xlsx.patch
+```
+
+That diff also holds the crate's `Cargo.toml`; by convention, move that part into
+`manifests.patch`. `verify` only needs the listed patches to apply in order. Then run `verify`.
 
 ## What the code does outside memory
 

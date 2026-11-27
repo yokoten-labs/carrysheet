@@ -1,0 +1,78 @@
+diff --git a/crates/engine/src/cmd/insert.rs b/crates/engine/src/cmd/insert.rs
+index d878e44..30fe707 100644
+--- a/crates/engine/src/cmd/insert.rs
++++ b/crates/engine/src/cmd/insert.rs
+@@ -1192,7 +1192,7 @@ fn insert_link(s: &mut Session, p: &Json) -> Result<Json> {
+         } else {
+             sh.set_style(at, link_style);
+         }
+-        sh.hyperlinks.insert(at, Hyperlink { target: target.clone(), tooltip: tooltip.clone(), external });
++        sh.hyperlinks.insert(at, Hyperlink { target: target.clone(), tooltip: tooltip.clone(), external, display: None });
+         cx.touch(sheet, at);
+         Ok(Json::Null)
+     })
+diff --git a/crates/engine/src/cmd/mod.rs b/crates/engine/src/cmd/mod.rs
+index 50865a2..a577e06 100644
+--- a/crates/engine/src/cmd/mod.rs
++++ b/crates/engine/src/cmd/mod.rs
+@@ -455,6 +455,21 @@ fn same_content(a: Option<&gridcraft_model::Cell>, b: Option<&gridcraft_model::C
+ 
+ /// Recomputes an automatic row height from its content: the largest font, and wrapped or
+ /// multi-line text. Rows with a user-set height keep it.
++/// The start of a cell's text that decides its row's height: a row is at most 409 points tall,
++/// so text past Excel's 32,767 characters never shows (Carrysheet patch: a 20 MB text shared by
++/// 100,000 cells was searched in full for each cell).
++fn shown_part(text: &str) -> &str {
++    const SHOWN: usize = 32_767 * 4;
++    if text.len() <= SHOWN {
++        return text;
++    }
++    let mut end = SHOWN;
++    while !text.is_char_boundary(end) {
++        end -= 1;
++    }
++    text.get(..end).unwrap_or(text)
++}
++
+ pub fn auto_row_height(wb: &mut Workbook, si: usize, row: u32) {
+     let Some(sh) = wb.sheet(si) else { return };
+     if sh.rows.get(&row).is_some_and(|i| i.custom) {
+@@ -464,7 +479,7 @@ pub fn auto_row_height(wb: &mut Workbook, si: usize, row: u32) {
+     // Fast path: rows of default-size, unwrapped, single-line content keep the default height.
+     let plain = sh.cells.row(row, 0, gridcraft_core::MAX_COLS - 1).all(|(_, cell)| {
+         let st = wb.styles.get(cell.style);
+-        st.font.size <= gridcraft_model::DEFAULT_FONT_SIZE && !st.align.wrap && !cell.value.as_text().is_some_and(|t| t.contains('\n'))
++        st.font.size <= gridcraft_model::DEFAULT_FONT_SIZE && !st.align.wrap && !cell.value.as_text().is_some_and(|t| shown_part(t).contains('\n'))
+     });
+     if plain {
+         if sh.rows.get(&row).is_some_and(|i| i.size.is_some())
+@@ -487,7 +502,15 @@ pub fn auto_row_height(wb: &mut Workbook, si: usize, row: u32) {
+         let line = (size * 1.8).round().max(default * size / gridcraft_model::DEFAULT_FONT_SIZE);
+         let mut lines = 1.0f32;
+         if !cell.value.is_empty() || cell.formula.is_some() {
+-            let text = crate::display::cell_text(wb, sh, CellRef::new(row, c));
++            // A long text is measured by its start, without formatting a copy of it.
++            let owned;
++            let text = match cell.value.as_text() {
++                Some(t) if t.len() > shown_part(t).len() => shown_part(t),
++                _ => {
++                    owned = crate::display::cell_text(wb, sh, CellRef::new(row, c));
++                    shown_part(&owned)
++                }
++            };
+             let explicit = text.lines().count().max(1) as f32;
+             lines = if st.align.wrap {
+                 let w = sh.col_width(c).max(1.0) - 6.0;
+diff --git a/crates/engine/src/cmd/review.rs b/crates/engine/src/cmd/review.rs
+index c55aac8..d3ff3fa 100644
+--- a/crates/engine/src/cmd/review.rs
++++ b/crates/engine/src/cmd/review.rs
+@@ -153,6 +153,8 @@ fn protect_sheet(s: &mut Session, p: &Json) -> Result<Json> {
+         delete_rows: b("deleteRows"),
+         sort: b("sort"),
+         autofilter: b("autofilter"),
++        objects_editable: false,
++        scenarios_editable: false,
+     };
+     let d = s.doc()?;
+     let what = d.wb.sheet(sheet).map(|sh| sh.name.clone()).unwrap_or_default();

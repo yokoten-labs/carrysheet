@@ -1,0 +1,257 @@
+diff --git a/crates/book/calc/src/eval.rs b/crates/book/calc/src/eval.rs
+index 0f9cfb0..dd8c8b8 100644
+--- a/crates/book/calc/src/eval.rs
++++ b/crates/book/calc/src/eval.rs
+@@ -13,6 +13,12 @@ use gridcraft_model::Workbook;
+ 
+ /// Largest array a reference may expand to.
+ pub const MAX_CELLS: u64 = 16_000_000;
++
++/// Most cells an array a formula builds may hold: the caller's limit, at most [`MAX_CELLS`]
++/// (Carrysheet patch, `gridcraft_core::limits`).
++fn array_cells() -> u64 {
++    gridcraft_core::limits::array_cells().min(MAX_CELLS)
++}
+ /// References up to this many cells are read at their full size; larger ones (`A:A`, ranges
+ /// reserved for data to come such as `$A$2:$A$50000`) stop at the sheet's used range, so that
+ /// formulas over them stay fast.
+@@ -942,6 +948,11 @@ impl<'h> Evaluator<'h> {
+     }
+ 
+     fn call_lambda_values(&mut self, l: &Lambda, bound: Vec<(String, Ev)>) -> Ev {
++        // Carrysheet patch: each call counts as work, so lambda loops (MAP, REDUCE, …) stop when
++        // the work or time runs out; the loops below stop on the first refused call.
++        if !gridcraft_core::limits::charge(1) {
++            return err(CellError::Calc);
++        }
+         let saved = std::mem::replace(&mut self.env, l.env.clone());
+         self.env.extend(bound);
+         let r = self.eval(&l.body);
+@@ -1012,12 +1023,15 @@ impl<'h> Evaluator<'h> {
+                 let arrays: Vec<Arc<Array>> = args[..args.len() - 1].iter().map(|a| as_array(self.value(a))).collect();
+                 let rows = arrays.iter().map(|a| a.rows).max().unwrap_or(1);
+                 let cols = arrays.iter().map(|a| a.cols).max().unwrap_or(1);
+-                if (rows * cols) as u64 > MAX_CELLS {
++                if (rows * cols) as u64 > array_cells() {
+                     return err(CellError::Num);
+                 }
+                 let mut out = Vec::with_capacity(rows * cols);
+                 for r in 0..rows {
+                     for c in 0..cols {
++                        if gridcraft_core::limits::exceeded().is_some() {
++                            return err(CellError::Calc);
++                        }
+                         let bound = l.params.iter().zip(arrays.iter()).map(|(p, a)| (p.clone(), Ev::V(a.get_broadcast(r, c)))).collect();
+                         let v = self.call_lambda_values(&l, bound);
+                         out.push(self.deref(v).scalar());
+@@ -1037,6 +1051,9 @@ impl<'h> Evaluator<'h> {
+                 }
+                 let mut scan = Vec::with_capacity(arr.data.len());
+                 for v in arr.data.iter() {
++                    if gridcraft_core::limits::exceeded().is_some() {
++                        return err(CellError::Calc);
++                    }
+                     let bound = vec![(l.params[0].clone(), Ev::V(acc.clone())), (l.params[1].clone(), Ev::V(v.clone()))];
+                     let r = self.call_lambda_values(&l, bound);
+                     acc = self.deref(r);
+@@ -1061,6 +1078,9 @@ impl<'h> Evaluator<'h> {
+                 let n = if by_row { arr.rows } else { arr.cols };
+                 let mut out = Vec::with_capacity(n);
+                 for i in 0..n {
++                    if gridcraft_core::limits::exceeded().is_some() {
++                        return err(CellError::Calc);
++                    }
+                     let slice: Vec<Value> = if by_row {
+                         (0..arr.cols).map(|c| arr.get(i, c).cloned().unwrap_or_default()).collect()
+                     } else {
+@@ -1081,7 +1101,7 @@ impl<'h> Evaluator<'h> {
+                     (Ok(r), Ok(c)) => (r.trunc(), c.trunc()),
+                     (Err(e), _) | (_, Err(e)) => return err(e),
+                 };
+-                if rows < 1.0 || cols < 1.0 || rows * cols > MAX_CELLS as f64 {
++                if rows < 1.0 || cols < 1.0 || rows * cols > array_cells() as f64 {
+                     return err(CellError::Value);
+                 }
+                 let Some(l) = self.lambda_arg(args.get(2), 2) else { return err(CellError::Value) };
+@@ -1092,6 +1112,9 @@ impl<'h> Evaluator<'h> {
+                 let mut out = Vec::with_capacity(rows * cols);
+                 for r in 0..rows {
+                     for c in 0..cols {
++                        if gridcraft_core::limits::exceeded().is_some() {
++                            return err(CellError::Calc);
++                        }
+                         let bound = vec![
+                             (l.params[0].clone(), Ev::V(Value::number(r as f64 + 1.0))),
+                             (l.params[1].clone(), Ev::V(Value::number(c as f64 + 1.0))),
+@@ -1212,7 +1235,7 @@ impl<'h> Evaluator<'h> {
+             };
+             let (ra, ca) = (as_array(&rows), as_array(&cols));
+             let (h, w) = (ra.rows.max(ca.rows), ra.cols.max(ca.cols));
+-            if (h as u64).saturating_mul(w as u64) > MAX_CELLS {
++            if (h as u64).saturating_mul(w as u64) > array_cells() {
+                 return err(CellError::Num);
+             }
+             let mut out = Vec::with_capacity(h * w);
+diff --git a/crates/book/calc/src/recalc.rs b/crates/book/calc/src/recalc.rs
+index b391821..c7f4930 100644
+--- a/crates/book/calc/src/recalc.rs
++++ b/crates/book/calc/src/recalc.rs
+@@ -395,6 +395,9 @@ struct PassHost<'a> {
+     cycle: bool,
+     cycles: Vec<Key>,
+     depth: usize,
++    /// A formula met deeper than [`MAX_DEPTH`] in this evaluation: [`PassHost::compute_root`]
++    /// evaluates it first, then the formulas that read it (Carrysheet patch).
++    deep: Option<Key>,
+     /// Iterative calculation: a circular reference reads the cell's previous value instead of
+     /// giving `#CIRC!`.
+     iterate: bool,
+@@ -425,6 +428,7 @@ impl<'a> PassHost<'a> {
+             cycle: false,
+             cycles: vec![],
+             depth: 0,
++            deep: None,
+             iterate: false,
+             prev: HashMap::default(),
+             stack: Vec::new(),
+@@ -456,7 +460,50 @@ fn spill_blocked(host: &PassHost<'_>, (sheet, anchor): Key, a: &Array) -> bool {
+         || sh.spill.range(range.start..=range.end).any(|(c, _)| range.contains(*c) && spilled_over(*c))
+ }
+ 
++/// Deepest chain of formulas followed by recursion. A deeper acyclic chain is evaluated from its
++/// far end first, a part at a time ([`PassHost::compute_root`]), so it is not a circular reference.
++/// Small enough for a 2 MiB thread stack in a debug build (each level is several frames).
++const MAX_DEPTH: usize = 256;
++/// Upstream's depth limit, kept for iterative calculation (which follows loops by recursion).
++const MAX_ITERATE_DEPTH: usize = 2000;
++
+ impl PassHost<'_> {
++    /// Evaluates `k`, and first any formula too deep to follow from it, so that long chains of
++    /// formulas (`A1=A2+1`, `A2=A3+1`, ...) never need deep recursion (Carrysheet patch). A
++    /// formula met again while its readers wait is on a loop: a circular reference.
++    fn compute_root(&mut self, k: Key) {
++        if self.iterate {
++            self.compute(k);
++            return;
++        }
++        let mut todo = vec![k];
++        // Carrysheet patch (review round 2, L-b): the keys on `todo`, as a
++        // set, so a cycle check does not scan the whole list each step.
++        let mut on_todo: HashSet<Key> = HashSet::default();
++        on_todo.insert(k);
++        while let Some(&top) = todo.last() {
++            self.deep = None;
++            self.compute(top);
++            match self.deep.take() {
++                Some(d) if on_todo.contains(&d) => {
++                    self.cycle = true;
++                    self.cycles.push(d);
++                    self.pending.remove(&d);
++                    self.results.insert(d, Value::Error(CellError::Circ));
++                }
++                Some(d) => {
++                    on_todo.insert(d);
++                    todo.push(d);
++                }
++                None => {
++                    if let Some(done) = todo.pop() {
++                        on_todo.remove(&done);
++                    }
++                }
++            }
++        }
++    }
++
+     fn compute(&mut self, k: Key) -> Value {
+         if let Some(v) = self.results.get(&k) {
+             let v = v.clone();
+@@ -468,7 +515,15 @@ impl PassHost<'_> {
+         let Some(expr) = self.exprs.get(&k) else {
+             return self.wb.sheet(k.0).map(|s| s.value(k.1)).unwrap_or_default();
+         };
+-        if self.in_progress.contains(&k) || self.depth > 2000 {
++        if self.deep.is_some() || !gridcraft_core::limits::charge(1) {
++            // Waiting for a deeper formula, or out of work or time: the caller sees an error.
++            return Value::Error(CellError::Calc);
++        }
++        if !self.iterate && !self.in_progress.contains(&k) && self.depth > MAX_DEPTH {
++            self.deep = Some(k);
++            return Value::Error(CellError::Calc);
++        }
++        if self.in_progress.contains(&k) || self.depth > MAX_ITERATE_DEPTH {
+             self.cycle = true;
+             if self.iterate {
+                 return self.circular_read(k);
+@@ -487,6 +542,25 @@ impl PassHost<'_> {
+             let mut ev = Evaluator::new(self, k.0, k.1);
+             ev.value(&expr)
+         };
++        if self.deep.is_some() {
++            // It read a formula too deep to follow: evaluated again once that one is known.
++            self.depth -= 1;
++            self.in_progress.remove(&k);
++            if self.iterate {
++                self.stack.pop();
++            }
++            self.taint |= outer_taint;
++            return Value::Error(CellError::Calc);
++        }
++        // An array result counts as work, cell by cell, and has a size limit.
++        let v = match v {
++            Value::Array(a) if a.data.len() as u64 > gridcraft_core::limits::array_cells() => Value::Error(CellError::Num),
++            Value::Array(a) if !gridcraft_core::limits::charge(a.data.len() as u64) => {
++                drop(a);
++                Value::Error(CellError::Calc)
++            }
++            v => v,
++        };
+         // A legacy array formula fills the range it was entered in.
+         let legacy = self.wb.sheet(k.0).and_then(|s| s.cell(k.1)).and_then(|c| c.formula.as_ref()).and_then(|f| f.array);
+         let v = match legacy {
+@@ -669,6 +743,10 @@ impl Host for PassHost<'_> {
+     }
+     fn range_values(&mut self, sheet: usize, range: RangeRef) -> Vec<Value> {
+         let (h, w) = (range.height() as usize, range.width() as usize);
++        // Out of work or time: no values (the caller gives an error).
++        if !gridcraft_core::limits::charge((h as u64).saturating_mul(w as u64)) {
++            return Vec::new();
++        }
+         let mut out = vec![Value::Empty; h * w];
+         let Some(sh) = self.wb.sheet(sheet) else { return out };
+         // Sparse walk: only stored cells; formula cells that are (or were) dirty go through
+@@ -756,6 +834,9 @@ impl Host for PassHost<'_> {
+             return false;
+         }
+         for (c, cell) in sh.cells.iter_range(range) {
++            if !gridcraft_core::limits::charge(1) {
++                break;
++            }
+             let go = if cell.formula.is_some() { f(&self.cell_value(sheet, c)) } else { f(&cell.value) };
+             if !go {
+                 break;
+@@ -957,8 +1038,16 @@ impl Calc {
+             // Row-major order is a good topological guess; on-demand evaluation fixes the rest.
+             dirty.sort_by_key(|(s, c)| (*s, c.row, c.col));
+             let mut exprs: HashMap<Key, std::sync::Arc<Expr>> = HashMap::with_capacity_and_hasher(dirty.len(), Default::default());
++            // Carrysheet patch: a formula calling a newer Excel function GridCraft does not know
++            // (read with the file's `_xlfn.` prefix, kept as `xlfn:NAME`) keeps the value the
++            // file saved instead of becoming #NAME?.
++            let unknown: Vec<&str> =
++                wb.preserved.as_deref().map(|p| p.elements.iter().filter_map(|e| e.slot.strip_prefix("xlfn:")).collect()).unwrap_or_default();
+             for k in &dirty {
+                 if let Some(e) = wb.sheet(k.0).and_then(|s| s.cell(k.1)).and_then(|c| c.formula.as_ref()).and_then(|f| f.expr_arc()) {
++                    if !unknown.is_empty() && e.functions().iter().any(|f| unknown.iter().any(|u| u.eq_ignore_ascii_case(f))) {
++                        continue;
++                    }
+                     exprs.insert(*k, e);
+                 }
+             }
+@@ -969,7 +1058,7 @@ impl Calc {
+                 let mut host = PassHost::new(wb, &exprs, &mut rng, now);
+                 host.iterate = wb.calc.iterative;
+                 for k in &dirty {
+-                    host.compute(*k);
++                    host.compute_root(*k);
+                 }
+                 if host.iterate && !host.members.is_empty() {
+                     let passes = host.iterate_loops(&dirty, wb.calc.max_iterations, wb.calc.max_change);
