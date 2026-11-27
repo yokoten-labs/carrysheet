@@ -20,7 +20,7 @@ body:
     id: version
     attributes:
       label: Carrysheet version
-      description: Run `carrysheet-cli --version`, or use `carrysheet-cli feedback`, which fills this in for you.
+      description: Run `carrysheet-cli --version`.
     validations:
       required: true
   - type: input

@@ -92,7 +92,7 @@ Carrysheet is a small, fast, native spreadsheet written in Rust. The first relea
 
 | Folder | What | License |
 |---|---|---|
-| `crates/` | Libraries: the join to the vendored GridCraft kernel, the workbook model, the command layer, and the macro readers (vba, cfb, zip) | MIT OR Apache-2.0 |
+| `crates/` | Libraries: the join to the vendored GridCraft kernel, the workbook model, the command layer, and the hardened zip reader | MIT OR Apache-2.0 |
 | `apps/` | Programs: `carrysheet-cli` (with MCP), later the desktop app | GPL-3.0-or-later |
 | `research/` | Experiments such as the kernel comparison; its own Cargo workspace | MIT OR Apache-2.0 |
 | `scripts/` | Node scripts: the full check, the release check, the line cap | MIT OR Apache-2.0 |
@@ -130,7 +130,7 @@ Our own source is at most 5,000 lines; the planning target is 4,500. [Record 001
 
 ### Command line and MCP
 
-The CLI and MCP server follow `docs/agents.md`. In short: `--json` everywhere with JSON-only stdout; exit codes 0 done, 1 failed, 2 usage, 3 nothing to do; never prompt without a terminal; `--dry-run` on every command that changes a file; MCP schemas that Claude, Gemini and OpenAI strict mode all accept.
+The CLI and MCP server follow `docs/agents.md`. In short: `--json` everywhere with JSON-only stdout; exit codes 0 done, 1 failed, 2 usage, 3 nothing to do; never prompt (`--yes`, `--confirm` and `--confirm-loss` confirm); `--dry-run` on every command that changes a file; MCP schemas that Claude, Gemini and OpenAI strict mode all accept.
 
 ### Working on this machine
 

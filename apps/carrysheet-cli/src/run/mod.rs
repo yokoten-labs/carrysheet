@@ -325,4 +325,15 @@ mod tests {
             assert!(line.chars().count() <= 80, "{line}");
         }
     }
+
+    // Issue 102: `commands` says every listed command is implemented, so
+    // none may fall through to `not_implemented`.
+    #[test]
+    fn every_listed_command_runs() {
+        use carrysheet_commands::engine::run::ENGINE_COMMANDS;
+        for c in COMMANDS {
+            let built = matches!(c.name, "commands" | "mcp_serve");
+            assert!(built || ENGINE_COMMANDS.contains(&c.name), "{}", c.name);
+        }
+    }
 }
