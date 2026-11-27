@@ -163,4 +163,4 @@ jobs:
         run: node --test scripts/tests/lines.test.mjs
 
       - name: node scripts/lines.mjs
-        run: node scripts/lines.mjs --max 74000
+        run: node scripts/lines.mjs --max 29000

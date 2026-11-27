@@ -56,7 +56,7 @@ defend against.
 ### 1. A hostile file
 
 *Spoofing a valid file, tampering, denial of service.* Someone sends a
-crafted `.xls`, `.xlsx`, `.csv`, `.numbers`, zip or compound file (CFB) and
+crafted `.xlsx`, `.xlsb`, `.ods`, `.xls`, `.csv`, zip or compound file (CFB) and
 the user or an agent opens it.
 
 Attacks: decompression bombs; small inputs that cost a lot of CPU
@@ -132,18 +132,9 @@ model obey. Run agents on untrusted files with `--read-only`.
 
 ### 3. A hostile SQL query
 
-*Elevation of privilege, denial of service, information disclosure.* The
-`query` command runs SQL over a workbook ([issue 25][i25], planned). A query
-could try `ATTACH` to reach other files, `load_extension` to run native
-code, or a huge cross join.
-
-**Planned (issue 25):** an in-memory SQLite holding only the workbook's
-tables, opened read-only after loading; no `ATTACH`, no extensions; limits
-on time and rows; results paged. Its tests cover these hostile queries.
-Changes never go through SQL; they go through `edit` with `dry_run`.
-
-**Not defended:** a correct query that returns what the user did not mean to
-share. The query sees the whole workbook it was given.
+Not a threat today. Record 0010 (decision 4) removed `carrysheet-query` and
+ended the SQL plan ([issue 25][i25]); no SQL engine is built. If SQL comes
+back, a new record decides it (decision 7), and this part returns with it.
 
 ### 4. A hostile or buggy MCP client
 
@@ -249,6 +240,12 @@ without running it ([issue 22][i22]). Running macros is undecided and lowest
 priority ([issue 21][i21]); so is refreshing external data
 ([issue 27][i27]).
 
+**CSV formula injection:** carrysheet-kernel's csv writer puts an apostrophe
+before text that starts with `=`, `+`, `-`, `@`, a tab or a carriage return
+(OWASP advice), on by default, so a CSV we write does not run formulas when
+opened elsewhere. Numbers are never changed. `csv_raw` (`--csv-raw`) turns
+it off.
+
 **Not defended:** what Excel or another program does with a file after we
 save it. We keep macros intact, so a file with a harmful macro stays
 harmful when opened in Excel with macros enabled.
@@ -258,11 +255,8 @@ harmful when opened in Excel with macros enabled.
 *Information disclosure.* Connection strings, Power Query, and the password
 of an encrypted file.
 
-**Planned (issue 26):** connections are listed by parsed fields; raw
-connection text and M code are hidden; passwords and tokens are always
-masked in command output, MCP results and feedback reports; a SQL command
-text that may hold a credential is hidden whole. One flag shows the raw
-text.
+Record 0010 (decision 4) removed carrysheet-connections and ended the plan
+to list connections with masked secrets ([issue 26][i26]).
 
 **Not defended:** secrets in files the user shares themselves. The
 `sanitize` command (planned) replaces values before a file is attached to

@@ -7,8 +7,7 @@ import { join } from "node:path";
 
 export const CAP = 5000, TARGET = 4500, PATCH_MAX = 0; // PATCH_MAX 0: the patch limit is off.
 const CODE = /\.(rs|mjs|js|cjs|ts|py|sh|ps1|psm1)$/;
-// proto: Numbers schemas, which leave with the numbers reader in record 0010 step 1.
-const DATA = /\.(toml|yml|md|lock|json|txt|proto)$|(^|\/)(LICENSE[^/]*|NOTICE|CODEOWNERS|\.[^/]*)$|^\.github\//;
+const DATA = /\.(toml|yml|md|lock|json|txt)$|(^|\/)(LICENSE[^/]*|NOTICE|CODEOWNERS|\.[^/]*)$|^\.github\//;
 const isTestPath = (path) => /(^|\/)(tests|benches)\//.test(path) || path.endsWith(".test.mjs");
 const isPatch = (path) => /^vendor\/gridcraft\/patches\/[^/]+\.patch$/.test(path);
 const countLines = (text) => (text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0));

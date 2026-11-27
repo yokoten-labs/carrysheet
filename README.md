@@ -11,12 +11,13 @@ The first release will be `carrysheet-cli`: a command-line tool with an MCP serv
 
 The libraries in `crates/` work and are tested. Each one treats every file as hostile: no crashes, limits on size and memory, and an error that says what went wrong.
 
+- **Workbooks** (`carrysheet-kernel`, on the vendored GridCraft kernel): open `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xlsb`, `.ods`, `.xls` (BIFF8) and `.csv`, calculate formulas, and save as `.xlsx` or `.csv`. A save that would lose content needs `confirm_loss`.
 - **Macros** (`carrysheet-vba`): list the VBA modules in a file, show their source and flag code that may be risky. Macros are never run, and their bytes are kept untouched.
 - **The workbook model and the command table** (`carrysheet-model`, `carrysheet-commands`): one list of commands that drives both the command line and the MCP tools, with JSON schemas that Claude, Gemini and OpenAI accept.
 
-`carrysheet-cli` runs, but it is a shell for now. `commands`, `feedback` and `mcp serve` work. The file commands (`overview`, `read`, `edit`, `convert` and the rest) check their input first: the arguments, and that the file exists. Then they answer "not implemented yet" until the calculation engine is in.
+`carrysheet-cli` runs `overview`, `read`, `eval`, `edit`, `convert`, `macros`, `commands`, `feedback` and `mcp serve`. `check`, `sanitize`, `mcp install` and `mcp doctor` answer "not implemented yet".
 
-Not there yet: reading and writing `.xlsx`, writing `.xls`, formulas that calculate, and the desktop app.
+Not there yet: writing `.xls`, `.xlsb` or `.ods`, and the desktop app.
 
 ## When is it ready?
 

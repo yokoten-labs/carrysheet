@@ -92,10 +92,11 @@ Carrysheet is a small, fast, native spreadsheet written in Rust. The first relea
 
 | Folder | What | License |
 |---|---|---|
-| `crates/` | Libraries: file formats, the workbook model, the command layer | MIT OR Apache-2.0 |
+| `crates/` | Libraries: the join to the vendored GridCraft kernel, the workbook model, the command layer, and the macro readers (vba, cfb, zip) | MIT OR Apache-2.0 |
 | `apps/` | Programs: `carrysheet-cli` (with MCP), later the desktop app | GPL-3.0-or-later |
 | `research/` | Experiments such as the kernel comparison; its own Cargo workspace | MIT OR Apache-2.0 |
-| `tools/` | Developer tools: `fuzzlite` (the fuzzer for the file readers), later `bench` | MIT OR Apache-2.0 |
+| `scripts/` | Node scripts: the full check, the release check, the line cap | MIT OR Apache-2.0 |
+| `vendor/gridcraft/` | Upstream GridCraft, the kernel that reads and writes the file formats | MIT OR Apache-2.0 (upstream's) |
 
 Every crate sets `license` in its `Cargo.toml` to match its folder. A library must never depend on anything in `apps/`.
 
