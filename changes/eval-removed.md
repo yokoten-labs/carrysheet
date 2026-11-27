@@ -1,0 +1,3 @@
+Removed
+
+The `eval` command and its MCP tool are gone, to bring the product under the 5,000-line cap (record 0011, which amends record 0010, decision 11). To see what a formula computes, call `edit` with `dry_run`: set the formula in a free cell, and the change list shows its value, like `{"formula": "=SUM(B2:B9)", "value": 150}`. Nothing is written. The MCP tool list is now `overview`, `read`, `edit` and `convert`; with `--read-only` it is `overview` and `read`. The hint for cut text in `read` now names `edit` with `dry_run` and `MID`. The removed code stays in the history of `main`: `4defaae` has it (`crates/carrysheet/src/view.rs`, `crates/carrysheet/src/args.rs`).

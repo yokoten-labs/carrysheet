@@ -337,7 +337,7 @@ fn bad_values_are_usage_errors() {
         vec!["read", book, "My sheet!A1", "--json"],
         vec!["edit", book, "--ops", "[{", "--json"],
         vec!["edit", book, "--ops", r#"[{"op":"explode","target":"A1"}]"#, "--json"],
-        vec!["eval", "--json"],
+        vec!["read", "--json"],
         vec!["convert", book, "b.x", "--format", "ods", "--json"],
         vec!["macros", book, "--json"],
         vec!["mcp", "serve", "--http", "127.0.0.1:0", "--json"],
@@ -443,10 +443,6 @@ fn the_core_path_works_from_the_command_line() {
     let o = run_in(&home, &["read", edited, "A2:C2"]);
     assert_eq!(code(&o), 0, "{}", stderr(&o));
     assert!(stdout(&o).contains("2\tTea\t3\t6\n"), "{}", stdout(&o));
-
-    let o = run_in(&home, &["eval", edited, "SUM(C:C)"]);
-    assert_eq!(code(&o), 0);
-    assert!(stdout(&o).contains("value: 15\n"), "{}", stdout(&o));
 
     // A damaged file is an error with a code, not a crash.
     std::fs::write(home.join("broken.xlsx"), b"PK\x03\x04 not really").unwrap();

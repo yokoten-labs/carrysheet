@@ -15,7 +15,7 @@ The libraries in `crates/` work and are tested. Each one treats every file as ho
 - **Macros**: `overview` says when an .xlsx, .xlsm or .xlsb file has macros (a VBA project or Excel 4 macro sheets), and says it did not check for .xls and .ods files. Carrysheet never runs them, and a save keeps them where the format can hold them; a save that would drop them needs `confirm_loss`.
 - **The commands** (`carrysheet::args`): one struct per command that drives both the command line and the MCP tools, with JSON schemas that Claude, Gemini and OpenAI accept.
 
-`carrysheet-cli` runs `overview`, `read`, `eval`, `edit`, `convert`, `commands` and `mcp serve` (MCP over stdio). It never asks a question: pass `--yes` to confirm deleting, overwriting or a lossy save.
+`carrysheet-cli` runs `overview`, `read`, `edit`, `convert`, `commands` and `mcp serve` (MCP over stdio). It never asks a question: pass `--yes` to confirm deleting, overwriting or a lossy save.
 
 Not there yet: writing `.xls`, `.xlsb` or `.ods`, and the desktop app.
 

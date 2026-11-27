@@ -24,8 +24,8 @@ fn missing_arguments_are_named() {
     let e = usage_of(&[BIN, "edit"]);
     assert!(e.what.ends_with("not provided: --ops <JSON>, <PATH>"), "{}", e.what);
     assert!(e.fix.contains("Usage: carrysheet-cli edit"), "{}", e.fix);
-    let e = usage_of(&[BIN, "eval", "a.xlsx"]);
-    assert!(e.what.contains("<FORMULA>"), "{}", e.what);
+    let e = usage_of(&[BIN, "read"]);
+    assert!(e.what.contains("<PATH>"), "{}", e.what);
 }
 
 #[test]

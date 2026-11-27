@@ -72,21 +72,6 @@ pub struct Read {
     pub response_format: Option<ResponseFormat>,
 }
 
-/// Compute a formula against a workbook without saving
-///
-/// Evaluate a formula against the workbook without changing it. Use to test a formula before writing it with edit.
-#[derive(Deserialize, JsonSchema)]
-#[cfg_attr(feature = "cli", derive(clap::Args))]
-pub struct Eval {
-    /// The workbook: xlsx, xlsm, xlsb, xls or csv.
-    pub path: String,
-    /// An en-US formula, with or without =, like SUM(Sheet1!B2:B9).
-    pub formula: String,
-    /// Where unqualified references point. Default: the first sheet.
-    #[cfg_attr(feature = "cli", arg(long))]
-    pub sheet: Option<String>,
-}
-
 /// Save a workbook as xlsx or csv, to a new file
 ///
 /// Convert a workbook to xlsx or csv as a new file. Use dry_run first to see what the format cannot hold.
@@ -242,7 +227,6 @@ const READS: [bool; 4] = [true, false, true, false];
 pub const COMMANDS: &[Command] = &[
     command!("overview", Overview, true, READS),
     command!("read", Read, true, READS),
-    command!("eval", Eval, true, READS),
     command!("convert", Convert, true, [false, true, true, false]),
     command!("edit", Edit, true, [false, true, false, false]),
     command!("mcp_serve", McpServe, false, [false, true, false, false]),

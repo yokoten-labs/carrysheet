@@ -356,8 +356,9 @@ fn csv_decimals_with_trailing_zeros_sum_and_save_as_written() {
     let rows = read_csv("edges", edges.as_bytes()).unwrap();
     let numbers = [123456789012345.0, 1e20, 1e-20, -99999999999999.9];
     assert_eq!(rows[0], numbers.map(|n| json!(n)));
-    let sum = call("eval", json!({ "path": p(&src), "formula": "=SUM(A2:B3)" })).unwrap();
-    let total = sum["value"].as_f64().unwrap();
+    let ops = json!([{ "op": "set_formula", "target": "E1", "value": "=SUM(A2:B3)" }]);
+    let sum = call("edit", json!({ "path": p(&src), "ops": ops, "dry_run": true })).unwrap();
+    let total = sum["changes"][0]["after"]["value"].as_f64().unwrap();
     assert!((total - 10.6).abs() < 1e-9, "{sum:?}");
     // csv to csv and csv to xlsx to csv, with the default (escaping) export.
     let plain = dir.join("plain.csv");

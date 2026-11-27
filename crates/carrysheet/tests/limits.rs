@@ -129,9 +129,6 @@ fn huge_array_results_are_errors_not_aborts() {
     let started = Instant::now();
     let page = call("read", json!({ "path": p(&path), "range": "A1" })).unwrap();
     assert_eq!(page["rows"][0]["cells"][0], "#NUM!", "{page:?}");
-    let e =
-        call("eval", json!({ "path": p(&path), "formula": "ROWS(SEQUENCE(1000000,10))" })).unwrap();
-    assert_eq!(e["value"], "#NUM!", "{e:?}");
     assert!(started.elapsed() < QUICK, "{:?}", started.elapsed());
     let _ = std::fs::remove_dir_all(&dir);
 }

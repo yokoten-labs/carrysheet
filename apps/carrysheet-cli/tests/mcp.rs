@@ -349,7 +349,7 @@ fn read_only_hides_write_tools() {
     let mut server = Server::start(&scratch, &["--read-only"]);
     initialize(&mut server, "2025-11-25");
     let tools = server.result(2, "tools/list", json!({}));
-    assert_eq!(tool_names(&tools), ["overview", "read", "eval"]);
+    assert_eq!(tool_names(&tools), ["overview", "read"]);
     let e = tool_error(&call(&mut server, 3, "edit", json!({ "path": "book.xlsx", "ops": [] })));
     assert!(e["fix"].as_str().unwrap().contains("without --read-only"));
 
@@ -379,7 +379,7 @@ fn discover_and_calls_without_initialize() {
     let r = server.result(
         3,
         "tools/call",
-        json!({ "_meta": meta, "name": "eval", "arguments": { "path": "book.xlsx", "formula": "1+1" } }),
+        json!({ "_meta": meta, "name": "overview", "arguments": { "path": "book.xlsx" } }),
     );
     assert_eq!(tool_error(&r)["code"], "damaged_file");
 

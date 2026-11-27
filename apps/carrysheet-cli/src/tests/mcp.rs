@@ -46,7 +46,7 @@ fn read_only_hides_tools_that_change_files() {
     let dir = scratch("readonly");
     let server = test_server(&dir.join("root"), true);
     let names: Vec<_> = server.commands.iter().map(|c| c.name).collect();
-    assert_eq!(names, ["overview", "read", "eval"]);
+    assert_eq!(names, ["overview", "read"]);
     for t in tools_json(&server) {
         assert_eq!(t["annotations"]["readOnlyHint"], true, "{}", t["name"]);
     }

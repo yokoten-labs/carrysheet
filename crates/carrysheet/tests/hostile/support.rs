@@ -264,7 +264,7 @@ impl Outcome {
 }
 
 fn exercise(kernel: &Kernel, input: Input<'_>, depth: Depth) -> Result<(), CommandError> {
-    let book = match input {
+    let mut book = match input {
         Input::File(path) => {
             carrysheet::open::check_opens(path)?;
             let read = std::fs::read(path);
@@ -281,10 +281,12 @@ fn exercise(kernel: &Kernel, input: Input<'_>, depth: Depth) -> Result<(), Comma
         kernel.read_range(&book, &request)?;
     }
     if depth == Depth::Save {
-        kernel.evaluate(&book, None, "SUM(A1:Z50)")?;
         let options = EncodeOptions::default();
         kernel.encode(&book, Path::new("out.xlsx"), FileFormat::Xlsx, &options)?;
         kernel.encode(&book, Path::new("out.csv"), FileFormat::Csv, &options)?;
+        let ops =
+            serde_json::json!([{ "op": "set_formula", "target": "AA1", "value": "SUM(A1:Z50)" }]);
+        kernel.edit(&mut book, &carrysheet::edit::parse_ops(&ops)?)?;
     }
     Ok(())
 }

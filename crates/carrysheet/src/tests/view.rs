@@ -276,27 +276,3 @@ fn read_empty_sheet_and_outside_used_range() {
     };
     assert_eq!(e.read_range(&b, &req).unwrap_err().code, ErrorCode::NoSuchSheet);
 }
-
-#[test]
-fn evaluate_simple_formulas() {
-    let (e, b) = engine();
-    let v = |f: &str, s: Option<&str>| e.evaluate(&b, s, f).unwrap();
-    assert_eq!(v("=1.5", None).value, json!(1.5));
-    assert_eq!(v("TRUE", None).value, json!(true));
-    assert_eq!(v("\"a\"\"b\"", None).value, json!("a\"b"));
-    assert_eq!(v("=SUM(B2:B6)", None).value, json!(150.0));
-    // The kernel counts all of column B: the total in B7, the error in B8.
-    assert_eq!(v("=sum(Data!B:B)", None).value, json!("#DIV/0!"));
-    assert_eq!(v("=sum(Data!B2:B6)", None).value, json!(150.0));
-    assert_eq!(v("B3", None).value, json!(20.0));
-    assert_eq!(v("A1", Some("Q1 売上")).value, json!(7.0));
-    assert_eq!(v("'Q1 売上'!A1", None).kind, "number");
-    assert_eq!(v("Z99", None).kind, "empty");
-    assert_eq!(v("B8", None).value, json!("#DIV/0!"));
-    // The kernel computes every function it knows.
-    assert_eq!(v("VLOOKUP(\"item 2\",A:B,2,0)", None).value, json!(20.0));
-    let err = e.evaluate(&b, Some("Nope"), "A1").unwrap_err();
-    assert_eq!(err.code, ErrorCode::NoSuchSheet);
-    // A column past XFD is no reference: the kernel gives an error value.
-    assert_eq!(v("SUM(A1:XFE1)", None).kind, "error");
-}

@@ -38,7 +38,7 @@ fn cells(page: &Map<String, Value>) -> Vec<Vec<Value>> {
 }
 
 #[test]
-fn open_read_edit_eval_save_reopen() {
+fn open_read_edit_save_reopen() {
     let dir = scratch("roundtrip");
     let csv = dir.join("prices.csv");
     std::fs::write(&csv, "Item,Price\nTea,3\nCake,4.5\nJam,2\n").unwrap();
@@ -94,12 +94,10 @@ fn open_read_edit_eval_save_reopen() {
     assert_eq!(rows[4][1]["value"], "007");
     assert_eq!(rows[5][1], json!({ "value": 11.5, "formula": "=SUM(B2:B4)" }));
 
-    let e =
-        call("eval", json!({ "path": p(&edited), "formula": "=SUM(C2:C4)+COUNTA(A:A)" })).unwrap();
-    assert_eq!(e["value"], json!(28.0));
-    assert_eq!(e["kind"], "number");
-    let e = call("eval", json!({ "path": p(&edited), "formula": "SEQUENCE(2,2)" })).unwrap();
-    assert_eq!(e["value"], json!([[1.0, 2.0], [3.0, 4.0]]));
+    // A dry run shows what a formula computes, without writing.
+    let ops = json!([{ "op": "set_formula", "target": "E1", "value": "=SUM(C2:C4)+COUNTA(A:A)" }]);
+    let e = call("edit", json!({ "path": p(&edited), "ops": ops, "dry_run": true })).unwrap();
+    assert_eq!(e["changes"][0]["after"]["value"], json!(28.0), "{e:?}");
 
     // Detailed reads carry types and formats.
     let page =
@@ -217,10 +215,6 @@ fn reading_pages_and_errors() {
 
     let e = call("read", json!({ "path": p(&csv), "range": "Nope!A1" })).unwrap_err();
     assert_eq!(e.code, ErrorCode::NoSuchSheet);
-    let e = call("eval", json!({ "path": p(&csv), "formula": "1/0" })).unwrap();
-    assert_eq!((e["kind"].as_str(), e["value"].as_str()), (Some("error"), Some("#DIV/0!")));
-    let e = call("eval", json!({ "path": p(&csv), "formula": "1+*2" })).unwrap_err();
-    assert_eq!(e.code, ErrorCode::Formula);
     let e = call("overview", json!({ "path": p(&dir.join("x.ods")) })).unwrap_err();
     assert_eq!(e.code, ErrorCode::UnsupportedFormat);
     let e = call("overview", json!({ "path": p(&dir.join("gone.xlsx")) })).unwrap_err();

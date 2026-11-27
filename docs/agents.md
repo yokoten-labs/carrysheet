@@ -44,8 +44,7 @@ Few, workflow-level tools. Names of built tools match `COMMANDS` in `crates/carr
 |---|---|---|---|
 | `overview` | Sheets, used ranges, cell, formula and error counts, defined names, and whether the file has macros (never run; kept on save where the format can hold them). For .xls and .ods files, and a zip it cannot list, it says macros were not checked. The first call on any workbook | No | `core` |
 | `read` | A range as a compact table with A1 addresses, values or formulas, paged | No | `core` |
-| `eval` | Compute a formula against the workbook without saving | No | `core` |
-| `edit` | A batch of operations: set values or formulas, insert or delete rows, rename sheets. `dry_run` returns the change list; the batch is all or nothing | Yes | `core` |
+| `edit` | A batch of operations: set values or formulas, insert or delete rows, rename sheets. `dry_run` returns the change list, with the value each new formula computes; the batch is all or nothing | Yes | `core` |
 | `convert` | Save as xlsx or csv, to a new file | Yes (new file) | `core` |
 | `find` | Search values or formulas, returns addresses. Not built | No | not decided |
 | `undo` | Restore the snapshot taken before an `edit`. Not built | Yes | not decided |
@@ -71,7 +70,7 @@ Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, in PR 88 until it 
 
 | Toolset | Tools | On by default |
 |---|---|---|
-| `core` (`default`) | overview, read, eval, edit, convert | Yes |
+| `core` (`default`) | overview, read, edit, convert | Yes |
 | `diff` | diff, when built (issue 65) | No |
 | `trace` | trace, when built (record 0007) | No |
 
@@ -88,7 +87,7 @@ Decided in record 0008 (`docs/records/0008-mcp-tool-list.md`, in PR 88 until it 
 ### Output size
 
 - Reads return a bounded window by default (200 rows, 50 columns, at most about 10,000 cells), as a compact table, plus `next_cursor` and a hint on how to narrow the request. Pass `next_cursor` back as `cursor` and keep the other limits the same; pages go across a band of rows, then down.
-- Long text is cut, never dropped quietly: a cell's text or formula at most 2,000 characters in `read`, and less when a page holds many cells, so one answer carries at most 200,000 characters of cell text. The answer then has a `cut` field with the cells cut (up to 20 named, plus the total) and a hint on how to get more: read fewer cells at a time, or get the rest of one cell with `eval`, like `MID(Sheet1!A1,2001,2000)`.
+- Long text is cut, never dropped quietly: a cell's text or formula at most 2,000 characters in `read`, and less when a page holds many cells, so one answer carries at most 200,000 characters of cell text. The answer then has a `cut` field with the cells cut (up to 20 named, plus the total) and a hint on how to get more: read fewer cells at a time, or get the rest of one cell with `edit` and `dry_run`, setting a free cell to `MID(Sheet1!A1,2001,2000)`.
 - `response_format` of `read`: `concise` (default) or `detailed`. Concise matters for local models with 4k–8k context.
 - The same data goes in the text content and in `structuredContent` (Cursor drops structured-only results). `outputSchema` is declared only where structured output always comes back.
 - Bulk reads set `_meta["anthropic/maxResultSizeChars"]`. Whole sheets are exported to a file and returned as a path, not inlined.

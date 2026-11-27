@@ -48,7 +48,7 @@ impl Rng {
 /// Opens, reads, recalculates and encodes; whatever fails must fail cleanly.
 fn exercise(name: &str, bytes: Vec<u8>) -> Result<(), CommandError> {
     let k = Kernel::new();
-    let book = k.open_bytes(Path::new(name), bytes)?;
+    let mut book = k.open_bytes(Path::new(name), bytes)?;
     let overview = k.overview(&book)?;
     for s in &overview.sheets {
         let request = ReadRequest {
@@ -61,10 +61,11 @@ fn exercise(name: &str, bytes: Vec<u8>) -> Result<(), CommandError> {
         };
         k.read_range(&book, &request)?;
     }
-    k.evaluate(&book, None, "SUM(A1:Z50)")?;
     let out = PathBuf::from(name);
     k.encode(&book, &out, FileFormat::Xlsx, &EncodeOptions::default())?;
     k.encode(&book, Path::new("out.csv"), FileFormat::Csv, &EncodeOptions::default())?;
+    let ops = serde_json::json!([{ "op": "set_formula", "target": "AA1", "value": "SUM(A1:Z50)" }]);
+    k.edit(&mut book, &carrysheet::edit::parse_ops(&ops)?)?;
     Ok(())
 }
 

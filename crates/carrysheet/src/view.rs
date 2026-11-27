@@ -1,4 +1,4 @@
-//! Looking at a workbook: `overview`, `read` in pages, and `eval`. Each command takes
+//! Looking at a workbook: `overview` and `read` in pages. Each command takes
 //! arguments checked by [`validate_args`](crate::commands::validate_args).
 
 use std::fmt;
@@ -11,7 +11,7 @@ use serde_json::{Map, Value, json};
 
 use crate::args::{detailed, input, number, shown, text};
 use crate::commands::limits::{MAX_CELL_TEXT_CHARS, MAX_LISTED_SHEETS, MAX_RESPONSE_TEXT_CHARS};
-use crate::error::{CommandError, ErrorCode};
+use crate::error::CommandError;
 use crate::open::{Book, SourceKind};
 use crate::range::{SheetRange, format_sheet_name};
 use crate::text::escape;
@@ -252,7 +252,7 @@ impl CutText {
     fn finish(mut self) -> Option<CutText> {
         let first = self.cells.first()?.clone();
         self.hint = format!(
-            "{} cell(s) hold more than {} characters and were cut. Read fewer cells at a time to see more of each (up to {}), or get the rest of one with eval, like MID({first},{},{}).",
+            "{} cell(s) hold more than {} characters and were cut. Read fewer cells at a time to see more of each (up to {}), or get the rest of one with edit and dry_run, setting a free cell to MID({first},{},{}).",
             self.total,
             self.max_chars,
             MAX_CELL_TEXT_CHARS,
@@ -276,19 +276,6 @@ pub fn cut_text(text: &str, max: usize) -> Option<String> {
 pub fn text_room(cells: u64) -> usize {
     let each = MAX_RESPONSE_TEXT_CHARS as u64 / cells.max(1);
     usize::try_from(each).unwrap_or(usize::MAX).clamp(16, MAX_CELL_TEXT_CHARS)
-}
-
-/// What `eval` returns.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Evaluation {
-    /// The formula as computed, without `=`.
-    pub formula: String,
-    pub value: Value,
-    /// `empty`, `number`, `text`, `bool` or `error`.
-    pub kind: String,
-    /// Says that long text in the value was cut, and how to get the rest.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cut: Option<String>,
 }
 
 /// A cell value as JSON; an error as its text (`#DIV/0!`), an array as its top-left value.
@@ -454,9 +441,6 @@ fn read_page(sheet: &View<'_>, request: &ReadRequest) -> Result<ReadPage, Comman
     })
 }
 
-/// Largest array a formula may return to `eval`.
-const MAX_EVAL_CELLS: usize = 10_000;
-
 impl Kernel {
     /// Sheets, used ranges and counts.
     pub fn overview(&self, book: &Book) -> Result<Overview, CommandError> {
@@ -511,72 +495,6 @@ impl Kernel {
             let sh = wb.sheets.get(book.sheet_index(sheet)?);
             let sh = sh.ok_or_else(|| internal("reading cells", "sheet index out of range"))?;
             read_page(&View { wb, sh }, request)
-        })
-    }
-
-    /// Computes an en-US formula without changing the book; `sheet` (or the first) is the default.
-    pub fn evaluate(
-        &self,
-        book: &Book,
-        sheet: Option<&str>,
-        formula: &str,
-    ) -> Result<Evaluation, CommandError> {
-        self.guard("computing the formula", || {
-            let wb = book.wb()?;
-            let si = book.sheet_index(sheet)?;
-            let body = formula.trim();
-            let body = body.strip_prefix('=').unwrap_or(body).trim();
-            let expr = gridcraft_engine::formula::parse(body).map_err(|e| {
-                CommandError::new(
-                    ErrorCode::Formula,
-                    "the formula could not be read",
-                    e.to_string(),
-                    "Write an en-US formula with commas between arguments, like SUM(A1:A3) or IF(A1>0,\"yes\",\"no\").",
-                )
-            })?;
-            let value =
-                gridcraft_engine::calc::recalc::evaluate_expr(wb, si, CellRef::new(0, 0), &expr);
-            let mut cut = 0u64;
-            let (value, kind, room) = match &value {
-                CellValue::Array(a) => {
-                    if a.data.len() > MAX_EVAL_CELLS {
-                        return Err(CommandError::new(
-                            ErrorCode::LimitExceeded,
-                            format!("the result has {} cells", a.data.len()),
-                            format!("eval returns at most {MAX_EVAL_CELLS} cells"),
-                            "Wrap the formula in one that sums it up, like SUM(...), ROWS(...) or INDEX(...,1,1).",
-                        ));
-                    }
-                    let room = text_room(a.data.len() as u64);
-                    let rows: Vec<Value> = a
-                        .data
-                        .chunks(a.cols.max(1))
-                        .map(|row| {
-                            row.iter()
-                                .map(|v| value_json(&cut_value(v, room, &mut cut)))
-                                .collect()
-                        })
-                        .collect();
-                    (json!(rows), "array".to_owned(), room)
-                }
-                v => {
-                    let room = text_room(1);
-                    let v = cut_value(v, room, &mut cut);
-                    (value_json(&v), kind(&v).to_owned(), room)
-                }
-            };
-            Ok(Evaluation {
-                formula: body.to_owned(),
-                value,
-                kind,
-                cut: (cut > 0).then(|| {
-                    format!(
-                        "{cut} text value(s) hold more than {room} characters and were cut. Get the rest with MID, like MID(<text>,{},{}).",
-                        room + 1,
-                        MAX_CELL_TEXT_CHARS
-                    )
-                }),
-            })
         })
     }
 }
@@ -642,28 +560,6 @@ pub(crate) fn read(
             json!("More cells remain: call read again with cursor set to next_cursor and the same max_rows, or ask for a smaller range."),
         );
     }
-    Ok(data)
-}
-
-/// Computes a formula without changing the file.
-pub(crate) fn eval(
-    kernel: &Kernel,
-    args: &Map<String, Value>,
-    bytes: Vec<u8>,
-) -> Result<Map<String, Value>, CommandError> {
-    let path = input(args)?;
-    let formula = text(args, "formula").unwrap_or("");
-    if formula.trim().trim_start_matches('=').trim().is_empty() {
-        return Err(CommandError::invalid_argument(
-            "formula",
-            "the formula is empty",
-            "Give a formula like SUM(Sheet1!B2:B9).",
-        ));
-    }
-    let book = kernel.open_bytes(&path, bytes)?;
-    let result = kernel.evaluate(&book, text(args, "sheet"), formula)?;
-    let mut data = to_map(&result);
-    data.insert("file".into(), shown(&path));
     Ok(data)
 }
 
