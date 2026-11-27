@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::model::RefError;
+use crate::range::RefError;
 use serde::Serialize;
 
 use crate::commands::paths::redact_home;

@@ -1,6 +1,6 @@
-use crate::commands::engine::FileFormat;
-use crate::commands::engine::save::*;
-use crate::commands::error::ErrorCode;
+use crate::error::ErrorCode;
+use crate::save::*;
+use std::path::Path;
 
 #[cfg(unix)]
 #[test]
@@ -116,4 +116,22 @@ fn writes_replace_whole_files() {
     let missing = dir.join("no/such/folder/x.xlsx");
     assert!(write_atomic(&missing, b"x").is_err());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn file_formats_from_paths() {
+    assert_eq!(
+        FileFormat::from_path(Path::new("a.XLSX")),
+        Some(FileFormat::Xlsx)
+    );
+    assert_eq!(
+        FileFormat::from_path(Path::new("a.xls")),
+        Some(FileFormat::Xls)
+    );
+    assert_eq!(
+        FileFormat::from_path(Path::new("a.csv")),
+        Some(FileFormat::Csv)
+    );
+    assert_eq!(FileFormat::from_path(Path::new("a.ods")), None);
+    assert_eq!(FileFormat::from_path(Path::new("a")), None);
 }

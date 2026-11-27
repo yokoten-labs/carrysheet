@@ -1,5 +1,5 @@
-use crate::commands::engine::SaveReport;
 use crate::kernel::package::*;
+use crate::save::SaveReport;
 
 /// A part to zip: its name, its text, and its raw deflate stream, if
 /// any.
@@ -96,7 +96,7 @@ fn content_lost_inside_rewritten_parts_is_reported() {
             r#"<personList><person displayName="Ann" id="{9}" userId="a@x" providerId="AD"/></personList>"#,
         ),
     ]);
-    let mut r = SaveReport::new(crate::commands::engine::FileFormat::Xlsx);
+    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
     compare(&source, &same, &mut r);
     assert!(r.lost.is_empty(), "{:?}", r.lost);
 
@@ -113,7 +113,7 @@ fn content_lost_inside_rewritten_parts_is_reported() {
             r#"<personList><person displayName="Ann" id="{1}" userId="Ann" providerId="None"/></personList>"#,
         ),
     ]);
-    let mut r = SaveReport::new(crate::commands::engine::FileFormat::Xlsx);
+    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
     compare(&source, &lossy, &mut r);
     let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
     for feature in [
@@ -144,7 +144,7 @@ fn a_package_too_large_to_search_needs_confirm_loss() {
         part: 16,
         total: 16,
     };
-    let mut r = SaveReport::new(crate::commands::engine::FileFormat::Xlsx);
+    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
     compare_within(&source, &source, &mut r, small);
     let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
     assert!(
@@ -156,7 +156,7 @@ fn a_package_too_large_to_search_needs_confirm_loss() {
     assert!(lost.iter().all(|l| !l.contains("slowly")), "{lost:?}");
     assert!(lost.iter().any(|l| l.contains("too large")), "{lost:?}");
     // With room to search, the same package loses nothing.
-    let mut r = SaveReport::new(crate::commands::engine::FileFormat::Xlsx);
+    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
     compare(&source, &source, &mut r);
     assert!(r.lost.is_empty(), "{:?}", r.lost);
 }
@@ -214,7 +214,7 @@ fn a_long_run_of_empty_blocks_between_outputs_is_refused_and_named() {
         [Unsearched::Slow]
     );
 
-    let mut r = SaveReport::new(crate::commands::engine::FileFormat::Xlsx);
+    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
     compare(&source, &source, &mut r);
     let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
     assert!(!lost.is_empty(), "{lost:?}");
@@ -233,7 +233,7 @@ fn a_long_run_of_empty_blocks_between_outputs_is_refused_and_named() {
             Some(with_empty_run(&sheet, 192 << 10, 0).as_slice()),
         ),
     ]);
-    let mut r = SaveReport::new(crate::commands::engine::FileFormat::Xlsx);
+    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
     compare(&plain, &plain, &mut r);
     assert!(r.lost.is_empty(), "{:?}", r.lost);
 }
@@ -241,7 +241,7 @@ fn a_long_run_of_empty_blocks_between_outputs_is_refused_and_named() {
 #[test]
 fn a_package_that_cannot_be_listed_says_why_and_what_to_do() {
     let good = package(&[("xl/workbook.xml", "<workbook/>")]);
-    let mut r = SaveReport::new(crate::commands::engine::FileFormat::Xlsx);
+    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
     compare(b"not a zip at all, but long enough", &good, &mut r);
     let lost: Vec<&str> = r.lost.iter().map(|l| l.feature.as_str()).collect();
     assert_eq!(lost.len(), 1, "{lost:?}");
@@ -253,7 +253,7 @@ fn a_package_that_cannot_be_listed_says_why_and_what_to_do() {
         lost[0]
     );
     assert!(lost[0].contains("confirm_loss"), "{}", lost[0]);
-    let mut r = SaveReport::new(crate::commands::engine::FileFormat::Xlsx);
+    let mut r = SaveReport::new(crate::save::FileFormat::Xlsx);
     compare(&good, b"PK", &mut r);
     assert!(
         r.lost[0].feature.contains("in the file to be written"),

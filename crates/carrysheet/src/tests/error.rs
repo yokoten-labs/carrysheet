@@ -1,4 +1,4 @@
-use crate::commands::error::*;
+use crate::error::*;
 
 #[test]
 fn exit_codes() {
@@ -80,14 +80,14 @@ fn every_way_of_showing_hides_the_home_folder() {
     }
     // A reference error repeats what was typed.
     let typed = format!("'{p}'!A1");
-    let e: CommandError = crate::model::SheetRange::parse(&typed).unwrap_err().into();
+    let e: CommandError = crate::range::SheetRange::parse(&typed).unwrap_err().into();
     assert!(e.what.contains(&home), "the field keeps the text");
     assert!(!e.to_json().to_string().contains(&home));
 }
 
 #[test]
 fn ref_errors_become_usage_errors() {
-    let e: CommandError = crate::model::CellRef::parse("XFE1").unwrap_err().into();
+    let e: CommandError = crate::range::SheetRange::parse("XFE1").unwrap_err().into();
     assert_eq!(e.code, ErrorCode::InvalidReference);
     assert_eq!(e.exit_code(), ExitCode::Usage);
     assert!(e.fix.contains("A1:C10"));

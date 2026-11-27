@@ -5,8 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 
-use crate::commands::engine::save::MAX_LISTED_PARTS;
-use crate::commands::engine::{Loss, PartCounts, SaveReport};
+use crate::save::{Loss, MAX_LISTED_PARTS, PartCounts, SaveReport};
 use carrysheet_zip::{Archive, DuplicateNames, Limits as ZipLimits};
 use gridcraft_engine::core::limits as gc;
 
@@ -897,15 +896,13 @@ pub(crate) fn compare_within(source: &[u8], output: &[u8], report: &mut SaveRepo
                 counts.dropped += 1;
                 report.notes.push(format!(
                     "{} is not written; Excel rebuilds it",
-                    crate::commands::engine::run::part_name(shown)
+                    crate::save::part_name(shown)
                 ));
             }
             None => {
                 counts.dropped += 1;
                 if report.dropped_parts.len() < MAX_LISTED_PARTS {
-                    report
-                        .dropped_parts
-                        .push(crate::commands::engine::run::part_name(shown));
+                    report.dropped_parts.push(crate::save::part_name(shown));
                 }
             }
         }

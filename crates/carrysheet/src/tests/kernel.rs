@@ -1,5 +1,5 @@
-use crate::commands::{CommandError, ErrorCode};
-use crate::kernel::*;
+use crate::error::{CommandError, ErrorCode};
+use crate::guard;
 
 #[test]
 fn panics_become_internal_errors_not_success() {

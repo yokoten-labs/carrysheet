@@ -20,12 +20,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use carrysheet::commands::engine::save::clean_from_file;
 use carrysheet::commands::paths::{display_path, home_dir, redact_home};
 use carrysheet::commands::root::Root;
 use carrysheet::commands::schema::tool_definition;
 use carrysheet::commands::table::{ArgType, Command, mcp_tools};
 use carrysheet::commands::{CommandError, ErrorCode, validate_args};
+use carrysheet::save::clean_from_file;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, ListToolsResult,
     PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
@@ -168,7 +168,7 @@ impl Server {
         // MCP calls keep the default time limit (limits::MAX_CALL_SECONDS).
         let ctx = Context::default();
         // Writes stay inside the root even if a link changes meanwhile.
-        let _confined = carrysheet::commands::engine::save::confine_writes(&self.inner.root.dir());
+        let _confined = carrysheet::save::confine_writes(&self.inner.root.dir());
         run::run(command, &args, &ctx).map(|done| done.data)
     }
 

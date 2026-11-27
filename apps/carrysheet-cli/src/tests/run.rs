@@ -73,7 +73,7 @@ fn commands_lists_everything() {
 // none may fall through to `not_implemented`.
 #[test]
 fn every_listed_command_runs() {
-    use carrysheet::commands::engine::run::ENGINE_COMMANDS;
+    use carrysheet::ENGINE_COMMANDS;
     for c in COMMANDS {
         let built = matches!(c.name, "commands" | "mcp_serve");
         assert!(built || ENGINE_COMMANDS.contains(&c.name), "{}", c.name);

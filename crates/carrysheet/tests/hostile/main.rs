@@ -24,9 +24,10 @@ mod xlsb;
 
 use std::path::{Path, PathBuf};
 
-use carrysheet::commands::engine::{Engine, FileFormat, ReadRequest};
+use carrysheet::Kernel;
 use carrysheet::commands::{CommandError, ErrorCode};
-use carrysheet::kernel::Kernel;
+use carrysheet::save::{EncodeOptions, FileFormat};
+use carrysheet::view::ReadRequest;
 
 fn data(name: &str) -> Vec<u8> {
     std::fs::read(
@@ -56,9 +57,9 @@ fn exercise(name: &str, bytes: Vec<u8>) -> Result<(), CommandError> {
     let overview = k.overview(&book)?;
     for s in &overview.sheets {
         let request = ReadRequest {
-            range: carrysheet::model::SheetRange::parse(&format!(
+            range: carrysheet::range::SheetRange::parse(&format!(
                 "{}!A1:Z50",
-                carrysheet::model::format_sheet_name(&s.name)
+                carrysheet::range::format_sheet_name(&s.name)
             ))
             .ok(),
             ..ReadRequest::default()
@@ -67,8 +68,13 @@ fn exercise(name: &str, bytes: Vec<u8>) -> Result<(), CommandError> {
     }
     k.evaluate(&book, None, "SUM(A1:Z50)")?;
     let out = PathBuf::from(name);
-    k.encode(&book, &out, FileFormat::Xlsx, None)?;
-    k.encode(&book, Path::new("out.csv"), FileFormat::Csv, None)?;
+    k.encode(&book, &out, FileFormat::Xlsx, &EncodeOptions::default())?;
+    k.encode(
+        &book,
+        Path::new("out.csv"),
+        FileFormat::Csv,
+        &EncodeOptions::default(),
+    )?;
     Ok(())
 }
 

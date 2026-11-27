@@ -2,12 +2,11 @@
 
 use std::path::Path;
 
-use carrysheet::commands::engine::run::run_within;
 use carrysheet::commands::paths::display_path;
 use carrysheet::commands::schema::command_json;
 use carrysheet::commands::table::{COMMANDS, Command};
 use carrysheet::commands::{CommandError, ErrorCode, check_confirmation};
-use carrysheet::kernel::Kernel;
+use carrysheet::{Kernel, run_within};
 use serde_json::{Map, Value, json};
 
 use crate::output::wrap;

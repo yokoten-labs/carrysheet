@@ -1,46 +1,70 @@
-use crate::commands::engine::memory::*;
-use crate::commands::engine::{Engine, FileFormat, ReadRequest};
-use crate::commands::engine::{ReadCursor, ReadMode};
-use crate::commands::error::ErrorCode;
-use crate::model::{Cell, CellRef, ErrorKind};
-use crate::model::{SheetRange, Workbook};
+//! The reads, on the real kernel: each book is written as an .xlsx file by
+//! GridCraft and opened again through [`Kernel::open_bytes`].
+
+use crate::Kernel;
+use crate::error::ErrorCode;
+use crate::open::Book;
+use crate::range::SheetRange;
+use crate::view::{ReadCursor, ReadMode, ReadRequest, value_json};
+use gridcraft_engine::core::{CellError, CellRef, Value as CellValue};
+use gridcraft_engine::io::FileKind;
+use gridcraft_engine::model::{Cell, Formula, Sheet, Workbook};
 use serde_json::{Value, json};
 use std::path::Path;
+use std::sync::Arc;
 
-fn book() -> Workbook {
-    let mut wb = Workbook::new();
-    let s = wb.add_sheet("Data").unwrap();
-    s.set(0, 0, Cell::value("Item")).unwrap();
-    s.set(0, 1, Cell::value("Price")).unwrap();
-    for r in 1..=5 {
-        s.set(r, 0, Cell::value(format!("item {r}"))).unwrap();
-        s.set(r, 1, Cell::value(f64::from(r) * 10.0)).unwrap();
+/// A sheet named `name` holding `cells`, each at a 0-based row and column.
+fn sheet(name: &str, cells: Vec<(u32, u32, CellValue)>) -> Arc<Sheet> {
+    let mut sheet = Sheet::new(name);
+    for (row, col, value) in cells {
+        sheet.set_value(CellRef::new(row, col), value);
     }
-    s.set(6, 1, Cell::formula("SUM(B2:B6)")).unwrap();
-    s.set(7, 1, Cell::value(ErrorKind::Div0)).unwrap();
-    let s = wb.add_sheet("Q1 売上").unwrap();
-    s.set(0, 0, Cell::value(7.0)).unwrap();
-    wb.add_sheet("Empty").unwrap();
-    wb
+    Arc::new(sheet)
 }
 
-fn engine() -> MemoryEngine {
-    let e = MemoryEngine::new();
-    e.insert("book.xlsx", book());
-    e
+/// The sheets as an .xlsx file, opened by the kernel.
+fn open(sheets: Vec<Arc<Sheet>>) -> (Kernel, Book) {
+    let mut wb = Workbook::new();
+    wb.sheets = sheets;
+    let bytes = gridcraft_engine::io::save_bytes_as(&wb, "book.xlsx", FileKind::Xlsx).unwrap();
+    let kernel = Kernel::new();
+    let book = kernel.open_bytes(Path::new("book.xlsx"), bytes).unwrap();
+    (kernel, book)
+}
+
+fn engine() -> (Kernel, Book) {
+    let mut cells: Vec<(u32, u32, CellValue)> = vec![(0, 0, "Item".into()), (0, 1, "Price".into())];
+    for r in 1..=5 {
+        cells.push((r, 0, format!("item {r}").into()));
+        cells.push((r, 1, (f64::from(r) * 10.0).into()));
+    }
+    cells.push((7, 1, CellError::Div0.into()));
+    let mut data = sheet("Data", cells);
+    let total = Cell::formula(Formula::new("=SUM(B2:B6)"));
+    Arc::make_mut(&mut data).set_cell(CellRef::new(6, 1), total);
+    open(vec![
+        data,
+        sheet("Q1 売上", vec![(0, 0, 7.0.into())]),
+        sheet("Empty", vec![]),
+    ])
+}
+
+#[test]
+fn non_finite_numbers_become_text() {
+    assert_eq!(value_json(&CellValue::Number(f64::NAN)), json!("NaN"));
+    assert_eq!(value_json(&CellValue::Empty), Value::Null);
 }
 
 #[test]
 fn open_missing_file_is_a_clear_error() {
-    let e = engine().open(Path::new("nope.xlsx")).unwrap_err();
+    let e = Kernel::new().open(Path::new("nope.xlsx")).unwrap_err();
     assert_eq!(e.code, ErrorCode::FileNotFound);
     assert!(e.what.contains("nope.xlsx"));
 }
 
 #[test]
 fn overview_counts() {
-    let e = engine();
-    let b = e.open(Path::new("book.xlsx")).unwrap();
+    let (e, b) = engine();
     let o = e.overview(&b).unwrap();
     assert_eq!(o.sheets.len(), 3);
     assert_eq!(o.sheets[0].used_range.as_deref(), Some("A1:B8"));
@@ -56,8 +80,7 @@ fn overview_counts() {
 
 #[test]
 fn read_pages_through_a_range() {
-    let e = engine();
-    let b = e.open(Path::new("book.xlsx")).unwrap();
+    let (e, b) = engine();
     let mut req = ReadRequest {
         max_rows: 3,
         ..ReadRequest::default()
@@ -81,23 +104,15 @@ fn read_pages_through_a_range() {
 }
 
 /// A sheet `rows` by `cols` where each cell holds its own address.
-fn grid(rows: u32, cols: u32) -> (MemoryEngine, Workbook) {
-    let e = MemoryEngine::new();
-    let mut wb = Workbook::new();
-    let s = wb.add_sheet("Grid").unwrap();
-    for r in 0..rows {
-        for c in 0..cols {
-            let at = CellRef::new(r, c).unwrap().to_string();
-            s.set(r, c, Cell::value(at)).unwrap();
-        }
-    }
-    e.insert("grid.xlsx", wb);
-    let b = e.open(Path::new("grid.xlsx")).unwrap();
-    (e, b)
+fn grid(rows: u32, cols: u32) -> (Kernel, Book) {
+    let cells = (0..rows)
+        .flat_map(|r| (0..cols).map(move |c| (r, c, CellRef::new(r, c).a1().into())))
+        .collect();
+    open(vec![sheet("Grid", cells)])
 }
 
 /// Reads every page and returns the page ranges and every address seen.
-fn read_all(e: &MemoryEngine, b: &Workbook, mut req: ReadRequest) -> (Vec<String>, Vec<String>) {
+fn read_all(e: &Kernel, b: &Book, mut req: ReadRequest) -> (Vec<String>, Vec<String>) {
     let (mut pages, mut seen) = (Vec::new(), Vec::new());
     loop {
         let p = e.read_range(b, &req).unwrap();
@@ -129,7 +144,7 @@ fn wide_ranges_page_across_then_down() {
     assert_eq!(pages, ["A1:B2", "C1:D2", "E1:E2", "A3:B3", "C3:D3", "E3"]);
     seen.sort();
     let mut all: Vec<String> = (0..3)
-        .flat_map(|r| (0..5).map(move |c| CellRef::new(r, c).unwrap().to_string()))
+        .flat_map(|r| (0..5).map(move |c| CellRef::new(r, c).a1()))
         .collect();
     all.sort();
     assert_eq!(seen, all, "every cell exactly once");
@@ -176,6 +191,7 @@ fn cursors_are_checked() {
         "Grid!A1:B2@C1",
         "Grid!A1:B2@A1:B3",
         "Grid!A1:B2@A1:B1",
+        "Grid!A1:B2@Grid!A1",
     ] {
         let e = ReadCursor::parse(bad).unwrap_err();
         assert_eq!(e.code, ErrorCode::InvalidArgument, "{bad}");
@@ -214,8 +230,7 @@ fn cursors_are_checked() {
 
 #[test]
 fn read_whole_columns_is_clipped_to_used_range() {
-    let e = engine();
-    let b = e.open(Path::new("book.xlsx")).unwrap();
+    let (e, b) = engine();
     let req = ReadRequest {
         range: Some(SheetRange::parse("Data!B:B").unwrap()),
         ..ReadRequest::default()
@@ -228,13 +243,8 @@ fn read_whole_columns_is_clipped_to_used_range() {
 
 #[test]
 fn whole_columns_and_rows_skip_the_empty_edges() {
-    let e = MemoryEngine::new();
-    let mut wb = Workbook::new();
-    let s = wb.add_sheet("Data").unwrap();
-    s.set(99, 2, Cell::value(1.0)).unwrap();
-    s.set(101, 3, Cell::value(2.0)).unwrap();
-    e.insert("far.xlsx", wb);
-    let b = e.open(Path::new("far.xlsx")).unwrap();
+    let cells = vec![(99, 2, 1.0.into()), (101, 3, 2.0.into())];
+    let (e, b) = open(vec![sheet("Data", cells)]);
     let read = |range: &str| {
         let req = ReadRequest {
             range: Some(SheetRange::parse(range).unwrap()),
@@ -258,8 +268,7 @@ fn whole_columns_and_rows_skip_the_empty_edges() {
 
 #[test]
 fn read_modes() {
-    let e = engine();
-    let b = e.open(Path::new("book.xlsx")).unwrap();
+    let (e, b) = engine();
     let mut req = ReadRequest {
         range: Some(SheetRange::parse("B7").unwrap()),
         mode: ReadMode::Formulas,
@@ -272,7 +281,8 @@ fn read_modes() {
     req.mode = ReadMode::Both;
     let both = &e.read_range(&b, &req).unwrap().rows[0].cells[0];
     assert_eq!(both["formula"], "=SUM(B2:B6)");
-    assert_eq!(both["value"], Value::Null);
+    // The kernel computes the formula.
+    assert_eq!(both["value"], json!(150.0));
     req.range = Some(SheetRange::parse("A2").unwrap());
     assert_eq!(
         e.read_range(&b, &req).unwrap().rows[0].cells[0]["formula"],
@@ -284,8 +294,7 @@ fn read_modes() {
 
 #[test]
 fn read_empty_sheet_and_outside_used_range() {
-    let e = engine();
-    let b = e.open(Path::new("book.xlsx")).unwrap();
+    let (e, b) = engine();
     let req = ReadRequest {
         range: Some(SheetRange::parse("Empty!A1:C3").unwrap()),
         ..ReadRequest::default()
@@ -309,34 +318,24 @@ fn read_empty_sheet_and_outside_used_range() {
 
 #[test]
 fn evaluate_simple_formulas() {
-    let e = engine();
-    let b = e.open(Path::new("book.xlsx")).unwrap();
+    let (e, b) = engine();
     let v = |f: &str, s: Option<&str>| e.evaluate(&b, s, f).unwrap();
     assert_eq!(v("=1.5", None).value, json!(1.5));
     assert_eq!(v("TRUE", None).value, json!(true));
     assert_eq!(v("\"a\"\"b\"", None).value, json!("a\"b"));
     assert_eq!(v("=SUM(B2:B6)", None).value, json!(150.0));
-    assert_eq!(v("=sum(Data!B:B)", None).value, json!(150.0));
+    // The kernel counts all of column B: the total in B7, the error in B8.
+    assert_eq!(v("=sum(Data!B:B)", None).value, json!("#DIV/0!"));
+    assert_eq!(v("=sum(Data!B2:B6)", None).value, json!(150.0));
     assert_eq!(v("B3", None).value, json!(20.0));
     assert_eq!(v("A1", Some("Q1 売上")).value, json!(7.0));
     assert_eq!(v("'Q1 売上'!A1", None).kind, "number");
     assert_eq!(v("Z99", None).kind, "empty");
     assert_eq!(v("B8", None).value, json!("#DIV/0!"));
-    let err = e.evaluate(&b, None, "VLOOKUP(1,A:B,2,0)").unwrap_err();
-    assert_eq!(err.code, ErrorCode::NotImplemented);
+    // The kernel computes every function it knows.
+    assert_eq!(v("VLOOKUP(\"item 2\",A:B,2,0)", None).value, json!(20.0));
     let err = e.evaluate(&b, Some("Nope"), "A1").unwrap_err();
     assert_eq!(err.code, ErrorCode::NoSuchSheet);
-    let err = e.evaluate(&b, None, "SUM(A1:XFE1)").unwrap_err();
-    assert_eq!(err.code, ErrorCode::InvalidReference);
-}
-
-#[test]
-fn save_stores_a_copy() {
-    let e = engine();
-    let b = e.open(Path::new("book.xlsx")).unwrap();
-    e.save(&b, Path::new("out.csv"), FileFormat::Csv).unwrap();
-    let (saved, format) = e.saved(Path::new("out.csv")).unwrap();
-    assert_eq!(format, FileFormat::Csv);
-    assert_eq!(saved, b);
-    assert_eq!(e.name(), "memory");
+    // A column past XFD is no reference: the kernel gives an error value.
+    assert_eq!(v("SUM(A1:XFE1)", None).kind, "error");
 }

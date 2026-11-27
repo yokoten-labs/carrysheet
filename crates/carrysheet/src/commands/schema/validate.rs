@@ -2,7 +2,7 @@
 //! schema validation, so every surface (CLI, MCP) calls this before running
 //! a command.
 
-use crate::model::SheetRange;
+use crate::range::SheetRange;
 use serde_json::{Map, Value};
 
 use crate::commands::error::{CommandError, ErrorCode};
