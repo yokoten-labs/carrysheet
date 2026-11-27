@@ -162,9 +162,7 @@ impl Kernel {
         format: FileFormat,
         options: &EncodeOptions<'_>,
     ) -> Result<Encoded, CommandError> {
-        self.guard("saving", || {
-            save::encode(book, path, format, options, values::MAX_CSV_BYTES)
-        })
+        self.guard("saving", || save::encode(book, path, format, options, values::MAX_CSV_BYTES))
     }
 
     /// Runs `f` within the limits; outside a command, each call gets its own.

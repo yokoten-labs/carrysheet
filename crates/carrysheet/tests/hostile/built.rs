@@ -78,9 +78,7 @@ fn many_boundsheets_on_one_substream() -> Vec<u8> {
     // 200 BOUNDSHEETs pointing at one sheet of 20 records of 60,000 bytes.
     let mut s = Stream::default();
     bof8(&mut s, 0x0005);
-    let bounds: Vec<usize> = (0..200)
-        .map(|i| boundsheet(&mut s, &format!("S{i}")))
-        .collect();
+    let bounds: Vec<usize> = (0..200).map(|i| boundsheet(&mut s, &format!("S{i}"))).collect();
     eof(&mut s);
     let start = s.pos();
     for b in bounds {
@@ -177,14 +175,7 @@ fn supbook_with_a_huge_length_character() -> Vec<u8> {
             for _ in 0..4000 {
                 s.rec(
                     0x01AE,
-                    &cat(&[
-                        &u16le(0),
-                        &u16le(3),
-                        &[1],
-                        &u16le(5),
-                        &u16le(0xDBFF),
-                        &u16le(0xDFFF),
-                    ]),
+                    &cat(&[&u16le(0), &u16le(3), &[1], &u16le(5), &u16le(0xDBFF), &u16le(0xDFFF)]),
                 );
             }
         },
@@ -204,14 +195,7 @@ fn shared_3d_reference_to_another_sheet() -> Vec<u8> {
     patch(&mut s, b1, start);
     bof8(&mut s, 0x0010);
     let ref3d = cat(&[&[0x5A], &u16le(0), &u16le(0), &u16le(0xC000)]);
-    let area3d = cat(&[
-        &[0x5B],
-        &u16le(0),
-        &u16le(0),
-        &u16le(1),
-        &u16le(0xC000),
-        &u16le(0xC001),
-    ]);
+    let area3d = cat(&[&[0x5B], &u16le(0), &u16le(0), &u16le(1), &u16le(0xC000), &u16le(0xC001)]);
     formula(&mut s, 0, 0, &ptg_exp(0, 0), 8);
     shrfmla(&mut s, 0, 2, 0, 0, &ref3d);
     formula(&mut s, 1, 0, &ptg_exp(0, 0), 8);
@@ -243,13 +227,7 @@ fn external_sheet_range() -> Vec<u8> {
     let start = s.pos();
     patch(&mut s, b, start);
     bof8(&mut s, 0x0010);
-    formula(
-        &mut s,
-        0,
-        0,
-        &cat(&[&[0x3A], &u16le(0), &u16le(0), &u16le(0)]),
-        0,
-    );
+    formula(&mut s, 0, 0, &cat(&[&[0x3A], &u16le(0), &u16le(0), &u16le(0)]), 0);
     eof(&mut s);
     s.bytes
 }
@@ -264,14 +242,7 @@ fn boundsheet_offset_at_u32_max() -> Vec<u8> {
 }
 
 fn sst_ext_rst_of_u32_max_bytes() -> Vec<u8> {
-    let sst = cat(&[
-        &u32le(1),
-        &u32le(1),
-        &u16le(1),
-        &[0x04],
-        &u32le(u32::MAX),
-        b"x",
-    ]);
+    let sst = cat(&[&u32le(1), &u32le(1), &u16le(1), &[0x04], &u32le(u32::MAX), b"x"]);
     one_sheet(
         |s| {
             s.rec(0x00FC, &sst);
@@ -355,58 +326,25 @@ fn broken_filepass(body: &[u8]) -> Vec<u8> {
 #[test]
 fn hostile_xls_streams() {
     let mut cases = vec![
-        (
-            "many BOUNDSHEETs on one substream",
-            xls(many_boundsheets_on_one_substream()),
-        ),
-        (
-            "a BOUNDSHEET into the globals",
-            xls(boundsheet_into_the_globals()),
-        ),
-        (
-            "an SST with thousands of CONTINUEs",
-            xls(sst_with_thousands_of_continues()),
-        ),
-        (
-            "40,000 missing shared formula anchors",
-            xls(missing_shared_formula_anchors()),
-        ),
-        (
-            "20,000 shared formulas at their anchors",
-            xls(shared_formulas_each_at_its_anchor()),
-        ),
-        (
-            "one 64 KB shared formula in 20,000 cells",
-            xls(one_big_shared_formula_in_many_cells()),
-        ),
+        ("many BOUNDSHEETs on one substream", xls(many_boundsheets_on_one_substream())),
+        ("a BOUNDSHEET into the globals", xls(boundsheet_into_the_globals())),
+        ("an SST with thousands of CONTINUEs", xls(sst_with_thousands_of_continues())),
+        ("40,000 missing shared formula anchors", xls(missing_shared_formula_anchors())),
+        ("20,000 shared formulas at their anchors", xls(shared_formulas_each_at_its_anchor())),
+        ("one 64 KB shared formula in 20,000 cells", xls(one_big_shared_formula_in_many_cells())),
         (
             "4,000 SUPBOOKs with a huge length character",
             xls(supbook_with_a_huge_length_character()),
         ),
-        (
-            "a shared 3D reference",
-            xls(shared_3d_reference_to_another_sheet()),
-        ),
+        ("a shared 3D reference", xls(shared_3d_reference_to_another_sheet())),
         ("an external sheet range", xls(external_sheet_range())),
-        (
-            "a BOUNDSHEET offset of u32::MAX",
-            xls(boundsheet_offset_at_u32_max()),
-        ),
-        (
-            "an SST ExtRst of u32::MAX bytes",
-            xls(sst_ext_rst_of_u32_max_bytes()),
-        ),
+        ("a BOUNDSHEET offset of u32::MAX", xls(boundsheet_offset_at_u32_max())),
+        ("an SST ExtRst of u32::MAX bytes", xls(sst_ext_rst_of_u32_max_bytes())),
         ("an inverted merged range", xls(inverted_merged_range())),
-        (
-            "13,000 long names on the formula stack",
-            xls(operands_that_add_up_on_the_stack()),
-        ),
+        ("13,000 long names on the formula stack", xls(operands_that_add_up_on_the_stack())),
         ("1.2 million empty records", xls(many_empty_records())),
         ("an empty FILEPASS", xls(broken_filepass(&[]))),
-        (
-            "an RC4 FILEPASS cut short",
-            xls(broken_filepass(&[1, 0, 1, 0])),
-        ),
+        ("an RC4 FILEPASS cut short", xls(broken_filepass(&[1, 0, 1, 0]))),
     ];
     // A container that hides a stream named like the workbook, twice.
     let stream = one_sheet(|_| {}, |_| {});
@@ -414,10 +352,7 @@ fn hostile_xls_streams() {
         "two Workbook streams",
         cfb::compound(&[("Workbook", &stream), ("WORKBOOK", &[0u8; 8])]),
     ));
-    let cases = cases
-        .into_iter()
-        .map(|(case, bytes)| (case, "book.xls", bytes))
-        .collect();
+    let cases = cases.into_iter().map(|(case, bytes)| (case, "book.xls", bytes)).collect();
     run_all("hostile xls", cases).settle(WAIVERS);
 }
 
@@ -456,16 +391,8 @@ fn old_excel_versions_are_refused_clearly() {
 #[test]
 fn xls_that_is_not_a_compound_file_is_refused() {
     let cases: Vec<(&str, &'static str, Vec<u8>)> = vec![
-        (
-            "a raw BIFF8 stream without a container",
-            "book.xls",
-            one_sheet(|_| {}, |_| {}),
-        ),
-        (
-            "text named .xls",
-            "book.xls",
-            b"Attachment: a,b\n1,2\n".to_vec(),
-        ),
+        ("a raw BIFF8 stream without a container", "book.xls", one_sheet(|_| {}, |_| {})),
+        ("text named .xls", "book.xls", b"Attachment: a,b\n1,2\n".to_vec()),
     ];
     let mut report = Report::default();
     for (case, name, bytes) in cases {
@@ -510,10 +437,8 @@ fn hostile_csv_text() {
         "=1+1".into(),
         "@SUM(1)".into(),
     ];
-    let hostile_values = values
-        .iter()
-        .map(|v| format!("\"{}\"\n", v.replace('"', "\"\"")))
-        .collect::<String>();
+    let hostile_values =
+        values.iter().map(|v| format!("\"{}\"\n", v.replace('"', "\"\""))).collect::<String>();
     let mut many_rows = String::from("zip\n");
     for i in 0..100_000 {
         many_rows.push_str(&format!("{:05}\n", i % 100_000));
@@ -522,60 +447,27 @@ fn hostile_csv_text() {
     for _ in 0..50_000 {
         quotes.push_str("\"a\"\"b,");
     }
-    let controls: String = (0u8..0x20)
-        .map(|b| format!("x{}y,\u{202E}z\u{200B},\u{E0041}\n", b as char))
-        .collect();
+    let controls: String =
+        (0u8..0x20).map(|b| format!("x{}y,\u{202E}z\u{200B},\u{E0041}\n", b as char)).collect();
     let cases: Vec<(&str, &'static str, Vec<u8>)> = vec![
         ("an 8 MB field", "data.csv", huge_field.into_bytes()),
         ("a 1 MB header name", "data.csv", huge_header.into_bytes()),
-        (
-            "a line of a million delimiters",
-            "data.csv",
-            wide_line.into_bytes(),
-        ),
-        (
-            "values no parser should take",
-            "data.csv",
-            hostile_values.into_bytes(),
-        ),
-        (
-            "100,000 rows with leading zeros",
-            "data.csv",
-            many_rows.into_bytes(),
-        ),
-        (
-            "an unclosed quote over 50,000 fields",
-            "data.csv",
-            quotes.into_bytes(),
-        ),
-        (
-            "control and invisible characters",
-            "data.csv",
-            controls.into_bytes(),
-        ),
+        ("a line of a million delimiters", "data.csv", wide_line.into_bytes()),
+        ("values no parser should take", "data.csv", hostile_values.into_bytes()),
+        ("100,000 rows with leading zeros", "data.csv", many_rows.into_bytes()),
+        ("an unclosed quote over 50,000 fields", "data.csv", quotes.into_bytes()),
+        ("control and invisible characters", "data.csv", controls.into_bytes()),
         ("a lone UTF-16 BOM", "data.csv", vec![0xFF, 0xFE]),
-        (
-            "an odd-length UTF-16 file",
-            "data.csv",
-            vec![0xFF, 0xFE, b'a', 0, b'b'],
-        ),
+        ("an odd-length UTF-16 file", "data.csv", vec![0xFF, 0xFE, b'a', 0, b'b']),
         (
             "unpaired UTF-16 surrogates",
             "data.csv",
             vec![0xFF, 0xFE, 0x00, 0xD8, b',', 0, 0x00, 0xDC],
         ),
-        (
-            "invalid UTF-8 after a BOM",
-            "data.csv",
-            vec![0xEF, 0xBB, 0xBF, 0xC3, 0x28, b',', 0xFF],
-        ),
+        ("invalid UTF-8 after a BOM", "data.csv", vec![0xEF, 0xBB, 0xBF, 0xC3, 0x28, b',', 0xFF]),
         ("NUL bytes", "data.csv", b"a,\0b\n\0\0\0,c\n".to_vec()),
         ("only line breaks", "data.csv", vec![b'\n'; 200_000]),
-        (
-            "a sep= line naming a control character",
-            "data.csv",
-            b"sep=\x01\na\x01b\n".to_vec(),
-        ),
+        ("a sep= line naming a control character", "data.csv", b"sep=\x01\na\x01b\n".to_vec()),
     ];
     run_all("hostile csv", cases).settle(WAIVERS);
 }
@@ -608,18 +500,11 @@ fn hostile_encrypted_packages() {
     let mut header_only = vec![3, 0, 2, 0, 0x24, 0, 0, 0];
     header_only.extend(u32::MAX.to_le_bytes());
     let cases: Vec<(&str, &'static str, Vec<u8>)> = vec![
-        (
-            "a spin count of 4 billion",
-            "book.xlsx",
-            agile(&agile_key("4000000000", PARAMS)),
-        ),
+        ("a spin count of 4 billion", "book.xlsx", agile(&agile_key("4000000000", PARAMS))),
         (
             "key bits of 99,999",
             "book.xlsx",
-            agile(&agile_key(
-                "1",
-                &PARAMS.replace(r#"keyBits="256""#, r#"keyBits="99999""#),
-            )),
+            agile(&agile_key("1", &PARAMS.replace(r#"keyBits="256""#, r#"keyBits="99999""#))),
         ),
         (
             "an unknown cipher",
@@ -629,20 +514,13 @@ fn hostile_encrypted_packages() {
                 &PARAMS.replace(r#"cipherAlgorithm="AES""#, r#"cipherAlgorithm="3DES""#),
             )),
         ),
-        (
-            "a 500 KB salt",
-            "book.xlsx",
-            agile(&agile_key("1", &huge_salt)),
-        ),
+        ("a 500 KB salt", "book.xlsx", agile(&agile_key("1", &huge_salt))),
         ("nested XML 100,000 deep", "book.xlsx", agile(&deep)),
         ("not XML", "book.xlsx", agile("\u{0}\u{1}not xml")),
         (
             "a standard header of u32::MAX bytes",
             "book.xlsx",
-            cfb::compound(&[
-                ("EncryptionInfo", &header_only),
-                ("EncryptedPackage", &[0u8; 8]),
-            ]),
+            cfb::compound(&[("EncryptionInfo", &header_only), ("EncryptedPackage", &[0u8; 8])]),
         ),
         (
             "an EncryptedPackage without EncryptionInfo",
@@ -725,36 +603,12 @@ fn hostile_xlsb_packages() {
     rec(&mut bad_name_book, 144, &[]);
     rec(&mut bad_name_book, 132, &[]);
     let cases: Vec<(&str, &'static str, Vec<u8>)> = vec![
-        (
-            "an xlsb string of 2^31 characters",
-            "book.xlsb",
-            package(&book, &huge_string, None),
-        ),
-        (
-            "an xlsb record past the end",
-            "book.xlsb",
-            package(&book, &past_the_end, None),
-        ),
-        (
-            "64 nested xlsb blocks",
-            "book.xlsb",
-            package(&book, &nested(64), None),
-        ),
-        (
-            "65 nested xlsb blocks",
-            "book.xlsb",
-            package(&book, &nested(65), None),
-        ),
-        (
-            "xlsb rows out of order",
-            "book.xlsb",
-            package(&book, &unordered, None),
-        ),
-        (
-            "an xlsb row past the last row",
-            "book.xlsb",
-            package(&book, &far_row, None),
-        ),
+        ("an xlsb string of 2^31 characters", "book.xlsb", package(&book, &huge_string, None)),
+        ("an xlsb record past the end", "book.xlsb", package(&book, &past_the_end, None)),
+        ("64 nested xlsb blocks", "book.xlsb", package(&book, &nested(64), None)),
+        ("65 nested xlsb blocks", "book.xlsb", package(&book, &nested(65), None)),
+        ("xlsb rows out of order", "book.xlsb", package(&book, &unordered, None)),
+        ("an xlsb row past the last row", "book.xlsb", package(&book, &far_row, None)),
         (
             "an xlsb SST that claims a million strings",
             "book.xlsb",
@@ -765,26 +619,14 @@ fn hostile_xlsb_packages() {
             "book.xlsb",
             package(&book, &bad_index, Some(&strings)),
         ),
-        (
-            "100,000 xlsb rows",
-            "book.xlsb",
-            package(&book, &many_rows, None),
-        ),
-        (
-            "2 million empty xlsb records",
-            "book.xlsb",
-            package(&book, &many_records, None),
-        ),
+        ("100,000 xlsb rows", "book.xlsb", package(&book, &many_rows, None)),
+        ("2 million empty xlsb records", "book.xlsb", package(&book, &many_records, None)),
         (
             "an xlsb sheet name of lone surrogates",
             "book.xlsb",
             package(&bad_name_book, &sheet_part(&[]), None),
         ),
-        (
-            "an xlsb package named .xlsx",
-            "book.xlsx",
-            xlsb::small_book(),
-        ),
+        ("an xlsb package named .xlsx", "book.xlsx", xlsb::small_book()),
     ];
     let report = run_all("hostile xlsb", cases);
     report.settle(WAIVERS);
@@ -795,11 +637,7 @@ fn hostile_xlsb_packages() {
 fn encryption_is_named() {
     let mut report = Report::default();
     let bytes = agile(&agile_key("100000", PARAMS));
-    let outcome = report.run(
-        "agile".into(),
-        Input::Bytes("book.xlsx", bytes),
-        Depth::Read,
-    );
+    let outcome = report.run("agile".into(), Input::Bytes("book.xlsx", bytes), Depth::Read);
     if let Some(outcome) = outcome {
         match outcome.refused() {
             Some(e)

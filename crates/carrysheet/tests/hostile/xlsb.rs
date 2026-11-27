@@ -141,9 +141,5 @@ pub fn package(workbook: &[u8], sheet: &[u8], strings: Option<&[u8]>) -> Vec<u8>
 
 /// A small, valid XLSB workbook.
 pub fn small_book() -> Vec<u8> {
-    package(
-        &workbook_part(),
-        &small_sheet(),
-        Some(&strings_part(&["shared"])),
-    )
+    package(&workbook_part(), &small_sheet(), Some(&strings_part(&["shared"])))
 }

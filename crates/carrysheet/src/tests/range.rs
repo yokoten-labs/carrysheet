@@ -34,17 +34,8 @@ fn cell_limits() {
     let last = range("XFD1048576").range.end;
     assert_eq!((last.row, last.col), (MAX_ROWS - 1, MAX_COLS - 1));
     // More than 7 digits is no row, as in GridCraft, leading zeros or not.
-    for s in [
-        "A1048577",
-        "A0",
-        "A99999999999999999999",
-        "A00000001",
-        "XFE1",
-    ] {
-        assert!(
-            error(s).contains("columns go from A to XFD, rows from 1 to 1048576"),
-            "{s}"
-        );
+    for s in ["A1048577", "A0", "A99999999999999999999", "A00000001", "XFE1"] {
+        assert!(error(s).contains("columns go from A to XFD, rows from 1 to 1048576"), "{s}");
     }
 }
 
@@ -166,15 +157,7 @@ fn range_rejects() {
 
 #[test]
 fn sheet_names_valid_and_invalid() {
-    for ok in [
-        "Sheet1",
-        "売上",
-        "Q1 売上",
-        "It's",
-        "a.b",
-        "1",
-        "データ_2026",
-    ] {
+    for ok in ["Sheet1", "売上", "Q1 売上", "It's", "a.b", "1", "データ_2026"] {
         assert!(validate_sheet_name(ok).is_ok(), "{ok}");
     }
     let long = "x".repeat(32);
@@ -202,21 +185,10 @@ fn sheet_names_valid_and_invalid() {
 
 #[test]
 fn sheet_name_quoting() {
-    for plain in [
-        "Sheet1",
-        "Data",
-        "_x",
-        "a.b",
-        "Totals2026x",
-        "売上",
-        "Report",
-        "ABCD1",
-    ] {
+    for plain in ["Sheet1", "Data", "_x", "a.b", "Totals2026x", "売上", "Report", "ABCD1"] {
         assert_eq!(format_sheet_name(plain), plain);
     }
-    for quoted in [
-        "My sheet", "1st", "A1", "xfd1", "C10", "TRUE", "false", "a-b", "a!b",
-    ] {
+    for quoted in ["My sheet", "1st", "A1", "xfd1", "C10", "TRUE", "false", "a-b", "a!b"] {
         assert_eq!(format_sheet_name(quoted), format!("'{quoted}'"));
     }
     assert_eq!(format_sheet_name("It's"), "'It''s'");

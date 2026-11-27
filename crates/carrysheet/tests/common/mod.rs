@@ -24,11 +24,7 @@ pub struct Entry {
 }
 
 pub fn entry(name: &str, data: impl Into<Vec<u8>>) -> Entry {
-    Entry {
-        name: name.to_owned(),
-        data: data.into(),
-        deflated: None,
-    }
+    Entry { name: name.to_owned(), data: data.into(), deflated: None }
 }
 
 fn crc32(data: &[u8]) -> u32 {
@@ -36,11 +32,7 @@ fn crc32(data: &[u8]) -> u32 {
     for &b in data {
         crc ^= u32::from(b);
         for _ in 0..8 {
-            crc = if crc & 1 == 1 {
-                (crc >> 1) ^ 0xEDB8_8320
-            } else {
-                crc >> 1
-            };
+            crc = if crc & 1 == 1 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
         }
     }
     !crc
@@ -117,11 +109,7 @@ pub fn empty_blocks(n: usize, data: &[u8]) -> Vec<u8> {
             }
         }
     }
-    let mut w = Bits {
-        bytes: Vec::with_capacity(n * 10 / 8 + data.len() + 8),
-        acc: 0,
-        n: 0,
-    };
+    let mut w = Bits { bytes: Vec::with_capacity(n * 10 / 8 + data.len() + 8), acc: 0, n: 0 };
     for _ in 0..n {
         // Not final, fixed Huffman, end of block (seven zero bits).
         w.put(0, 1);
@@ -184,9 +172,7 @@ impl Book {
             r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>"#,
         );
         for (part, ct) in &self.content_types {
-            types.push_str(&format!(
-                r#"<Override PartName="/{part}" ContentType="{ct}"/>"#
-            ));
+            types.push_str(&format!(r#"<Override PartName="/{part}" ContentType="{ct}"/>"#));
         }
         types.push_str("</Types>");
         let rels = format!(
@@ -216,14 +202,9 @@ impl Book {
             entries.push(entry("xl/sharedStrings.xml", s));
         }
         for (ty, target) in &self.workbook_rels {
-            let ty = if ty.starts_with("http") {
-                ty.clone()
-            } else {
-                format!("{REL}{ty}")
-            };
-            wb_rels.push_str(&format!(
-                r#"<Relationship Id="rId{n}" Type="{ty}" Target="{target}"/>"#
-            ));
+            let ty = if ty.starts_with("http") { ty.clone() } else { format!("{REL}{ty}") };
+            wb_rels
+                .push_str(&format!(r#"<Relationship Id="rId{n}" Type="{ty}" Target="{target}"/>"#));
             n += 1;
         }
         wb_rels.push_str("</Relationships>");
@@ -233,16 +214,8 @@ impl Book {
                 r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
             );
             for (id, (ty, target, external)) in self.sheet_rels.iter().enumerate() {
-                let ty = if ty.starts_with("http") {
-                    ty.clone()
-                } else {
-                    format!("{REL}{ty}")
-                };
-                let mode = if *external {
-                    r#" TargetMode="External""#
-                } else {
-                    ""
-                };
+                let ty = if ty.starts_with("http") { ty.clone() } else { format!("{REL}{ty}") };
+                let mode = if *external { r#" TargetMode="External""# } else { "" };
                 r.push_str(&format!(
                     r#"<Relationship Id="rIdS{}" Type="{ty}" Target="{target}"{mode}/>"#,
                     id + 1

@@ -91,11 +91,7 @@ impl Default for ReadRequest {
 
 impl ReadRequest {
     fn limits(&self) -> (u32, u32, u32) {
-        (
-            self.max_rows.max(1),
-            self.max_columns.max(1),
-            self.max_cells.max(1),
-        )
+        (self.max_rows.max(1), self.max_columns.max(1), self.max_cells.max(1))
     }
 
     /// The last row of a new band of `area` that starts at row `top`.
@@ -140,15 +136,9 @@ impl ReadCursor {
         let (area_text, band_text) = text.rsplit_once('@').ok_or_else(|| bad("it has no '@'"))?;
         let area = SheetRange::parse(area_text);
         let area = area.map_err(|_| bad("the part before '@' is not a range"))?;
-        let sheet = area
-            .sheet
-            .ok_or_else(|| bad("the range has no sheet name"))?;
-        let band = SheetRange::parse(band_text)
-            .ok()
-            .filter(|band| band.sheet.is_none());
-        let band = band
-            .ok_or_else(|| bad("the part after '@' is not a range"))?
-            .range;
+        let sheet = area.sheet.ok_or_else(|| bad("the range has no sheet name"))?;
+        let band = SheetRange::parse(band_text).ok().filter(|band| band.sheet.is_none());
+        let band = band.ok_or_else(|| bad("the part after '@' is not a range"))?.range;
         let area = area.range;
         let inside = area.contains(band.start)
             && band.start.col == band.end.col
@@ -156,12 +146,7 @@ impl ReadCursor {
         if !inside {
             return Err(bad("the next page lies outside the area"));
         }
-        Ok(ReadCursor {
-            sheet,
-            area,
-            next: band.start,
-            band_end_row: band.end.row,
-        })
+        Ok(ReadCursor { sheet, area, next: band.start, band_end_row: band.end.row })
     }
 
     /// Plans the page this cursor points at: its rows from the cursor, its width from `request`.
@@ -178,16 +163,12 @@ impl ReadCursor {
                 "Read the next page with the same max_rows as the page that gave the cursor, or start again without a cursor.",
             ));
         }
-        let width = max_columns
-            .min(self.area.end.col - self.next.col + 1)
-            .min((max_cells / height).max(1));
+        let width =
+            max_columns.min(self.area.end.col - self.next.col + 1).min((max_cells / height).max(1));
         let last_col = self.next.col + width - 1;
         let page = RangeRef::new(self.next, CellRef::new(self.band_end_row, last_col));
         let next = if last_col < self.area.end.col {
-            Some(ReadCursor {
-                next: CellRef::new(self.next.row, last_col + 1),
-                ..self.clone()
-            })
+            Some(ReadCursor { next: CellRef::new(self.next.row, last_col + 1), ..self.clone() })
         } else if self.band_end_row < self.area.end.row {
             let top = self.band_end_row + 1;
             Some(ReadCursor {
@@ -294,9 +275,7 @@ pub fn cut_text(text: &str, max: usize) -> Option<String> {
 /// Characters each text in a page of `cells` cells may keep, under [`MAX_RESPONSE_TEXT_CHARS`].
 pub fn text_room(cells: u64) -> usize {
     let each = MAX_RESPONSE_TEXT_CHARS as u64 / cells.max(1);
-    usize::try_from(each)
-        .unwrap_or(usize::MAX)
-        .clamp(16, MAX_CELL_TEXT_CHARS)
+    usize::try_from(each).unwrap_or(usize::MAX).clamp(16, MAX_CELL_TEXT_CHARS)
 }
 
 /// What `eval` returns.
@@ -348,11 +327,7 @@ fn cut_value(v: &CellValue, max: usize, cut: &mut u64) -> CellValue {
             }
             None => v.clone(),
         },
-        CellValue::Array(a) => a
-            .data
-            .first()
-            .map(|v| cut_value(v, max, cut))
-            .unwrap_or_default(),
+        CellValue::Array(a) => a.data.first().map(|v| cut_value(v, max, cut)).unwrap_or_default(),
         v => v.clone(),
     }
 }
@@ -450,20 +425,14 @@ fn read_page(sheet: &View<'_>, request: &ReadRequest) -> Result<ReadPage, Comman
                 None => used,
             };
             let Some(area) = area else {
-                return Ok(ReadPage {
-                    sheet: name.clone(),
-                    ..ReadPage::default()
-                });
+                return Ok(ReadPage { sheet: name.clone(), ..ReadPage::default() });
             };
             ReadCursor::start(name, area, request)
         }
     };
     let (page, next_cursor) = cursor.plan(request)?;
     let room = text_room(page.count());
-    let mut cut = CutText {
-        max_chars: room,
-        ..CutText::default()
-    };
+    let mut cut = CutText { max_chars: room, ..CutText::default() };
     let sheet_name = format_sheet_name(name);
     let rows = (page.start.row..=page.end.row)
         .map(|r| ReadRow {
@@ -483,9 +452,7 @@ fn read_page(sheet: &View<'_>, request: &ReadRequest) -> Result<ReadPage, Comman
     Ok(ReadPage {
         sheet: name.clone(),
         range: Some(page.a1()),
-        columns: (page.start.col..=page.end.col)
-            .map(col_to_letters)
-            .collect(),
+        columns: (page.start.col..=page.end.col).map(col_to_letters).collect(),
         rows,
         next_cursor,
         cut: cut.finish(),

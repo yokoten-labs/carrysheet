@@ -96,13 +96,7 @@ impl Server {
             }
         });
         let stdin = child.stdin.take();
-        Server {
-            child,
-            stdin,
-            lines,
-            seen: Vec::new(),
-            started,
-        }
+        Server { child, stdin, lines, seen: Vec::new(), started }
     }
 
     fn send(&mut self, message: &Value) {
@@ -155,12 +149,7 @@ impl Server {
             jsonrpc(line);
         }
         let mut stderr = String::new();
-        self.child
-            .stderr
-            .take()
-            .unwrap()
-            .read_to_string(&mut stderr)
-            .unwrap();
+        self.child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
         (status.code().unwrap_or(-1), stderr)
     }
 }
@@ -189,11 +178,7 @@ fn initialize(server: &mut Server, version: &str) -> Value {
 }
 
 fn call(server: &mut Server, id: u64, name: &str, arguments: Value) -> Value {
-    server.result(
-        id,
-        "tools/call",
-        json!({ "name": name, "arguments": arguments }),
-    )
+    server.result(id, "tools/call", json!({ "name": name, "arguments": arguments }))
 }
 
 /// Checks a failed tool call: `isError`, the same JSON in text and
@@ -204,17 +189,8 @@ fn tool_error(result: &Value) -> Value {
     let text = result["content"][0]["text"].as_str().unwrap();
     let parsed: Value = serde_json::from_str(text).unwrap();
     assert_eq!(parsed, result["structuredContent"]);
-    assert_eq!(
-        text,
-        result["structuredContent"].to_string(),
-        "compact JSON"
-    );
-    let keys: Vec<&str> = parsed["error"]
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
+    assert_eq!(text, result["structuredContent"].to_string(), "compact JSON");
+    let keys: Vec<&str> = parsed["error"].as_object().unwrap().keys().map(String::as_str).collect();
     assert_eq!(keys, ["code", "what", "fix", "why"], "{text}");
     let fix_at = text.find(r#""fix":""#).unwrap();
     assert!(fix_at < 200, "fix starts after 200 characters: {text}");
@@ -248,23 +224,14 @@ fn stdio_session_lists_and_calls_tools() {
     let expected: Vec<Value> = mcp_tools().map(tool_definition).collect();
     assert_eq!(tools["tools"], Value::Array(expected));
     for t in tools["tools"].as_array().unwrap() {
-        for key in [
-            "readOnlyHint",
-            "destructiveHint",
-            "idempotentHint",
-            "openWorldHint",
-        ] {
+        for key in ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] {
             assert!(t["annotations"][key].is_boolean(), "{} {key}", t["name"]);
         }
     }
     assert!(!tools.to_string().contains("session_id"));
     // All tool definitions together stay under 10,000 characters.
-    let size: usize = tools["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t.to_string().chars().count())
-        .sum();
+    let size: usize =
+        tools["tools"].as_array().unwrap().iter().map(|t| t.to_string().chars().count()).sum();
     eprintln!("tools/list: {size} characters");
     assert!(size < 10_000, "{size}");
 
@@ -274,12 +241,8 @@ fn stdio_session_lists_and_calls_tools() {
     assert_eq!(e["code"], "damaged_file");
 
     // The core path over MCP: convert, edit, read back.
-    let r = call(
-        &mut server,
-        20,
-        "convert",
-        json!({ "path": "prices.csv", "output": "prices.xlsx" }),
-    );
+    let r =
+        call(&mut server, 20, "convert", json!({ "path": "prices.csv", "output": "prices.xlsx" }));
     assert_eq!(r["isError"], false, "{r}");
     let r = call(
         &mut server,
@@ -288,17 +251,8 @@ fn stdio_session_lists_and_calls_tools() {
         json!({ "path": "prices.xlsx", "ops": [{ "op": "set_formula", "target": "C2", "value": "B2*2" }] }),
     );
     assert_eq!(r["structuredContent"]["written"], true, "{r}");
-    let r = call(
-        &mut server,
-        22,
-        "read",
-        json!({ "path": "prices-edited.xlsx" }),
-    );
-    assert_eq!(
-        r["structuredContent"]["rows"][1]["cells"],
-        json!(["Tea", 3.0, 6.0]),
-        "{r}"
-    );
+    let r = call(&mut server, 22, "read", json!({ "path": "prices-edited.xlsx" }));
+    assert_eq!(r["structuredContent"]["rows"][1]["cells"], json!(["Tea", 3.0, 6.0]), "{r}");
 
     // A built command: success, same data in text and structuredContent.
     let r = call(&mut server, 4, "overview", json!({ "path": "prices.csv" }));
@@ -326,12 +280,8 @@ fn stdio_session_lists_and_calls_tools() {
     assert_eq!(e["code"], "outside_root");
 
     // Bad arguments and unknown tools are tool errors too; the session lives on.
-    let e = tool_error(&call(
-        &mut server,
-        9,
-        "read",
-        json!({ "path": "book.xlsx", "max_rows": 0 }),
-    ));
+    let e =
+        tool_error(&call(&mut server, 9, "read", json!({ "path": "book.xlsx", "max_rows": 0 })));
     assert_eq!(e["code"], "invalid_argument");
     let e = tool_error(&call(&mut server, 10, "overveiw", json!({})));
     assert!(e["fix"].as_str().unwrap().contains("overview"));
@@ -341,10 +291,7 @@ fn stdio_session_lists_and_calls_tools() {
     let (code, stderr) = server.finish();
     assert_eq!(code, 0, "{stderr}");
     // The log went to stderr, without the home folder.
-    assert!(
-        stderr.contains("tools/call overview: damaged_file"),
-        "{stderr}"
-    );
+    assert!(stderr.contains("tools/call overview: damaged_file"), "{stderr}");
     assert!(stderr.contains("the client closed stdin"), "{stderr}");
     assert!(!stderr.contains(scratch.path("home").to_str().unwrap()));
 }
@@ -370,11 +317,7 @@ fn tool_errors_are_cut_short() {
         let e = tool_error(&r);
         for part in ["what", "fix", "why"] {
             let text = e[part].as_str().unwrap();
-            assert!(
-                text.chars().count() <= 200,
-                "{part}: {} characters",
-                text.len()
-            );
+            assert!(text.chars().count() <= 200, "{part}: {} characters", text.len());
         }
         let size = r.to_string().len();
         assert!(size < 2_000, "call {id}: {size} bytes");
@@ -407,21 +350,13 @@ fn read_only_hides_write_tools() {
     initialize(&mut server, "2025-11-25");
     let tools = server.result(2, "tools/list", json!({}));
     assert_eq!(tool_names(&tools), ["overview", "read", "eval"]);
-    let e = tool_error(&call(
-        &mut server,
-        3,
-        "edit",
-        json!({ "path": "book.xlsx", "ops": [] }),
-    ));
+    let e = tool_error(&call(&mut server, 3, "edit", json!({ "path": "book.xlsx", "ops": [] })));
     assert!(e["fix"].as_str().unwrap().contains("without --read-only"));
 
     let (code, stderr) = server.finish();
     assert_eq!(code, 0);
     assert!(stderr.contains("(read-only)"), "{stderr}");
-    assert!(
-        stderr.contains("tools/call edit: invalid_argument"),
-        "{stderr}"
-    );
+    assert!(stderr.contains("tools/call edit: invalid_argument"), "{stderr}");
 }
 
 #[test]
@@ -440,10 +375,7 @@ fn discover_and_calls_without_initialize() {
     assert!(found["capabilities"]["tools"].is_object());
 
     let tools = server.result(2, "tools/list", json!({ "_meta": meta }));
-    assert_eq!(
-        tools["tools"].as_array().unwrap().len(),
-        mcp_tools().count()
-    );
+    assert_eq!(tools["tools"].as_array().unwrap().len(), mcp_tools().count());
     let r = server.result(
         3,
         "tools/call",
@@ -482,12 +414,7 @@ fn bad_options_fail_before_serving() {
     }
 
     // stdin closed at once: no session, nothing on stdout, a clean exit.
-    let o = run(&[
-        "mcp",
-        "serve",
-        "--root",
-        scratch.path("root").to_str().unwrap(),
-    ]);
+    let o = run(&["mcp", "serve", "--root", scratch.path("root").to_str().unwrap()]);
     assert_eq!(o.status.code(), Some(0));
     assert!(o.stdout.is_empty());
 }
@@ -545,11 +472,7 @@ fn mcp_serve_keeps_stdout_for_json_rpc_even_with_json() {
     // Before the session: the error is text on stderr, not JSON on stdout.
     let o = serve(&scratch.path("home"), &[], b"");
     assert_eq!(o.status.code(), Some(2));
-    assert!(
-        o.stdout.is_empty(),
-        "{}",
-        String::from_utf8_lossy(&o.stdout)
-    );
+    assert!(o.stdout.is_empty(), "{}", String::from_utf8_lossy(&o.stdout));
     assert!(String::from_utf8_lossy(&o.stderr).contains("too wide to serve"));
     // A session that ends on a broken message: stdout still holds JSON-RPC only.
     let root = scratch.path("root");

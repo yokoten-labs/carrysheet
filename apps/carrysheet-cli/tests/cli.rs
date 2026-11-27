@@ -93,10 +93,7 @@ fn error_json(o: &Output) -> Value {
     let keys: Vec<_> = err.as_object().unwrap().keys().cloned().collect();
     assert_eq!(keys, ["code", "what", "fix", "why"], "the fix comes early");
     for k in ["code", "what", "why", "fix"] {
-        assert!(
-            err[k].as_str().is_some_and(|s| !s.is_empty()),
-            "{k} is empty in {err}"
-        );
+        assert!(err[k].as_str().is_some_and(|s| !s.is_empty()), "{k} is empty in {err}");
     }
     assert!(!stderr(o).is_empty(), "the message also goes to stderr");
     err
@@ -129,10 +126,7 @@ fn no_arguments_with_json_is_a_json_usage_error() {
 fn version() {
     let o = run(&["--version"]);
     assert_eq!(code(&o), 0);
-    assert_eq!(
-        stdout(&o).trim(),
-        format!("carrysheet-cli {}", env!("CARGO_PKG_VERSION"))
-    );
+    assert_eq!(stdout(&o).trim(), format!("carrysheet-cli {}", env!("CARGO_PKG_VERSION")));
     let o = run(&["--version", "--json"]);
     assert_eq!(code(&o), 0);
     let v = json_only(&o);
@@ -150,11 +144,7 @@ fn help_with_json_is_still_json() {
 
 #[test]
 fn help_fits_80_columns_without_colour() {
-    for args in [
-        vec!["--help"],
-        vec!["read", "--help"],
-        vec!["mcp", "--help"],
-    ] {
+    for args in [vec!["--help"], vec!["read", "--help"], vec!["mcp", "--help"]] {
         let o = run(&args);
         assert_eq!(code(&o), 0, "{args:?}");
         no_escape_codes(&o);
@@ -238,13 +228,7 @@ fn usage_errors_name_what_is_missing_or_allowed() {
     let o = run(&["read", "a.xlsx", "--mode", "everything", "--json"]);
     assert_eq!(code(&o), 2);
     let e = error_json(&o);
-    assert!(
-        e["fix"]
-            .as_str()
-            .unwrap()
-            .contains("values, formulas, both"),
-        "{e}"
-    );
+    assert!(e["fix"].as_str().unwrap().contains("values, formulas, both"), "{e}");
 }
 
 #[test]
@@ -352,13 +336,7 @@ fn bad_values_are_usage_errors() {
         vec!["read", book, "Sheet1!A1:XFE3", "--json"],
         vec!["read", book, "My sheet!A1", "--json"],
         vec!["edit", book, "--ops", "[{", "--json"],
-        vec![
-            "edit",
-            book,
-            "--ops",
-            r#"[{"op":"explode","target":"A1"}]"#,
-            "--json",
-        ],
+        vec!["edit", book, "--ops", r#"[{"op":"explode","target":"A1"}]"#, "--json"],
         vec!["eval", "--json"],
         vec!["convert", book, "b.x", "--format", "ods", "--json"],
         vec!["macros", book, "--json"],
@@ -368,10 +346,7 @@ fn bad_values_are_usage_errors() {
         assert_eq!(code(&o), 2, "{args:?}: {}", stderr(&o));
         let e = error_json(&o);
         let c = e["code"].as_str().unwrap();
-        assert!(
-            ["usage", "invalid_argument", "invalid_reference"].contains(&c),
-            "{args:?}: {e}"
-        );
+        assert!(["usage", "invalid_argument", "invalid_reference"].contains(&c), "{args:?}: {e}");
         no_escape_codes(&o);
     }
 }
@@ -423,35 +398,17 @@ fn deleting_or_overwriting_needs_confirm() {
         assert_eq!(error_json(&o)["code"], "damaged_file", "{args:?}");
     }
 
-    let o = run_in(
-        &home,
-        &["convert", book, "out.csv", "--overwrite", "--json"],
-    );
+    let o = run_in(&home, &["convert", book, "out.csv", "--overwrite", "--json"]);
     assert_eq!(code(&o), 1);
     assert_eq!(error_json(&o)["code"], "confirmation_required");
-    let o = run_in(
-        &home,
-        &[
-            "convert",
-            book,
-            "out.csv",
-            "--overwrite",
-            "--confirm",
-            "--json",
-        ],
-    );
+    let o = run_in(&home, &["convert", book, "out.csv", "--overwrite", "--confirm", "--json"]);
     assert_eq!(error_json(&o)["code"], "damaged_file");
 }
 
 #[test]
 fn exit_code_3_is_reserved_for_nothing_to_do() {
     // No command returns it yet; the mapping lives in the command layer.
-    assert_eq!(
-        carrysheet::commands::ErrorCode::NothingToDo
-            .exit_code()
-            .code(),
-        3
-    );
+    assert_eq!(carrysheet::commands::ErrorCode::NothingToDo.exit_code().code(), 3);
 }
 
 #[test]
@@ -506,23 +463,12 @@ fn max_seconds_must_be_a_sensible_number() {
         let o = run(&["--json", "--max-seconds", bad, "overview", "a.xlsx"]);
         assert_eq!(code(&o), 2, "{bad}: {}", stdout(&o));
         let e = error_json(&o);
-        assert!(
-            ["invalid_argument", "usage"].contains(&e["code"].as_str().unwrap()),
-            "{bad}: {e}"
-        );
+        assert!(["invalid_argument", "usage"].contains(&e["code"].as_str().unwrap()), "{bad}: {e}");
     }
     let home = temp_home();
     let missing = home.join("none.xlsx");
-    let o = run_in(
-        &home,
-        &[
-            "overview",
-            missing.to_str().unwrap(),
-            "--max-seconds",
-            "60",
-            "--json",
-        ],
-    );
+    let o =
+        run_in(&home, &["overview", missing.to_str().unwrap(), "--max-seconds", "60", "--json"]);
     // The flag is accepted; the file is what fails.
     assert_eq!(error_json(&o)["code"], "file_not_found", "{}", stdout(&o));
 }

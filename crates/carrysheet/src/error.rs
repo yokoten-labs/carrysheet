@@ -112,12 +112,7 @@ impl CommandError {
         why: impl Into<String>,
         fix: impl Into<String>,
     ) -> Self {
-        CommandError {
-            code,
-            what: what.into(),
-            why: why.into(),
-            fix: fix.into(),
-        }
+        CommandError { code, what: what.into(), why: why.into(), fix: fix.into() }
     }
 
     /// A command that is not built yet, by how it is typed (`mcp install`).
@@ -153,10 +148,7 @@ impl CommandError {
 
     /// Plain text for a terminal: three lines, no colour, the fix second.
     pub fn to_text(&self) -> String {
-        format!(
-            "error: {}\n  fix: {}\n  why: {}",
-            self.what, self.fix, self.why
-        )
+        format!("error: {}\n  fix: {}\n  why: {}", self.what, self.fix, self.why)
     }
 }
 

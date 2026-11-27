@@ -12,9 +12,7 @@ use common::{run, run_within};
 use serde_json::{Map, Value, json};
 
 fn data(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/data")
-        .join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)
 }
 
 fn scratch(name: &str) -> PathBuf {
@@ -43,9 +41,7 @@ fn open_zip(path: &Path) -> zip::ZipArchive<std::fs::File> {
 /// The part names of a saved package, lower case.
 fn parts(path: &Path) -> Vec<String> {
     let zip = open_zip(path);
-    zip.file_names()
-        .map(|n| n.unwrap().to_ascii_lowercase())
-        .collect()
+    zip.file_names().map(|n| n.unwrap().to_ascii_lowercase()).collect()
 }
 
 /// The part names of a package, as stored.
@@ -82,16 +78,9 @@ fn overview_says_macros_are_kept_and_never_run() {
     let done = call("overview", json!({ "path": p(&data("SimpleMacro.xlsm")) })).unwrap();
     let macros = done["macros"].as_str().unwrap();
     assert!(macros.contains("VBA project"), "{macros}");
-    assert!(
-        macros.contains("never runs") && macros.contains("keeps them"),
-        "{macros}"
-    );
+    assert!(macros.contains("never runs") && macros.contains("keeps them"), "{macros}");
 
-    let done = call(
-        "overview",
-        json!({ "path": p(&data("WithTwoCharts.xlsx")) }),
-    )
-    .unwrap();
+    let done = call("overview", json!({ "path": p(&data("WithTwoCharts.xlsx")) })).unwrap();
     assert!(done.get("macros").is_none(), "{done:?}");
 }
 
@@ -148,9 +137,8 @@ fn overview_finds_a_renamed_vba_project() {
         let (name, body) = match name.as_str() {
             "xl/vbaProject.bin" => ("xl/project1.bin".to_owned(), body),
             "[Content_Types].xml" | "xl/_rels/workbook.xml.rels" => {
-                let text = String::from_utf8(body)
-                    .unwrap()
-                    .replace("vbaProject.bin", "project1.bin");
+                let text =
+                    String::from_utf8(body).unwrap().replace("vbaProject.bin", "project1.bin");
                 (name.clone(), text.into_bytes())
             }
             _ => (name.clone(), body),
@@ -171,11 +159,8 @@ fn overview_finds_a_renamed_vba_project() {
 /// not checked rather than staying silent.
 #[test]
 fn overview_says_macros_in_xls_were_not_checked() {
-    let done = call(
-        "overview",
-        json!({ "path": p(&data("formats/biff/SimpleWithFormula.xls")) }),
-    )
-    .unwrap();
+    let done = call("overview", json!({ "path": p(&data("formats/biff/SimpleWithFormula.xls")) }))
+        .unwrap();
     let macros = done["macros"].as_str().unwrap();
     assert!(
         macros.starts_with("not checked:")
@@ -193,11 +178,7 @@ fn macros_are_kept_in_xlsm_and_reported_before_xlsx() {
 
     // Edited as .xlsm, the VBA project comes back byte for byte.
     let out = dir.join("macro.xlsm");
-    let done = call(
-        "edit",
-        json!({ "path": p(&src), "ops": ops, "output": p(&out) }),
-    )
-    .unwrap();
+    let done = call("edit", json!({ "path": p(&src), "ops": ops, "output": p(&out) })).unwrap();
     assert_eq!(done["written"], true, "{done:?}");
     assert!(lost(&done).is_empty(), "{done:?}");
     assert!(parts(&out).contains(&"xl/vbaproject.bin".to_owned()));
@@ -214,31 +195,22 @@ fn macros_are_kept_in_xlsm_and_reported_before_xlsx() {
     assert!(!out.exists());
 
     // dry_run shows the same report without writing.
-    let dry = call(
-        "convert",
-        json!({ "path": p(&src), "output": p(&out), "dry_run": true }),
-    )
-    .unwrap();
+    let dry =
+        call("convert", json!({ "path": p(&src), "output": p(&out), "dry_run": true })).unwrap();
     assert_eq!(dry["written"], false);
     assert!(lost(&dry).contains(&"VBA project".to_owned()));
 
     // confirm (for overwriting) does not accept a loss: that has its own
     // confirm_loss, so one yes never covers both (review M1).
-    let e = call(
-        "convert",
-        json!({ "path": p(&src), "output": p(&out), "confirm": true }),
-    )
-    .unwrap_err();
+    let e = call("convert", json!({ "path": p(&src), "output": p(&out), "confirm": true }))
+        .unwrap_err();
     assert_eq!(e.code, ErrorCode::ConfirmationRequired);
     assert!(e.fix.contains("confirm_loss"), "{}", e.fix);
     assert!(!out.exists());
 
     // With confirm_loss it saves and says what was lost.
-    let done = call(
-        "convert",
-        json!({ "path": p(&src), "output": p(&out), "confirm_loss": true }),
-    )
-    .unwrap();
+    let done = call("convert", json!({ "path": p(&src), "output": p(&out), "confirm_loss": true }))
+        .unwrap();
     assert_eq!(done["written"], true);
     assert!(lost(&done).contains(&"VBA project".to_owned()));
     assert!(!parts(&out).contains(&"xl/vbaproject.bin".to_owned()));
@@ -250,22 +222,12 @@ fn macros_are_kept_in_xlsm_and_reported_before_xlsx() {
 fn charts_are_kept_or_reported() {
     let dir = scratch("charts");
     let src = data("WithTwoCharts.xlsx");
-    let before = call(
-        "read",
-        json!({ "path": p(&src), "range": "E1", "mode": "both" }),
-    )
-    .unwrap();
-    assert_eq!(
-        before["rows"][0]["cells"][0],
-        json!({ "value": 25.0, "formula": "=D1*D1" })
-    );
+    let before = call("read", json!({ "path": p(&src), "range": "E1", "mode": "both" })).unwrap();
+    assert_eq!(before["rows"][0]["cells"][0], json!({ "value": 25.0, "formula": "=D1*D1" }));
 
     let out = dir.join("charts.xlsx");
     let ops = json!([{ "op": "set_value", "target": "D1", "value": 7 }]);
-    let result = call(
-        "edit",
-        json!({ "path": p(&src), "ops": ops, "output": p(&out) }),
-    );
+    let result = call("edit", json!({ "path": p(&src), "ops": ops, "output": p(&out) }));
     let saved = match result {
         Ok(done) => done,
         // Refused: then it must name what would be lost, and write nothing.
@@ -294,10 +256,7 @@ fn charts_are_kept_or_reported() {
     );
     // Each chart still points at its data.
     if charts == 2 {
-        assert!(
-            part_text(&out, "xl/charts/chart1.xml").contains("Sheet"),
-            "chart lost its series"
-        );
+        assert!(part_text(&out, "xl/charts/chart1.xml").contains("Sheet"), "chart lost its series");
     }
     // The saved file reopens with the new values.
     let after = call("read", json!({ "path": p(&out), "range": "D1:E1" })).unwrap();
@@ -315,11 +274,8 @@ fn csv_output_lists_what_it_cannot_hold() {
     for word in ["formulas", "charts"] {
         assert!(e.what.contains(word), "{word}: {}", e.what);
     }
-    let done = call(
-        "convert",
-        json!({ "path": p(&src), "output": p(&out), "confirm_loss": true }),
-    )
-    .unwrap();
+    let done = call("convert", json!({ "path": p(&src), "output": p(&out), "confirm_loss": true }))
+        .unwrap();
     assert_eq!(done["format"], "csv");
     let text = std::fs::read_to_string(&out).unwrap();
     assert!(text.starts_with("1,10,,5,25"), "{text}");
@@ -461,11 +417,7 @@ fn csv_legacy_bytes_after_a_long_ascii_start_are_guessed() {
     std::fs::write(&path, &bytes).unwrap();
     let args = json!({ "path": p(&path), "range": "A300001:B300001" });
     let page = call("read", args).unwrap();
-    assert_eq!(
-        page["rows"][0]["cells"],
-        json!(["姓名", "城市"]),
-        "{page:?}"
-    );
+    assert_eq!(page["rows"][0]["cells"], json!(["姓名", "城市"]), "{page:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -505,10 +457,7 @@ fn csv_short_legacy_files_report_what_chardetng_guesses() {
             Ok(rows) => rows[0][0].to_string(),
             Err(e) => format!("error: {} / {} / {}", e.what, e.why, e.fix),
         };
-        eprintln!(
-            "short {}: {text:?} -> guess {guess}, A1 {first}",
-            encoding.name()
-        );
+        eprintln!("short {}: {text:?} -> guess {guess}, A1 {first}", encoding.name());
         let field = text.split(',').next().unwrap();
         let read_right = first == format!("{field:?}");
         if (guess == encoding.name()) != is_right || read_right != is_right {
@@ -525,11 +474,7 @@ fn csv_bytes_that_fit_no_encoding_are_an_error() {
     bytes.extend(b"\xFF,2\n");
     let e = read_csv("bad-utf8", &bytes).unwrap_err();
     assert_eq!(e.code, ErrorCode::DamagedFile, "{e:?}");
-    assert!(
-        e.why.contains("UTF-8") && e.why.contains("guessed"),
-        "{}",
-        e.why
-    );
+    assert!(e.why.contains("UTF-8") && e.why.contains("guessed"), "{}", e.why);
     assert!(e.fix.contains("UTF-8"), "{}", e.fix);
     // A byte order mark decides, so its encoding must hold every byte.
     let e = read_csv("bad-bom", b"\xEF\xBB\xBFa,\xFF\n").unwrap_err();

@@ -25,11 +25,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn tools_json(server: &Server) -> Vec<Value> {
-    server
-        .tools()
-        .iter()
-        .map(|t| serde_json::to_value(t).unwrap())
-        .collect()
+    server.tools().iter().map(|t| serde_json::to_value(t).unwrap()).collect()
 }
 
 #[test]
@@ -86,15 +82,9 @@ fn failures_put_the_fix_first() {
     for (name, args) in [
         ("overview", json!({ "path": "book.xlsx" })),
         ("overview", json!({ "path": "../outside.xlsx" })),
-        (
-            "overview",
-            json!({ "path": "book.xlsx", "session_id": "x" }),
-        ),
+        ("overview", json!({ "path": "book.xlsx", "session_id": "x" })),
         ("overview", json!({})),
-        (
-            "overview",
-            json!({ "path": format!("../{}", "x".repeat(5000)) }),
-        ),
+        ("overview", json!({ "path": format!("../{}", "x".repeat(5000)) })),
         ("overview", json!({ "path": "y".repeat(5000) })),
         ("nope", json!({})),
     ] {
@@ -107,10 +97,7 @@ fn failures_put_the_fix_first() {
         let what_at = text.find(r#""what":""#).unwrap();
         let fix_at = text.find(r#""fix":""#).unwrap();
         let why_at = text.find(r#""why":""#).unwrap();
-        assert!(
-            code_at < what_at && what_at < fix_at && fix_at < why_at,
-            "{text}"
-        );
+        assert!(code_at < what_at && what_at < fix_at && fix_at < why_at, "{text}");
         assert!(fix_at < 200, "{text}");
     }
     let _ = std::fs::remove_dir_all(&dir);
@@ -120,50 +107,27 @@ fn failures_put_the_fix_first() {
 fn paths_are_confined_and_resolved() {
     let dir = scratch("confine");
     let server = test_server(&dir.join("root"), false);
-    let r = server.call(
-        "overview",
-        json!({ "path": "../outside.xlsx" }).as_object().cloned(),
-    );
-    assert_eq!(
-        r.structured_content.unwrap()["error"]["code"],
-        "outside_root"
-    );
+    let r = server.call("overview", json!({ "path": "../outside.xlsx" }).as_object().cloned());
+    assert_eq!(r.structured_content.unwrap()["error"]["code"], "outside_root");
     // Inside the root, the call reaches the kernel, which finds no workbook.
-    let r = server.call(
-        "overview",
-        json!({ "path": "book.xlsx" }).as_object().cloned(),
-    );
-    assert_eq!(
-        r.structured_content.unwrap()["error"]["code"],
-        "damaged_file"
-    );
+    let r = server.call("overview", json!({ "path": "book.xlsx" }).as_object().cloned());
+    assert_eq!(r.structured_content.unwrap()["error"]["code"], "damaged_file");
     // A missing file inside the root is reported as missing, with ~.
     let r = server.call("read", json!({ "path": "gone.xlsx" }).as_object().cloned());
-    assert_eq!(
-        r.structured_content.unwrap()["error"]["code"],
-        "file_not_found"
-    );
+    assert_eq!(r.structured_content.unwrap()["error"]["code"], "file_not_found");
     // Outputs are confined too.
     let r = server.call(
         "convert",
-        json!({ "path": "book.xlsx", "output": "../out.csv" })
-            .as_object()
-            .cloned(),
+        json!({ "path": "book.xlsx", "output": "../out.csv" }).as_object().cloned(),
     );
-    assert_eq!(
-        r.structured_content.unwrap()["error"]["code"],
-        "outside_root"
-    );
+    assert_eq!(r.structured_content.unwrap()["error"]["code"], "outside_root");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn log_lines_escape_tag_characters_and_backslashes() {
     let line = log_line("x\u{E0041}\u{202E}\u{1b}[31m\\u{41}");
-    assert_eq!(
-        line,
-        "carrysheet-cli: x\\u{e0041}\\u{202e}\\u{1b}[31m\\\\u{41}\n"
-    );
+    assert_eq!(line, "carrysheet-cli: x\\u{e0041}\\u{202e}\\u{1b}[31m\\\\u{41}\n");
 }
 
 #[test]

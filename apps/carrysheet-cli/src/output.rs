@@ -56,9 +56,7 @@ fn cell(value: &Value) -> String {
 }
 
 fn lines(key: &str, value: &Value, pad: &str, out: &mut String) {
-    let rows = value
-        .as_array()
-        .filter(|l| !l.is_empty() && l.iter().all(Value::is_object));
+    let rows = value.as_array().filter(|l| !l.is_empty() && l.iter().all(Value::is_object));
     if let Some(rows) = rows {
         let mut keys: Vec<&str> = Vec::new();
         for k in rows.iter().flat_map(|r| r.as_object().unwrap().keys()) {

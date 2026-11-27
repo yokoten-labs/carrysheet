@@ -67,59 +67,25 @@ fn command_json_lists_flags_and_types() {
             json!("--response-format")
         ]
     );
-    assert_eq!(
-        field("type"),
-        [
-            "path", "range", "enum", "integer", "integer", "text", "enum"
-        ]
-    );
-    assert_eq!(
-        field("required"),
-        [true, false, false, false, false, false, false]
-    );
+    assert_eq!(field("type"), ["path", "range", "enum", "integer", "integer", "text", "enum"]);
+    assert_eq!(field("required"), [true, false, false, false, false, false, false]);
     assert_eq!(field("positional")[..3], [true, true, false]);
-    assert_eq!(
-        field("description")[3],
-        "Rows per page, 1 to 10000. Default: 200."
-    );
+    assert_eq!(field("description")[3], "Rows per page, 1 to 10000. Default: 200.");
 
     let c = command_json(command("edit").unwrap());
     let args = c["args"].as_array().unwrap();
     let types: Vec<_> = args.iter().map(|a| a["type"].clone()).collect();
-    assert_eq!(
-        types,
-        [
-            "path",
-            "object_list",
-            "path",
-            "boolean",
-            "boolean",
-            "boolean",
-            "boolean"
-        ]
-    );
+    assert_eq!(types, ["path", "object_list", "path", "boolean", "boolean", "boolean", "boolean"]);
     assert_eq!(args[1]["flag"], "--ops");
     assert_eq!(args[1]["required"], true);
     assert_eq!(c["changes_files"], true);
-    assert_eq!(
-        command_json(command("mcp_serve").unwrap())["cli"],
-        "mcp serve"
-    );
+    assert_eq!(command_json(command("mcp_serve").unwrap())["cli"], "mcp serve");
 }
 
 #[test]
 fn flags_are_kebab_case() {
     let m = build()
-        .try_get_matches_from([
-            BIN,
-            "read",
-            "a.xlsx",
-            "A1:B2",
-            "--max-rows",
-            "5",
-            "--mode",
-            "both",
-        ])
+        .try_get_matches_from([BIN, "read", "a.xlsx", "A1:B2", "--max-rows", "5", "--mode", "both"])
         .unwrap();
     let (c, sub) = chosen(&m).unwrap();
     let j = args_json(c, sub).unwrap();
@@ -131,16 +97,8 @@ fn flags_are_kebab_case() {
 
 #[test]
 fn dry_run_only_where_files_change() {
-    assert!(
-        build()
-            .try_get_matches_from([BIN, "convert", "a.xlsx", "b.csv", "--dry-run"])
-            .is_ok()
-    );
-    assert!(
-        build()
-            .try_get_matches_from([BIN, "read", "a.xlsx", "--dry-run"])
-            .is_err()
-    );
+    assert!(build().try_get_matches_from([BIN, "convert", "a.xlsx", "b.csv", "--dry-run"]).is_ok());
+    assert!(build().try_get_matches_from([BIN, "read", "a.xlsx", "--dry-run"]).is_err());
 }
 
 #[test]
@@ -158,20 +116,12 @@ fn global_flags_go_anywhere() {
 #[test]
 fn ops_json_is_parsed() {
     let m = build()
-        .try_get_matches_from([
-            BIN,
-            "edit",
-            "a.xlsx",
-            "--ops",
-            r#"[{"op":"clear","target":"A1"}]"#,
-        ])
+        .try_get_matches_from([BIN, "edit", "a.xlsx", "--ops", r#"[{"op":"clear","target":"A1"}]"#])
         .unwrap();
     let (c, sub) = chosen(&m).unwrap();
     assert_eq!(args_json(c, sub).unwrap()["ops"][0]["op"], "clear");
 
-    let m = build()
-        .try_get_matches_from([BIN, "edit", "a.xlsx", "--ops", "[{"])
-        .unwrap();
+    let m = build().try_get_matches_from([BIN, "edit", "a.xlsx", "--ops", "[{"]).unwrap();
     let (c, sub) = chosen(&m).unwrap();
     let e = args_json(c, sub).unwrap_err();
     assert_eq!(e.code, ErrorCode::InvalidArgument);
@@ -204,9 +154,7 @@ impl Drop for TempDir {
 }
 
 fn ops_from(at: &str) -> Result<Map<String, Value>, CommandError> {
-    let m = build()
-        .try_get_matches_from([BIN, "edit", "a.xlsx", "--ops", at])
-        .unwrap();
+    let m = build().try_get_matches_from([BIN, "edit", "a.xlsx", "--ops", at]).unwrap();
     let (c, sub) = chosen(&m).unwrap();
     args_json(c, sub)
 }
@@ -248,10 +196,7 @@ fn endless_devices_and_pipes_are_refused_without_waiting() {
     // Opening a pipe with no writer would wait forever.
     let dir = TempDir::new("ops-fifo");
     let fifo = dir.0.join("ops.fifo");
-    let made = std::process::Command::new("mkfifo")
-        .arg(&fifo)
-        .status()
-        .is_ok_and(|s| s.success());
+    let made = std::process::Command::new("mkfifo").arg(&fifo).status().is_ok_and(|s| s.success());
     if made {
         let e = ops_from(&format!("@{}", fifo.display())).unwrap_err();
         assert_eq!(e.code, ErrorCode::InvalidArgument);

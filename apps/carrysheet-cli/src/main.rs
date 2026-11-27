@@ -52,11 +52,7 @@ fn main() -> std::process::ExitCode {
 /// Runs the chosen command with its checked arguments.
 fn run_command(matches: &ArgMatches) -> Result<Option<run::Done>, CommandError> {
     let global = cli::Global::from_arg_matches(matches).expect("clap parsed the global flags");
-    let ctx = run::Context {
-        yes: global.yes,
-        max_seconds: cli::max_seconds(&global)?,
-        root: None,
-    };
+    let ctx = run::Context { yes: global.yes, max_seconds: cli::max_seconds(&global)?, root: None };
     // clap requires a subcommand, and each one comes from the command table.
     let (command, sub) = cli::chosen(matches).expect("clap chose a command");
     let args = validate_args(command, &Value::Object(cli::args_json(command, sub)?))?;
@@ -69,8 +65,7 @@ fn run_command(matches: &ArgMatches) -> Result<Option<run::Done>, CommandError> 
 /// Nobody is asked: a refusal for want of a confirmation also names `--yes`.
 fn with_yes(mut err: CommandError) -> CommandError {
     if err.code == ErrorCode::ConfirmationRequired {
-        err.fix
-            .push_str(" Or add --yes, which confirms everything.");
+        err.fix.push_str(" Or add --yes, which confirms everything.");
     }
     err
 }

@@ -49,15 +49,7 @@ fn every_class_is_escaped() {
 
 #[test]
 fn visible_text_is_kept() {
-    for text in [
-        "plain",
-        "Módulo1",
-        "日本語",
-        "😀",
-        "e\u{301}",
-        "a b",
-        "\u{a0}",
-    ] {
+    for text in ["plain", "Módulo1", "日本語", "😀", "e\u{301}", "a b", "\u{a0}"] {
         assert_eq!(escape(text, 100), text);
     }
 }
@@ -111,11 +103,7 @@ fn a_cut_never_splits_an_escape() {
     let total = text.chars().count();
     for max in 0..40 {
         for quoted in [false, true] {
-            let out = if quoted {
-                quote(text, max)
-            } else {
-                escape(text, max)
-            };
+            let out = if quoted { quote(text, max) } else { escape(text, max) };
             let (body, rest) = match out.find(CUT) {
                 Some(at) => {
                     let mark = &out[at + CUT.len()..];
@@ -125,9 +113,7 @@ fn a_cut_never_splits_an_escape() {
                 None => (&out[..], 0),
             };
             let body = if quoted {
-                body.strip_prefix('"')
-                    .and_then(|b| b.strip_suffix('"'))
-                    .unwrap()
+                body.strip_prefix('"').and_then(|b| b.strip_suffix('"')).unwrap()
             } else {
                 body
             };

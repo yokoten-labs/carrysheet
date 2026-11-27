@@ -11,8 +11,7 @@ fn is_snake(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 64
         && s.starts_with(|c: char| c.is_ascii_lowercase())
-        && s.bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 /// The argument names of a command, in order.
@@ -36,15 +35,7 @@ fn names_are_unique_snake_case() {
 
 #[test]
 fn mvp_commands_are_all_there() {
-    for name in [
-        "overview",
-        "read",
-        "eval",
-        "convert",
-        "edit",
-        "mcp_serve",
-        "commands",
-    ] {
+    for name in ["overview", "read", "eval", "convert", "edit", "mcp_serve", "commands"] {
         assert!(command(name).is_some(), "{name}");
     }
 }
@@ -54,17 +45,9 @@ fn text_fits_help_and_tool_lists() {
     for c in COMMANDS {
         let (summary, description) = c.doc();
         assert!(!summary.is_empty() && summary.len() <= 72, "{}", c.name);
-        assert!(
-            !summary.ends_with('.') && !summary.contains('\n'),
-            "{}",
-            c.name
-        );
+        assert!(!summary.ends_with('.') && !summary.contains('\n'), "{}", c.name);
         assert_ne!(summary, description, "{}: one doc paragraph", c.name);
-        assert!(
-            !description.is_empty() && description.len() <= 400,
-            "{}",
-            c.name
-        );
+        assert!(!description.is_empty() && description.len() <= 400, "{}", c.name);
         assert!(!description.contains('\n'), "{}", c.name);
         let schema = input_schema(c);
         for name in names(c) {
@@ -133,11 +116,7 @@ fn path_arguments_are_text() {
             found.insert(*name);
         }
     }
-    assert_eq!(
-        found.len(),
-        PATHS.len(),
-        "a name in PATHS is not an argument"
-    );
+    assert_eq!(found.len(), PATHS.len(), "a name in PATHS is not an argument");
 }
 
 // The schemas.
@@ -157,10 +136,7 @@ fn overview_schema_shape() {
     // The struct's doc comment is the tool description, not the schema's.
     assert!(s.get("description").is_none());
     let keys: Vec<_> = s.as_object().unwrap().keys().collect();
-    assert_eq!(
-        keys,
-        ["type", "properties", "required", "additionalProperties"]
-    );
+    assert_eq!(keys, ["type", "properties", "required", "additionalProperties"]);
 }
 
 #[test]
@@ -168,15 +144,7 @@ fn schemas_keep_only_what_every_client_accepts() {
     let s = input_schema(read());
     assert_eq!(
         names(read()),
-        [
-            "path",
-            "range",
-            "mode",
-            "max_rows",
-            "max_columns",
-            "cursor",
-            "response_format"
-        ]
+        ["path", "range", "mode", "max_rows", "max_columns", "cursor", "response_format"]
     );
     // No `format`, `minimum` or `default` from schemars, and no type lists.
     assert_eq!(
@@ -195,10 +163,7 @@ fn schemas_keep_only_what_every_client_accepts() {
         s["properties"]["dry_run"]["anyOf"],
         json!([{ "type": "boolean" }, { "type": "null" }])
     );
-    assert_eq!(
-        s["properties"]["format"]["anyOf"][0]["enum"],
-        json!(["xlsx", "csv"])
-    );
+    assert_eq!(s["properties"]["format"]["anyOf"][0]["enum"], json!(["xlsx", "csv"]));
     assert_eq!(
         input_schema(command("commands").unwrap()),
         json!({ "type": "object", "properties": {}, "required": [], "additionalProperties": false })
@@ -250,22 +215,8 @@ fn tool_definitions_have_all_annotations() {
         assert_eq!(t["name"], c.name);
         assert_eq!(t["description"], c.doc().1);
         let keys: Vec<_> = t["annotations"].as_object().unwrap().keys().collect();
-        assert_eq!(
-            keys,
-            [
-                "readOnlyHint",
-                "destructiveHint",
-                "idempotentHint",
-                "openWorldHint"
-            ]
-        );
-        assert!(
-            t["annotations"]
-                .as_object()
-                .unwrap()
-                .values()
-                .all(Value::is_boolean)
-        );
+        assert_eq!(keys, ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"]);
+        assert!(t["annotations"].as_object().unwrap().values().all(Value::is_boolean));
     }
 }
 
@@ -346,10 +297,7 @@ fn a_wrong_value_names_its_argument() {
         (json!({ "path": 1 }), "`path`"),
         (json!({ "max_rows": "5", "path": "a" }), "`max_rows`"),
         (json!({ "path": "a", "cursor": "c", "mode": 1 }), "`mode`"),
-        (
-            json!({ "path": "a", "max_columns": 1.5, "mode": "all" }),
-            "`max_columns`",
-        ),
+        (json!({ "path": "a", "max_columns": 1.5, "mode": "all" }), "`max_columns`"),
         (json!({ "path": "a", "max_columns": 0 }), "`max_columns`"),
     ] {
         let e = validate_args(read(), &bad).unwrap_err();
@@ -371,11 +319,7 @@ fn an_enum_error_lists_the_allowed_values() {
     let e = validate_args(convert, &call).unwrap_err();
     assert!(e.what.contains("`format`"), "{}", e.what);
     assert!(e.why.contains("pdf"), "{}", e.why);
-    assert!(
-        e.fix.starts_with("Give `format` as one of xlsx, csv."),
-        "{}",
-        e.fix
-    );
+    assert!(e.fix.starts_with("Give `format` as one of xlsx, csv."), "{}", e.fix);
 }
 
 #[test]
@@ -396,11 +340,8 @@ fn checks_booleans() {
     assert_eq!(ok["dry_run"], true);
     assert_eq!(ok["confirm"], false);
     assert_eq!(ok["overwrite"], Value::Null);
-    let e = validate_args(
-        convert,
-        &json!({ "path": "a", "output": "b", "dry_run": "yes" }),
-    )
-    .unwrap_err();
+    let e = validate_args(convert, &json!({ "path": "a", "output": "b", "dry_run": "yes" }))
+        .unwrap_err();
     assert!(e.what.contains("`dry_run`"), "{}", e.what);
 }
 
@@ -480,11 +421,7 @@ fn checks_object_lists() {
         )
         .unwrap_err();
         assert!(e.what.contains("`ops[0]`"), "{}", e.what);
-        assert!(
-            e.why.contains("text, a number, or true or false"),
-            "{}",
-            e.why
-        );
+        assert!(e.why.contains("text, a number, or true or false"), "{}", e.why);
     }
     let long = "z".repeat(MAX_TEXT_CHARS + 1);
     assert!(
@@ -501,9 +438,8 @@ fn checks_object_lists() {
 #[test]
 fn limits_list_sizes_and_text_length() {
     let edit = command("edit").unwrap();
-    let ops: Vec<Value> = (0..=MAX_LIST_ITEMS)
-        .map(|_| json!({ "op": "clear", "target": "A1" }))
-        .collect();
+    let ops: Vec<Value> =
+        (0..=MAX_LIST_ITEMS).map(|_| json!({ "op": "clear", "target": "A1" })).collect();
     let e = validate_args(edit, &json!({ "path": "a", "ops": ops })).unwrap_err();
     assert!(e.why.contains("limit"));
     // A bad last item still gets the size error, before any type check.
@@ -564,11 +500,9 @@ fn deleting_and_overwriting_need_confirm() {
     assert!(call(json!({ "confirm": false })).is_err());
 
     // Nothing destructive: no confirmation.
-    let args = validate_args(
-        edit,
-        &json!({ "path": "a", "ops": [{ "op": "clear", "target": "A1" }] }),
-    )
-    .unwrap();
+    let args =
+        validate_args(edit, &json!({ "path": "a", "ops": [{ "op": "clear", "target": "A1" }] }))
+            .unwrap();
     assert!(check_confirmation(edit, &args).is_ok());
 
     // Each deleting operation is named.
@@ -585,22 +519,15 @@ fn deleting_and_overwriting_need_confirm() {
 
     // Overwriting with convert.
     let convert = command("convert").unwrap();
-    let args = validate_args(
-        convert,
-        &json!({ "path": "a.xlsx", "output": "b.csv", "overwrite": true }),
-    )
-    .unwrap();
+    let args =
+        validate_args(convert, &json!({ "path": "a.xlsx", "output": "b.csv", "overwrite": true }))
+            .unwrap();
     let e = check_confirmation(convert, &args).unwrap_err();
-    assert!(
-        e.what.starts_with("`convert` would overwrite a file"),
-        "{}",
-        e.what
-    );
+    assert!(e.what.starts_with("`convert` would overwrite a file"), "{}", e.what);
 
     // Long lists are summed up.
-    let ops: Vec<Value> = (0..50)
-        .map(|i| json!({ "op": "delete_sheet", "target": format!("S{i}") }))
-        .collect();
+    let ops: Vec<Value> =
+        (0..50).map(|i| json!({ "op": "delete_sheet", "target": format!("S{i}") })).collect();
     let args = validate_args(edit, &json!({ "path": "a", "ops": ops })).unwrap();
     let e = check_confirmation(edit, &args).unwrap_err();
     assert!(e.what.contains("and 49 more"), "{}", e.what);

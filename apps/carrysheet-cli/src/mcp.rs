@@ -35,9 +35,7 @@ pub(crate) const MAX_LOG_LINE: usize = 2_000;
 /// Writes one line to stderr, never stdout: home shown as `~`, and control and invisible
 /// characters escaped as for file text, so a client cannot forge a line or hide escape codes.
 pub fn log(message: &str) {
-    let _ = std::io::stderr()
-        .lock()
-        .write_all(log_line(message).as_bytes());
+    let _ = std::io::stderr().lock().write_all(log_line(message).as_bytes());
 }
 
 pub(crate) fn log_line(message: &str) -> String {
@@ -56,9 +54,7 @@ pub struct Server {
 /// The commands offered as tools: every MCP tool in the table; with `--read-only`, only
 /// those that never change files and say so in `readOnlyHint`.
 pub fn offered(read_only: bool) -> Vec<&'static Command> {
-    mcp_tools()
-        .filter(|c| !read_only || (!c.changes_files() && c.is_read_only()))
-        .collect()
+    mcp_tools().filter(|c| !read_only || (!c.changes_files() && c.is_read_only())).collect()
 }
 
 impl Server {
@@ -70,10 +66,8 @@ impl Server {
     /// The tool definitions as rmcp's type. The JSON comes from the argument structs, so
     /// nothing here can drift from `commands --json`.
     pub(crate) fn tools(&self) -> Vec<Tool> {
-        let tools = self
-            .commands
-            .iter()
-            .map(|c| serde_json::from_value::<Tool>(tool_definition(c)));
+        let tools =
+            self.commands.iter().map(|c| serde_json::from_value::<Tool>(tool_definition(c)));
         tools
             .collect::<Result<_, _>>()
             .expect("tool definitions from the argument structs are valid MCP tools")
@@ -89,11 +83,7 @@ impl Server {
         // calls. The name comes from the client: log it only if it is a real
         // tool, so a long or multi-line name cannot fill or forge log lines.
         if let Err(e) = &outcome {
-            let shown = if mcp_tools().any(|c| c.name == name) {
-                name
-            } else {
-                "(unknown tool)"
-            };
+            let shown = if mcp_tools().any(|c| c.name == name) { name } else { "(unknown tool)" };
             log(&format!(
                 "tools/call {shown}: {} in {} ms",
                 e.code.as_str(),
@@ -118,10 +108,7 @@ impl Server {
         self.confine(&mut args)?;
         // Never asks; keeps the agents' time limit (limits::MAX_CALL_SECONDS).
         // Writes stay inside the root even if a link changes meanwhile.
-        let ctx = Context {
-            root: Some(self.root.dir()),
-            ..Context::default()
-        };
+        let ctx = Context { root: Some(self.root.dir()), ..Context::default() };
         run::run(command, &args, &ctx).map(|done| done.data)
     }
 
@@ -156,10 +143,7 @@ impl Server {
             fix.push_str(" To change files, restart the server without --read-only.");
             let why =
                 "the server was started with --read-only, which hides tools that change files";
-            (
-                format!("the tool `{name}` is not offered in read-only mode"),
-                why,
-            )
+            (format!("the tool `{name}` is not offered in read-only mode"), why)
         } else {
             let why = "the name is not in this server's tool list";
             (format!("there is no tool named `{name}`"), why)
@@ -179,11 +163,9 @@ const MAX_DETAIL: usize = 200;
 /// characters and `fix` and `why` to [`MAX_DETAIL`].
 pub fn error_envelope(e: &CommandError) -> Value {
     let mut envelope = redact_error(e).to_envelope();
-    for (part, max) in [
-        ("/error/what", MAX_WHAT),
-        ("/error/fix", MAX_DETAIL),
-        ("/error/why", MAX_DETAIL),
-    ] {
+    for (part, max) in
+        [("/error/what", MAX_WHAT), ("/error/fix", MAX_DETAIL), ("/error/why", MAX_DETAIL)]
+    {
         if let Some(Value::String(text)) = envelope.pointer_mut(part)
             && text.chars().count() > max
         {
@@ -286,10 +268,8 @@ pub fn serve(args: &Map<String, Value>) -> Result<(), CommandError> {
     })?;
     let read_only = options.read_only == Some(true);
     let (root, warning) = open_root(options.root.as_deref().map(Path::new))?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| {
+    let runtime =
+        tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| {
             CommandError::new(
                 ErrorCode::Internal,
                 "the MCP server could not start",

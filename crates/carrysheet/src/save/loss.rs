@@ -128,9 +128,7 @@ pub(crate) fn kind(table: &'static str, name: &str) -> Option<&'static str> {
     table.lines().find_map(|line| {
         let (label, patterns) = line.split_once(": ")?;
         let mut patterns = patterns.split(' ');
-        let excluded = patterns
-            .clone()
-            .any(|p| p.strip_prefix('-').is_some_and(matches));
+        let excluded = patterns.clone().any(|p| p.strip_prefix('-').is_some_and(matches));
         (!excluded && patterns.any(matches)).then_some(label)
     })
 }
@@ -151,15 +149,9 @@ pub(crate) fn macros(bytes: &[u8], kept: bool) -> Option<String> {
     };
     let by_name = p.part_features();
     // Content types, lower case: `macrosheet` also matches `intlmacrosheet`.
-    let types = [
-        ("VBA project", "vbaproject"),
-        ("macro sheets (Excel 4)", "macrosheet"),
-    ];
-    let mut found: Vec<&str> = types
-        .iter()
-        .map(|t| t.0)
-        .filter(|t| by_name.contains_key(t))
-        .collect();
+    let types = [("VBA project", "vbaproject"), ("macro sheets (Excel 4)", "macrosheet")];
+    let mut found: Vec<&str> =
+        types.iter().map(|t| t.0).filter(|t| by_name.contains_key(t)).collect();
     let data = p.content_types();
     let low = data.as_deref().unwrap_or_default().to_ascii_lowercase();
     for (label, kind) in types {
@@ -232,10 +224,7 @@ pub(crate) fn compare(source: &[u8], output: &[u8], report: &mut SaveReport) {
             }
         }
     }
-    let added = after
-        .parts
-        .keys()
-        .filter(|k| !before.parts.contains_key(*k));
+    let added = after.parts.keys().filter(|k| !before.parts.contains_key(*k));
     counts.added = added.count() as u64;
     report.parts = Some(counts);
 
@@ -245,11 +234,7 @@ pub(crate) fn compare(source: &[u8], output: &[u8], report: &mut SaveReport) {
     for (feature, n) in &had {
         let kept = has.get(feature).map_or(0, |k| *k.min(n));
         if kept < *n {
-            report.lost.push(Loss {
-                feature: (*feature).to_owned(),
-                before: *n,
-                after: kept,
-            });
+            report.lost.push(Loss { feature: (*feature).to_owned(), before: *n, after: kept });
         }
     }
     if had.contains_key("digital signatures") {

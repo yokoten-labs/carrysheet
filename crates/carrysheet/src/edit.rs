@@ -91,22 +91,14 @@ impl EditOp {
 }
 
 fn op_error(i: usize, why: impl Into<String>, fix: impl Into<String>) -> CommandError {
-    CommandError::new(
-        ErrorCode::InvalidArgument,
-        format!("ops[{i}] is not valid"),
-        why,
-        fix,
-    )
+    CommandError::new(ErrorCode::InvalidArgument, format!("ops[{i}] is not valid"), why, fix)
 }
 
 /// Reads the `ops` argument of `edit`. The argument layer checked its
 /// shape; this checks what each operation needs, and the fill limits.
 pub fn parse_ops(ops: &Value) -> Result<Vec<EditOp>, CommandError> {
     let items = Operations::deserialize(ops).map_err(|e| {
-        let why = format!(
-            "ops is not a list of operations: {}",
-            escape(&e.to_string(), 200)
-        );
+        let why = format!("ops is not a list of operations: {}", escape(&e.to_string(), 200));
         let fix = format!("Pass a list like [{OPERATION_EXAMPLE}].");
         CommandError::invalid_argument("ops", why, fix)
     })?;
@@ -155,10 +147,8 @@ fn parse_op(i: usize, item: Operation) -> Result<EditOp, CommandError> {
         }
         Ok(())
     };
-    let is_sheet_op = matches!(
-        kind,
-        EditKind::AddSheet | EditKind::RenameSheet | EditKind::DeleteSheet
-    );
+    let is_sheet_op =
+        matches!(kind, EditKind::AddSheet | EditKind::RenameSheet | EditKind::DeleteSheet);
     let target = if is_sheet_op {
         let name = item.target.trim();
         if name.is_empty() {
@@ -197,11 +187,7 @@ fn parse_op(i: usize, item: Operation) -> Result<EditOp, CommandError> {
             let formula = formula.trim();
             let formula = formula.strip_prefix('=').unwrap_or(formula).trim();
             if formula.is_empty() {
-                return Err(op_error(
-                    i,
-                    "the formula is empty",
-                    "Add \"value\": \"SUM(B2:B9)\".",
-                ));
+                return Err(op_error(i, "the formula is empty", "Add \"value\": \"SUM(B2:B9)\"."));
             }
             check_formula(i, formula)?;
             text = Some(formula.to_owned());
@@ -227,22 +213,13 @@ fn parse_op(i: usize, item: Operation) -> Result<EditOp, CommandError> {
         }
         _ => {}
     }
-    let op = EditOp {
-        kind,
-        target,
-        value,
-        text,
-        count: item.count,
-    };
+    let op = EditOp { kind, target, value, text, count: item.count };
     let cells = op.fill_cells();
     if cells > MAX_FILL_CELLS {
         return Err(CommandError::new(
             ErrorCode::LimitExceeded,
             format!("ops[{i}] fills {cells} cells"),
-            format!(
-                "{} fills at most {MAX_FILL_CELLS} cells per operation",
-                kind.name()
-            ),
+            format!("{} fills at most {MAX_FILL_CELLS} cells per operation", kind.name()),
             "Give a smaller range, like B2:B1000 rather than B:B.",
         ));
     }
@@ -401,9 +378,7 @@ pub(crate) fn apply(book: &mut Book, ops: &[EditOp]) -> Result<EditResult, Comma
     }
     // Filling a range moves the active sheet; the file keeps its own.
     if let Some(name) = active {
-        let _ = book
-            .session
-            .execute_headless("sheet.activate", json!({ "sheet": name }));
+        let _ = book.session.execute_headless("sheet.activate", json!({ "sheet": name }));
     }
     // After rows, columns or sheets move, cells cannot be compared by address.
     let fills = [EditKind::SetValue, EditKind::SetFormula, EditKind::Clear];
@@ -521,11 +496,7 @@ fn apply_one(
             forget_kept(book, si, None, &mut result.dropped);
             let n = op.count.unwrap_or(size).max(1);
             let label = |at: u32| {
-                if is_rows {
-                    at.saturating_add(1).to_string()
-                } else {
-                    col_to_letters(at)
-                }
+                if is_rows { at.saturating_add(1).to_string() } else { col_to_letters(at) }
             };
             let span = format!("{}:{}", label(start), label(start.saturating_add(n - 1)));
             execute(book, i, op, id, json!({ "sheet": si, key: span }))?;
@@ -545,11 +516,7 @@ fn apply_one(
             ));
         }
     };
-    result.ops.push(OpResult {
-        op: op.kind,
-        target: op.target_text(),
-        done,
-    });
+    result.ops.push(OpResult { op: op.kind, target: op.target_text(), done });
     Ok(())
 }
 
@@ -625,9 +592,7 @@ fn write_cells(
     // Excel. An agent asked for a formula, so that is an error.
     if op.kind == EditKind::SetFormula
         && let Some(sh) = after_sheet
-        && let Some(at) = r
-            .iter()
-            .find(|at| sh.cell(*at).is_none_or(|c| c.formula.is_none()))
+        && let Some(at) = r.iter().find(|at| sh.cell(*at).is_none_or(|c| c.formula.is_none()))
     {
         return Err(CommandError::new(
             ErrorCode::InvalidArgument,

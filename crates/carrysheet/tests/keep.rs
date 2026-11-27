@@ -27,11 +27,7 @@ fn features_book() -> Vec<u8> {
     ));
     book.sheet_rels = vec![
         ("comments".into(), "../comments1.xml".into(), false),
-        (
-            THREADED_REL.into(),
-            "../threadedComments/threadedComment1.xml".into(),
-            false,
-        ),
+        (THREADED_REL.into(), "../threadedComments/threadedComment1.xml".into(), false),
     ];
     book.workbook_rels = vec![(PERSON_REL.into(), "persons/person.xml".into())];
     book.content_types = vec![
@@ -43,10 +39,7 @@ fn features_book() -> Vec<u8> {
             "xl/threadedComments/threadedComment1.xml".into(),
             "application/vnd.ms-excel.threadedcomments+xml".into(),
         ),
-        (
-            "xl/persons/person.xml".into(),
-            "application/vnd.ms-excel.person+xml".into(),
-        ),
+        ("xl/persons/person.xml".into(), "application/vnd.ms-excel.person+xml".into()),
     ];
     book.extra = vec![
         entry(
@@ -77,10 +70,7 @@ fn a_save_keeps_what_round_one_found_dropped() {
     assert_eq!(done["save"]["lost"], json!([]), "{done:?}");
 
     let wb = part_text(&out, "xl/workbook.xml");
-    assert!(
-        wb.contains(r#"<fileSharing readOnlyRecommended="1" userName="Ann"/>"#),
-        "{wb}"
-    );
+    assert!(wb.contains(r#"<fileSharing readOnlyRecommended="1" userName="Ann"/>"#), "{wb}");
     assert!(wb.contains(r#"codeName="ThisWorkbook""#), "{wb}");
 
     let sheet = part_text(&out, "xl/worksheets/sheet1.xml");
@@ -105,10 +95,7 @@ fn a_save_keeps_what_round_one_found_dropped() {
     assert!(strings.contains("<rPr><b/></rPr><t>Bold</t>"), "{strings}");
     assert!(strings.contains(r#"<rPh sb="0" eb="1">"#), "{strings}");
     let comments = part_text(&out, "xl/comments1.xml");
-    assert!(
-        comments.contains("<rPr><b/></rPr><t>Ann:</t>"),
-        "{comments}"
-    );
+    assert!(comments.contains("<rPr><b/></rPr><t>Ann:</t>"), "{comments}");
     let persons = part_text(&out, "xl/persons/person.xml");
     assert!(
         persons.contains(r#"displayName="Ann Lee""#)
@@ -132,11 +119,7 @@ fn moved_rows_report_what_no_longer_fits() {
     std::fs::write(&src, features_book()).unwrap();
     let out = dir.join("out.xlsx");
     let ops = json!([{ "op": "insert_rows", "target": "1:1" }]);
-    let e = call(
-        "edit",
-        json!({ "path": p(&src), "ops": ops, "output": p(&out) }),
-    )
-    .unwrap_err();
+    let e = call("edit", json!({ "path": p(&src), "ops": ops, "output": p(&out) })).unwrap_err();
     assert_eq!(e.code, ErrorCode::ConfirmationRequired, "{e:?}");
     for feature in ["scenarios", "ignored error flags", "what-if data tables"] {
         assert!(e.what.contains(feature), "{feature}: {}", e.what);
@@ -152,16 +135,10 @@ fn moved_rows_report_what_no_longer_fits() {
     // A fill over a data table's anchor drops that table only.
     let ops = json!([{ "op": "set_value", "target": "B2", "value": 1 }]);
     let out = dir.join("filled.xlsx");
-    let dry = call(
-        "edit",
-        json!({ "path": p(&src), "ops": ops, "output": p(&out), "dry_run": true }),
-    )
-    .unwrap();
-    assert_eq!(
-        lost(&dry),
-        vec!["what-if data tables".to_owned()],
-        "{dry:?}"
-    );
+    let dry =
+        call("edit", json!({ "path": p(&src), "ops": ops, "output": p(&out), "dry_run": true }))
+            .unwrap();
+    assert_eq!(lost(&dry), vec!["what-if data tables".to_owned()], "{dry:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -188,15 +165,9 @@ fn csv_escapes_text_that_could_run_as_a_formula() {
     let out = dir.join("out.csv");
     let done = call("convert", json!({ "path": p(&src), "output": p(&out) })).unwrap();
     let text = std::fs::read_to_string(&out).unwrap();
-    assert_eq!(
-        text,
-        "\"'=HYPERLINK(\"\"http://x\"\")\",'+1,-5,'@SUM(1),plain\r\n"
-    );
+    assert_eq!(text, "\"'=HYPERLINK(\"\"http://x\"\")\",'+1,-5,'@SUM(1),plain\r\n");
     let notes = done["save"]["notes"].to_string();
-    assert!(
-        notes.contains("3 cells") && notes.contains("--csv-raw"),
-        "{notes}"
-    );
+    assert!(notes.contains("3 cells") && notes.contains("--csv-raw"), "{notes}");
 
     let raw = call(
         "convert",
@@ -204,10 +175,7 @@ fn csv_escapes_text_that_could_run_as_a_formula() {
     )
     .unwrap();
     let text = std::fs::read_to_string(&out).unwrap();
-    assert_eq!(
-        text,
-        "\"=HYPERLINK(\"\"http://x\"\")\",+1,-5,@SUM(1),plain\r\n"
-    );
+    assert_eq!(text, "\"=HYPERLINK(\"\"http://x\"\")\",+1,-5,@SUM(1),plain\r\n");
     assert!(!raw["save"]["notes"].to_string().contains("--csv-raw"));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -242,10 +210,7 @@ fn links_to_other_workbooks_never_name_home_folders() {
     book.workbook = format!(
         r#"<?xml version="1.0"?><workbook {NS}><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets><externalReferences><externalReference r:id="rId2"/></externalReferences></workbook>"#
     );
-    book.workbook_rels = vec![(
-        "externalLink".into(),
-        "externalLinks/externalLink1.xml".into(),
-    )];
+    book.workbook_rels = vec![("externalLink".into(), "externalLinks/externalLink1.xml".into())];
     book.content_types = vec![(
         "xl/externalLinks/externalLink1.xml".into(),
         "application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml".into(),
@@ -269,21 +234,13 @@ fn links_to_other_workbooks_never_name_home_folders() {
     let other = dir.join("elsewhere");
     std::fs::create_dir_all(&other).unwrap();
     let out = other.join("out.xlsx");
-    let done = call(
-        "convert",
-        json!({ "path": p(&src), "output": p(&out), "confirm_loss": true }),
-    )
-    .unwrap();
+    let done = call("convert", json!({ "path": p(&src), "output": p(&out), "confirm_loss": true }))
+        .unwrap();
     let rels = part_text(&out, "xl/externalLinks/_rels/externalLink1.xml.rels");
     let home = std::env::temp_dir().display().to_string();
     assert!(!rels.contains(&home), "{rels}");
     assert!(rels.contains(r#"Target="data.xlsx""#), "{rels}");
-    assert!(
-        done["save"]["notes"]
-            .to_string()
-            .contains("keep their paths"),
-        "{done:?}"
-    );
+    assert!(done["save"]["notes"].to_string().contains("keep their paths"), "{done:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

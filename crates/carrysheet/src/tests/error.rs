@@ -28,24 +28,14 @@ fn json_shape() {
     assert!(err["what"].as_str().unwrap().contains("mcp install"));
     // The serde form matches the hand-written one.
     assert_eq!(serde_json::to_value(&e).unwrap(), e.to_json());
-    assert_eq!(
-        serde_json::to_string(&e).unwrap(),
-        e.to_json().to_string(),
-        "same key order"
-    );
+    assert_eq!(serde_json::to_string(&e).unwrap(), e.to_json().to_string(), "same key order");
 }
 
 #[test]
 fn codes_serialize_as_snake_case() {
-    assert_eq!(
-        serde_json::to_value(ErrorCode::NotImplemented).unwrap(),
-        "not_implemented"
-    );
+    assert_eq!(serde_json::to_value(ErrorCode::NotImplemented).unwrap(), "not_implemented");
     assert_eq!(ErrorCode::FileNotFound.to_string(), "file_not_found");
-    assert_eq!(
-        serde_json::to_value(ErrorCode::Internal).unwrap(),
-        ErrorCode::Internal.as_str()
-    );
+    assert_eq!(serde_json::to_value(ErrorCode::Internal).unwrap(), ErrorCode::Internal.as_str());
     assert_eq!(ErrorCode::Internal.as_str(), "internal_error");
     assert_eq!(ErrorCode::DamagedFile.as_str(), "damaged_file");
     assert_eq!(ErrorCode::DamagedFile.to_string(), "damaged_file");

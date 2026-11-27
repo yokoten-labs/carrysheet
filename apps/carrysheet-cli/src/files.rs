@@ -59,11 +59,7 @@ enum Start {
 /// prefixes are accepted only before a plain drive or UNC path.
 fn parse(text: &str, windows: bool) -> Result<(Start, Vec<String>), Refusal> {
     if !windows {
-        let start = if text.starts_with('/') {
-            Start::Slash
-        } else {
-            Start::Relative
-        };
+        let start = if text.starts_with('/') { Start::Slash } else { Start::Relative };
         return Ok((start, parts(text, '/')));
     }
     let mut s = text.replace('/', "\\");
@@ -109,10 +105,7 @@ fn is_drive(s: &str) -> bool {
 }
 
 fn parts(text: &str, separator: char) -> Vec<String> {
-    text.split(separator)
-        .filter(|p| !p.is_empty() && *p != ".")
-        .map(str::to_owned)
-        .collect()
+    text.split(separator).filter(|p| !p.is_empty() && *p != ".").map(str::to_owned).collect()
 }
 
 /// A name a file may have; on Windows no device, `<>:"|?*`, control character, final dot or space.
@@ -121,24 +114,14 @@ fn is_usable_name(name: &str, windows: bool) -> bool {
         && (!windows
             || !is_windows_device_name(name)
                 && !name.ends_with(['.', ' '])
-                && !name
-                    .chars()
-                    .any(|c| c.is_control() || "<>:\"|?*".contains(c)))
+                && !name.chars().any(|c| c.is_control() || "<>:\"|?*".contains(c)))
 }
 
 /// True for names Windows treats as devices in every folder, such as `NUL`,
 /// `nul:`, `com1.txt` or `COM¹`.
 pub fn is_windows_device_name(name: &str) -> bool {
-    let stem = name
-        .split(['.', ':'])
-        .next()
-        .unwrap_or("")
-        .trim_end_matches(' ')
-        .to_uppercase();
-    if matches!(
-        stem.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
-    ) {
+    let stem = name.split(['.', ':']).next().unwrap_or("").trim_end_matches(' ').to_uppercase();
+    if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") {
         return true;
     }
     let mut chars = stem.chars();
@@ -214,10 +197,7 @@ impl Root {
         }
         let is_absolute =
             |t: &&str| parse(t, cfg!(windows)).is_ok_and(|(s, _)| s != Start::Relative);
-        let text = plain_path(&canonical)
-            .to_str()
-            .filter(is_absolute)
-            .map(str::to_owned);
+        let text = plain_path(&canonical).to_str().filter(is_absolute).map(str::to_owned);
         let text = text.ok_or_else(|| {
             error(
                 ErrorCode::InvalidArgument,
@@ -225,15 +205,9 @@ impl Root {
                 "its path is not plain text, or is a device or volume path".into(),
             )
         })?;
-        let alias = std::path::absolute(dir)
-            .ok()
-            .and_then(|a| a.to_str().map(str::to_owned));
+        let alias = std::path::absolute(dir).ok().and_then(|a| a.to_str().map(str::to_owned));
         let alias = alias.filter(|a| *a != text && parse(a, cfg!(windows)).is_ok());
-        Ok(Root {
-            canonical,
-            text,
-            alias,
-        })
+        Ok(Root { canonical, text, alias })
     }
 
     /// The root folder, fit for showing and opening.
@@ -254,12 +228,8 @@ impl Root {
     /// with every link followed. The file itself need not exist.
     pub fn resolve(&self, given: &str) -> Result<PathBuf, CommandError> {
         let windows = cfg!(windows);
-        let walked = self
-            .plan(given, windows)
-            .and_then(|steps| self.walk(steps, windows));
-        walked
-            .map(|p| plain_path(&p))
-            .map_err(|refusal| self.refuse(given, refusal))
+        let walked = self.plan(given, windows).and_then(|steps| self.walk(steps, windows));
+        walked.map(|p| plain_path(&p)).map_err(|refusal| self.refuse(given, refusal))
     }
 
     /// [`plan`] against the canonical root, else against the alias.
@@ -338,16 +308,9 @@ pub fn plain_path(path: &Path) -> PathBuf {
         (None, Some(rest)) if is_drive(rest) => rest.to_owned(),
         _ => return path.to_path_buf(),
     };
-    let names_are_plain = plain
-        .split('\\')
-        .filter(|p| !p.is_empty())
-        .skip(1)
-        .all(|p| !p.ends_with(['.', ' ']));
-    if plain.len() < 260 && names_are_plain {
-        PathBuf::from(plain)
-    } else {
-        path.to_path_buf()
-    }
+    let names_are_plain =
+        plain.split('\\').filter(|p| !p.is_empty()).skip(1).all(|p| !p.ends_with(['.', ' ']));
+    if plain.len() < 260 && names_are_plain { PathBuf::from(plain) } else { path.to_path_buf() }
 }
 
 /// Reads a regular file of at most `max` bytes, not trusting the reported size. Anything else
@@ -393,9 +356,7 @@ pub fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>, CommandError> {
         return Err(not_a_file());
     }
     let mut bytes = Vec::new();
-    file.take(max.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(failed)?;
+    file.take(max.saturating_add(1)).read_to_end(&mut bytes).map_err(failed)?;
     if bytes.len() as u64 > max {
         return Err(too_large());
     }
@@ -413,14 +374,8 @@ pub fn exists(path: &Path) -> bool {
 pub fn write_atomic(path: &Path, bytes: &[u8], root: Option<&Path>) -> Result<(), CommandError> {
     let real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let keep = std::fs::metadata(&real).ok().map(|m| m.permissions());
-    let dir = real
-        .parent()
-        .filter(|d| !d.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let name = real
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    let dir = real.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let name = real.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = dir.join(format!(".{name}.{}.carrysheet-tmp", std::process::id()));
     let inside = || {
         let root = root.map(std::fs::canonicalize);
@@ -440,19 +395,15 @@ pub fn write_atomic(path: &Path, bytes: &[u8], root: Option<&Path>) -> Result<()
     };
     inside()?;
     let written = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         if let Some(permissions) = keep {
             file.set_permissions(permissions)?;
         }
         file.write_all(bytes)?;
         file.sync_all()
     })();
-    let renamed = written
-        .map_err(|e| carrysheet::save::write_error(&real, &e))
-        .and_then(|()| inside());
+    let renamed =
+        written.map_err(|e| carrysheet::save::write_error(&real, &e)).and_then(|()| inside());
     let renamed = renamed.and_then(|()| {
         std::fs::rename(&tmp, &real).map_err(|e| carrysheet::save::write_error(&real, &e))
     });
@@ -491,9 +442,7 @@ pub fn redact_home_text(text: &str, home: &str, windows: bool) -> String {
     let (mut out, mut i) = (String::with_capacity(text.len()), 0);
     while let Some(c) = text[i..].chars().next() {
         let rest = &text[i..];
-        let verbatim = VERBATIM
-            .iter()
-            .find(|p| windows && starts_with_ignore_case(rest, p));
+        let verbatim = VERBATIM.iter().find(|p| windows && starts_with_ignore_case(rest, p));
         let skip = verbatim.map_or(0, |p| p.len());
         // After `\\?\UNC\`, a home on a share is written without its `\\`.
         let unc = verbatim.is_some_and(|p| p.contains("UNC"));
@@ -515,12 +464,7 @@ pub fn redact_home_text(text: &str, home: &str, windows: bool) -> String {
 
 /// The error with the home folder shown as `~` in every part.
 pub fn redact_error(e: &CommandError) -> CommandError {
-    CommandError::new(
-        e.code,
-        redact_home(&e.what),
-        redact_home(&e.why),
-        redact_home(&e.fix),
-    )
+    CommandError::new(e.code, redact_home(&e.what), redact_home(&e.why), redact_home(&e.fix))
 }
 
 const VERBATIM: &[&str] = &[r"\\?\UNC\", r"\\?\", "//?/UNC/", "//?/"];
@@ -530,8 +474,7 @@ fn is_separator(c: char, windows: bool) -> bool {
 }
 
 fn starts_with_ignore_case(text: &str, prefix: &str) -> bool {
-    text.get(..prefix.len())
-        .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+    text.get(..prefix.len()).is_some_and(|start| start.eq_ignore_ascii_case(prefix))
 }
 
 /// `\\?\C:\x` as `C:\x`, `\\?\UNC\server\share` as `\\server\share`.
@@ -545,11 +488,7 @@ fn strip_verbatim(path: &str) -> Cow<'_, str> {
 
 /// The home as compared; `None` for one that matches too much (`/`, `C:\`).
 fn usable_home(home: &str, windows: bool) -> Option<String> {
-    let home = if windows {
-        strip_verbatim(home)
-    } else {
-        Cow::Borrowed(home)
-    };
+    let home = if windows { strip_verbatim(home) } else { Cow::Borrowed(home) };
     let trimmed = home.trim_end_matches(|c| is_separator(c, windows));
     let has_separator = trimmed.chars().any(|c| is_separator(c, windows));
     (has_separator && trimmed.chars().count() >= 2).then(|| trimmed.to_owned())

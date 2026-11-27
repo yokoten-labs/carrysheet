@@ -22,10 +22,7 @@ impl fmt::Display for RefError {
 }
 
 fn invalid(input: &str, reason: &str) -> RefError {
-    RefError(format!(
-        "{} is not a valid reference: {reason}",
-        quote(input, 200)
-    ))
+    RefError(format!("{} is not a valid reference: {reason}", quote(input, 200)))
 }
 
 /// Checks a sheet name against Excel's rules: 1 to 31 characters (UTF-16),
@@ -46,10 +43,7 @@ pub fn validate_sheet_name(name: &str) -> Result<(), RefError> {
     } else {
         return Ok(());
     };
-    Err(RefError(format!(
-        "{} is not a valid sheet name: {reason}",
-        quote(name, 64)
-    )))
+    Err(RefError(format!("{} is not a valid sheet name: {reason}", quote(name, 64))))
 }
 
 /// What a range covers: cells (`A1:C3`), whole columns (`A:C`) or whole rows (`2:5`).
@@ -121,11 +115,7 @@ impl SheetRange {
             (false, true) => Shape::Rows,
             _ => Shape::Cells,
         };
-        Ok(SheetRange {
-            sheet,
-            range,
-            shape,
-        })
+        Ok(SheetRange { sheet, range, shape })
     }
 
     /// The range without its sheet name: `A1:C3`, `A:C`, `2:5`.

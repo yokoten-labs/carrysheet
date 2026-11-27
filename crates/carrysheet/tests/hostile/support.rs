@@ -59,10 +59,7 @@ pub fn formats_dir() -> PathBuf {
 /// The path of a file below `tests/data/formats`, with `/` on every system.
 pub fn short_name(path: &Path) -> String {
     let rel = path.strip_prefix(formats_dir()).unwrap_or(path);
-    rel.components()
-        .map(|c| c.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
+    rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
 }
 
 /// Every sample file below `tests/data/formats`: notices, licenses, read-me
@@ -101,11 +98,7 @@ impl Rng {
     }
 
     pub fn below(&mut self, n: usize) -> usize {
-        if n == 0 {
-            0
-        } else {
-            (self.next() % n as u64) as usize
-        }
+        if n == 0 { 0 } else { (self.next() % n as u64) as usize }
     }
 }
 
@@ -224,10 +217,8 @@ fn quiet_panics() {
             if !IN_CASE.with(Cell::get) {
                 return default_hook(info);
             }
-            let at = info
-                .location()
-                .map(|l| format!("{}:{}", l.file(), l.line()))
-                .unwrap_or_default();
+            let at =
+                info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
             let message = info
                 .payload()
                 .downcast_ref::<&str>()
@@ -285,10 +276,8 @@ fn exercise(kernel: &Kernel, input: Input<'_>, depth: Depth) -> Result<(), Comma
     let overview = kernel.overview(&book)?;
     for sheet in overview.sheets.iter().take(8) {
         let range = format!("{}!A1:Z50", format_sheet_name(&sheet.name));
-        let request = ReadRequest {
-            range: SheetRange::parse(&range).ok(),
-            ..ReadRequest::default()
-        };
+        let request =
+            ReadRequest { range: SheetRange::parse(&range).ok(), ..ReadRequest::default() };
         kernel.read_range(&book, &request)?;
     }
     if depth == Depth::Save {
@@ -445,18 +434,10 @@ impl Report {
             let ran = self.cases.iter().any(|c| c == w.case);
             let failed = self.failures.iter().any(|(c, p)| w.covers(c, p));
             if ran && !failed {
-                problems.push(format!(
-                    "waiver {:?} is not needed any more: remove it",
-                    w.case
-                ));
+                problems.push(format!("waiver {:?} is not needed any more: remove it", w.case));
             }
         }
-        assert!(
-            problems.is_empty(),
-            "{} problems:\n{}",
-            problems.len(),
-            problems.join("\n")
-        );
+        assert!(problems.is_empty(), "{} problems:\n{}", problems.len(), problems.join("\n"));
     }
 }
 
@@ -464,16 +445,8 @@ impl Report {
 /// filter picks other tests): run this from one test of each file.
 pub fn check_waivers(waivers: &[Waiver]) {
     for w in waivers {
-        assert!(
-            !w.reason.trim().is_empty(),
-            "waiver {:?}: no reason",
-            w.case
-        );
-        assert!(
-            !w.problem.trim().is_empty(),
-            "waiver {:?}: no problem",
-            w.case
-        );
+        assert!(!w.reason.trim().is_empty(), "waiver {:?}: no reason", w.case);
+        assert!(!w.problem.trim().is_empty(), "waiver {:?}: no problem", w.case);
         assert!(w.issue.is_some(), "waiver {:?}: no issue", w.case);
         assert_eq!(w.expires, EXPIRY, "waiver {:?}: wrong expiry", w.case);
     }
@@ -502,10 +475,8 @@ pub fn unpack(package: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
 
 /// A package of `parts`, each stored with its CRC-32.
 pub fn pack(parts: &[(String, Vec<u8>)]) -> Vec<u8> {
-    let entries: Vec<_> = parts
-        .iter()
-        .map(|(name, body)| crate::common::entry(name, body.clone()))
-        .collect();
+    let entries: Vec<_> =
+        parts.iter().map(|(name, body)| crate::common::entry(name, body.clone())).collect();
     crate::common::zip(&entries)
 }
 
@@ -522,9 +493,7 @@ pub fn load_parts(path: &Path) -> Vec<u8> {
             body.push('\n');
         }
     }
-    let entries: Vec<_> = parts
-        .iter()
-        .map(|(name, body)| crate::common::entry(name, body.as_bytes()))
-        .collect();
+    let entries: Vec<_> =
+        parts.iter().map(|(name, body)| crate::common::entry(name, body.as_bytes())).collect();
     crate::common::zip(&entries)
 }

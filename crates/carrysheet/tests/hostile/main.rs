@@ -30,12 +30,7 @@ use carrysheet::save::{EncodeOptions, FileFormat};
 use carrysheet::view::ReadRequest;
 
 fn data(name: &str) -> Vec<u8> {
-    std::fs::read(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/data")
-            .join(name),
-    )
-    .unwrap()
+    std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)).unwrap()
 }
 
 /// A small fixed-seed generator (xorshift), so every run tries the same files.
@@ -69,12 +64,7 @@ fn exercise(name: &str, bytes: Vec<u8>) -> Result<(), CommandError> {
     k.evaluate(&book, None, "SUM(A1:Z50)")?;
     let out = PathBuf::from(name);
     k.encode(&book, &out, FileFormat::Xlsx, &EncodeOptions::default())?;
-    k.encode(
-        &book,
-        Path::new("out.csv"),
-        FileFormat::Csv,
-        &EncodeOptions::default(),
-    )?;
+    k.encode(&book, Path::new("out.csv"), FileFormat::Csv, &EncodeOptions::default())?;
     Ok(())
 }
 
@@ -82,10 +72,7 @@ fn check(case: &str, name: &str, bytes: Vec<u8>) -> bool {
     match exercise(name, bytes) {
         Err(e) if e.code == ErrorCode::Internal => panic!("{case}: {}\n{}", e.what, e.why),
         Err(e) => {
-            assert!(
-                !e.what.is_empty() && !e.fix.is_empty() && !e.why.is_empty(),
-                "{case}"
-            );
+            assert!(!e.what.is_empty() && !e.fix.is_empty() && !e.why.is_empty(), "{case}");
             false
         }
         Ok(()) => true,
@@ -97,9 +84,7 @@ fn truncated_files_fail_cleanly() {
     for name in ["WithTwoCharts.xlsx", "SimpleMacro.xlsm"] {
         let good = data(name);
         let mut rng = Rng(0x5eed_0001);
-        let mut cuts: Vec<usize> = (0..60)
-            .map(|_| rng.below(good.len() as u64) as usize)
-            .collect();
+        let mut cuts: Vec<usize> = (0..60).map(|_| rng.below(good.len() as u64) as usize).collect();
         cuts.extend([0, 1, 4, 30, good.len() - 22, good.len() - 1]);
         for cut in cuts {
             check(&format!("{name} cut at {cut}"), name, good[..cut].to_vec());
@@ -134,10 +119,7 @@ fn not_a_workbook() {
         ("empty.xlsx", Vec::new()),
         ("text.xlsx", b"just some text".to_vec()),
         ("zeros.xls", vec![0u8; 4096]),
-        (
-            "zip.xlsx",
-            b"PK\x05\x06\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0".to_vec(),
-        ),
+        ("zip.xlsx", b"PK\x05\x06\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0".to_vec()),
     ] {
         check(name, name, bytes);
     }

@@ -28,11 +28,8 @@ pub const MAX_TEXT_CHARS: usize = 32_767;
 pub const PATHS: &[&str] = &["path", "output", "root"];
 
 /// The largest value of each whole-number argument, from 1; not in the schema, for strict clients.
-const LARGEST: &[(&str, u64)] = &[
-    ("max_rows", 10_000),
-    ("max_columns", 16_384),
-    ("count", 1_048_576),
-];
+const LARGEST: &[(&str, u64)] =
+    &[("max_rows", 10_000), ("max_columns", 16_384), ("count", 1_048_576)];
 
 /// On the command line a true/false argument is a switch, such as `--dry-run`.
 #[cfg(feature = "cli")]

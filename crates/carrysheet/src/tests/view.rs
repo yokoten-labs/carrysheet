@@ -42,11 +42,7 @@ fn engine() -> (Kernel, Book) {
     let mut data = sheet("Data", cells);
     let total = Cell::formula(Formula::new("=SUM(B2:B6)"));
     Arc::make_mut(&mut data).set_cell(CellRef::new(6, 1), total);
-    open(vec![
-        data,
-        sheet("Q1 売上", vec![(0, 0, 7.0.into())]),
-        sheet("Empty", vec![]),
-    ])
+    open(vec![data, sheet("Q1 売上", vec![(0, 0, 7.0.into())]), sheet("Empty", vec![])])
 }
 
 #[test]
@@ -61,10 +57,7 @@ fn overview_counts() {
     let o = e.overview(&b).unwrap();
     assert_eq!(o.sheets.len(), 3);
     assert_eq!(o.sheets[0].used_range.as_deref(), Some("A1:B8"));
-    assert_eq!(
-        (o.sheets[0].cells, o.sheets[0].formulas, o.sheets[0].errors),
-        (14, 1, 1)
-    );
+    assert_eq!((o.sheets[0].cells, o.sheets[0].formulas, o.sheets[0].errors), (14, 1, 1));
     assert_eq!(o.sheets[2].used_range, None);
     assert_eq!(o.date_system, "1900");
     let j = serde_json::to_value(&o).unwrap();
@@ -74,10 +67,7 @@ fn overview_counts() {
 #[test]
 fn read_pages_through_a_range() {
     let (e, b) = engine();
-    let mut req = ReadRequest {
-        max_rows: 3,
-        ..ReadRequest::default()
-    };
+    let mut req = ReadRequest { max_rows: 3, ..ReadRequest::default() };
     let p1 = e.read_range(&b, &req).unwrap();
     assert_eq!(p1.range.as_deref(), Some("A1:B3"));
     assert_eq!(p1.columns, ["A", "B"]);
@@ -128,17 +118,12 @@ fn read_all(e: &Kernel, b: &Book, mut req: ReadRequest) -> (Vec<String>, Vec<Str
 #[test]
 fn wide_ranges_page_across_then_down() {
     let (e, b) = grid(3, 5);
-    let req = ReadRequest {
-        max_rows: 2,
-        max_columns: 2,
-        ..ReadRequest::default()
-    };
+    let req = ReadRequest { max_rows: 2, max_columns: 2, ..ReadRequest::default() };
     let (pages, mut seen) = read_all(&e, &b, req);
     assert_eq!(pages, ["A1:B2", "C1:D2", "E1:E2", "A3:B3", "C3:D3", "E3"]);
     seen.sort();
-    let mut all: Vec<String> = (0..3)
-        .flat_map(|r| (0..5).map(move |c| CellRef::new(r, c).a1()))
-        .collect();
+    let mut all: Vec<String> =
+        (0..3).flat_map(|r| (0..5).map(move |c| CellRef::new(r, c).a1())).collect();
     all.sort();
     assert_eq!(seen, all, "every cell exactly once");
 }
@@ -149,16 +134,10 @@ fn default_pages_are_bounded_in_columns_and_cells() {
     let p = e.read_range(&b, &ReadRequest::default()).unwrap();
     // 50 columns, and 200 rows of them make 10,000 cells.
     assert_eq!(p.range.as_deref(), Some("A1:AX200"));
-    assert_eq!(
-        p.next_cursor.unwrap().to_string(),
-        "Grid!A1:DP260@AY1:AY200"
-    );
+    assert_eq!(p.next_cursor.unwrap().to_string(), "Grid!A1:DP260@AY1:AY200");
 
     // Fewer cells allowed: shorter bands.
-    let req = ReadRequest {
-        max_cells: 1_000,
-        ..ReadRequest::default()
-    };
+    let req = ReadRequest { max_cells: 1_000, ..ReadRequest::default() };
     let p = e.read_range(&b, &req).unwrap();
     assert_eq!(p.range.as_deref(), Some("A1:AX20"));
 
@@ -197,10 +176,7 @@ fn cursors_are_checked() {
     assert_eq!(page.a1(), "B4:C6");
     assert_eq!(next.unwrap().to_string(), "'a@b'!A1:C9@A7:A9");
     assert_eq!(c.to_string(), "'a@b'!A1:C9@B4:B6");
-    assert_eq!(
-        serde_json::to_value(&c).unwrap(),
-        json!("'a@b'!A1:C9@B4:B6")
-    );
+    assert_eq!(serde_json::to_value(&c).unwrap(), json!("'a@b'!A1:C9@B4:B6"));
     // A band over a whole column reads back as written.
     let c = ReadCursor::parse("Grid!A1:B1048576@A1:A1048576").unwrap();
     assert_eq!(c.to_string(), "Grid!A:B@A:A");
@@ -221,10 +197,7 @@ fn cursors_are_checked() {
         cursor: Some(ReadCursor::parse("Gone!A1:B10@A1:A8").unwrap()),
         ..ReadRequest::default()
     };
-    assert_eq!(
-        e.read_range(&b, &req).unwrap_err().code,
-        ErrorCode::NoSuchSheet
-    );
+    assert_eq!(e.read_range(&b, &req).unwrap_err().code, ErrorCode::NoSuchSheet);
 }
 
 #[test]
@@ -273,20 +246,14 @@ fn read_modes() {
         mode: ReadMode::Formulas,
         ..ReadRequest::default()
     };
-    assert_eq!(
-        e.read_range(&b, &req).unwrap().rows[0].cells[0],
-        "=SUM(B2:B6)"
-    );
+    assert_eq!(e.read_range(&b, &req).unwrap().rows[0].cells[0], "=SUM(B2:B6)");
     req.mode = ReadMode::Both;
     let both = &e.read_range(&b, &req).unwrap().rows[0].cells[0];
     assert_eq!(both["formula"], "=SUM(B2:B6)");
     // The kernel computes the formula.
     assert_eq!(both["value"], json!(150.0));
     req.range = Some(SheetRange::parse("A2").unwrap());
-    assert_eq!(
-        e.read_range(&b, &req).unwrap().rows[0].cells[0]["formula"],
-        Value::Null
-    );
+    assert_eq!(e.read_range(&b, &req).unwrap().rows[0].cells[0]["formula"], Value::Null);
 }
 
 #[test]
@@ -307,10 +274,7 @@ fn read_empty_sheet_and_outside_used_range() {
         range: Some(SheetRange::parse("Nope!A1").unwrap()),
         ..ReadRequest::default()
     };
-    assert_eq!(
-        e.read_range(&b, &req).unwrap_err().code,
-        ErrorCode::NoSuchSheet
-    );
+    assert_eq!(e.read_range(&b, &req).unwrap_err().code, ErrorCode::NoSuchSheet);
 }
 
 #[test]
