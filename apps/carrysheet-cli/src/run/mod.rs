@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use carrysheet::args::{PATHS, input_schema};
-use carrysheet::commands::{COMMANDS, Command, CommandError, ErrorCode, check_confirmation};
+use carrysheet::commands::{COMMANDS, Command, CommandError, check_confirmation};
 use carrysheet::open::{MAX_FILE_BYTES, check_opens};
 use carrysheet::save::prepare_output;
 use carrysheet::{Kernel, run_within};
@@ -41,71 +41,37 @@ pub fn run(
     args: &Map<String, Value>,
     ctx: &Context,
 ) -> Result<Done, CommandError> {
-    match command.name {
-        "commands" => Ok(commands()),
-        // `main` hands `mcp serve` to `mcp::serve` before getting here.
-        "mcp_serve" => Err(CommandError::new(
-            ErrorCode::Internal,
-            "`mcp serve` cannot run as a tool",
-            "the MCP server is started by the command line, not from inside itself",
-            "Start it with `carrysheet-cli mcp serve`.",
-        )),
-        _ => {
-            check_input_exists(args)?;
-            let mut args = args.clone();
-            for name in ["confirm", "confirm_loss"] {
-                if ctx.yes && args.contains_key(name) {
-                    args.insert(name.into(), Value::Bool(true));
-                }
-            }
-            check_confirmation(command, &args)?;
-            let output = prepare_output(command, &mut args, &exists)?;
-            let path = PathBuf::from(args.get("path").and_then(Value::as_str).unwrap_or(""));
-            check_opens(&path)?;
-            let input = read_bounded(&path, MAX_FILE_BYTES).map_err(|e| e.error(&path))?;
-            let answer = run_within(&Kernel::new(), command, &args, input, ctx.max_seconds)?;
-            let mut data = answer.data;
-            if let (Some(bytes), Some(output)) = (answer.save, output) {
-                write_atomic(&output, &bytes, ctx.root.as_deref())?;
-                data.insert("written".into(), json!(true));
-                data.insert("bytes".into(), json!(bytes.len()));
-            }
-            for name in ["file", "output"] {
-                if let Some(Value::String(shown)) = data.get_mut(name) {
-                    *shown = display_path(Path::new(shown));
-                }
-            }
-            Ok(Done { data, plain: None })
+    if command.name == "commands" {
+        return Ok(commands());
+    }
+    let mut args = args.clone();
+    for name in ["confirm", "confirm_loss"] {
+        if ctx.yes && args.contains_key(name) {
+            args.insert(name.into(), Value::Bool(true));
         }
     }
-}
-
-/// Fails early with a clear error when the input workbook is missing.
-fn check_input_exists(args: &Map<String, Value>) -> Result<(), CommandError> {
-    let Some(path) = args.get("path").and_then(Value::as_str) else {
-        return Ok(());
-    };
-    let p = Path::new(path);
-    if p.exists() {
-        return Ok(());
+    check_confirmation(command, &args)?;
+    let output = prepare_output(command, &mut args, &exists)?;
+    let path = PathBuf::from(args.get("path").and_then(Value::as_str).unwrap_or(""));
+    check_opens(&path)?;
+    let input = read_bounded(&path, MAX_FILE_BYTES)?;
+    let answer = run_within(&Kernel::new(), command, &args, input, ctx.max_seconds)?;
+    let mut data = answer.data;
+    if let (Some(bytes), Some(output)) = (answer.save, output) {
+        write_atomic(&output, &bytes, ctx.root.as_deref())?;
+        data.insert("written".into(), json!(true));
+        data.insert("bytes".into(), json!(bytes.len()));
     }
-    Err(CommandError::new(
-        ErrorCode::FileNotFound,
-        format!("{} does not exist", display_path(p)),
-        "there is no file at that path",
-        "Check the spelling, or give the full path to the workbook.",
-    ))
+    for name in ["file", "output"] {
+        if let Some(Value::String(shown)) = data.get_mut(name) {
+            *shown = display_path(Path::new(shown));
+        }
+    }
+    Ok(Done { data, plain: None })
 }
 
 fn commands() -> Done {
-    let list: Vec<Value> = COMMANDS
-        .iter()
-        .map(|c| {
-            let mut v = command_json(c);
-            v["implemented"] = Value::Bool(true);
-            v
-        })
-        .collect();
+    let list: Vec<Value> = COMMANDS.iter().map(command_json).collect();
     let rows: Vec<Value> = COMMANDS
         .iter()
         .map(|c| json!({ "command": c.cli_name(), "summary": c.doc().0 }))

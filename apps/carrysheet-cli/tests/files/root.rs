@@ -2,17 +2,8 @@ use crate::files::*;
 use carrysheet::error::ErrorCode;
 use std::path::{Path, PathBuf};
 
-fn names(names: &[&str]) -> Vec<Step> {
-    names
-        .iter()
-        .map(|n| {
-            if *n == ".." {
-                Step::Parent
-            } else {
-                Step::Name((*n).to_owned())
-            }
-        })
-        .collect()
+fn names(names: &[&str]) -> Vec<String> {
+    names.iter().map(|n| (*n).to_owned()).collect()
 }
 
 const WIN_ROOT: &str = r"C:\work\books";

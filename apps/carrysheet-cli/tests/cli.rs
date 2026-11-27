@@ -182,7 +182,6 @@ fn commands_json_is_json_only_and_every_schema_passes_the_lint() {
         for key in ["summary", "description", "cli"] {
             assert!(c[key].is_string(), "{} {key}", table.name);
         }
-        assert!(c["implemented"].is_boolean());
         if c["mcp_tool"] == true {
             tools.push(serde_json::json!({
                 "name": c["name"],
@@ -291,14 +290,6 @@ fn dry_run_only_on_commands_that_change_files() {
     let o = run_in(&home, &["convert", book, "out.csv", "--dry-run", "--json"]);
     assert_eq!(code(&o), 1);
     assert_eq!(error_json(&o)["code"], "damaged_file");
-}
-
-#[test]
-fn every_command_is_implemented() {
-    let listing = json_only(&run(&["commands", "--json"]));
-    for c in listing["commands"].as_array().unwrap() {
-        assert_eq!(c["implemented"], true, "{}", c["name"]);
-    }
 }
 
 #[test]

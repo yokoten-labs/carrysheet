@@ -1,28 +1,18 @@
-//! Every file the program touches: `--root`, bounded reads, atomic writes,
-//! and paths shown with `~` (record 0010, decision 2). The library only
-//! sees bytes.
+//! Every file the program touches: `--root`, bounded reads, atomic writes and
+//! paths shown with `~` (record 0010, decision 2). The library sees bytes.
 //!
-//! A client path is checked twice. [`plan`] works on text alone, before the
-//! system sees the path: device paths, other shares and drives, `..` above
-//! the root and names Windows reserves are refused (opening `\\host\share`
-//! would contact that computer). Then [`Root::walk`] follows links one name
-//! at a time and plans every target the same way. `cap-std` was not taken:
-//! it refuses an absolute link that points inside the root.
+//! A client path is checked twice. [`plan`] works on text alone, before the system sees the
+//! path: device paths, other shares and drives, `..` above the root and names Windows reserves
+//! are refused (opening `\\host\share` would contact that computer). Then [`Root::walk`] follows
+//! links one name at a time and plans every target the same way. `cap-std` was not taken: it
+//! refuses an absolute link that points inside the root.
 
 use std::borrow::Cow;
 use std::collections::VecDeque;
-use std::io::{Read as _, Write as _};
+use std::io::{ErrorKind, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use carrysheet::error::{CommandError, ErrorCode};
-use carrysheet::open::ReadFailure;
-
-/// One step below the root.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Step {
-    Name(String),
-    Parent,
-}
 
 /// Why a path was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,16 +67,9 @@ fn parse(text: &str, windows: bool) -> Result<(Start, Vec<String>), Refusal> {
         return Ok((start, parts(text, '/')));
     }
     let mut s = text.replace('/', "\\");
-    if let Some(len) = [r"\\?\", r"\??\"]
-        .iter()
-        .find(|p| s.starts_with(*p))
-        .map(|p| p.len())
-    {
-        let rest = s[len..].to_owned();
-        if rest
-            .get(..4)
-            .is_some_and(|p| p.eq_ignore_ascii_case(r"UNC\"))
-        {
+    if let Some(prefix) = [r"\\?\", r"\??\"].iter().find(|p| s.starts_with(*p)) {
+        let rest = s[prefix.len()..].to_owned();
+        if starts_with_ignore_case(&rest, r"UNC\") {
             s = format!(r"\\{}", &rest[4..]);
         } else if is_drive(&rest) {
             s = rest;
@@ -111,10 +94,8 @@ fn parse(text: &str, windows: bool) -> Result<(Start, Vec<String>), Refusal> {
         if b.len() == 2 || b[2] != b'\\' {
             return Err(Refusal::DriveRelative);
         }
-        return Ok((
-            Start::Drive(char::from(b[0].to_ascii_uppercase())),
-            parts(&s[3..], '\\'),
-        ));
+        let drive = Start::Drive(char::from(b[0].to_ascii_uppercase()));
+        return Ok((drive, parts(&s[3..], '\\')));
     }
     if s.starts_with('\\') {
         return Err(Refusal::RootRelative);
@@ -134,8 +115,7 @@ fn parts(text: &str, separator: char) -> Vec<String> {
         .collect()
 }
 
-/// A name a file may have; on Windows not a device, no `<>:"|?*` or
-/// control characters, no final dot or space.
+/// A name a file may have; on Windows no device, `<>:"|?*`, control character, final dot or space.
 fn is_usable_name(name: &str, windows: bool) -> bool {
     !name.contains('\0')
         && (!windows
@@ -169,9 +149,9 @@ pub fn is_windows_device_name(name: &str) -> bool {
         && digit.is_some_and(|d| d.is_ascii_digit() || "¹²³".contains(d))
 }
 
-/// The steps from `root` (absolute) to `given`, on text alone, refusing
-/// anything that could reach outside the root.
-pub fn plan(root: &str, given: &str, windows: bool) -> Result<Vec<Step>, Refusal> {
+/// The names from `root` (absolute) to `given`, `..` for a step up, on text
+/// alone, refusing anything that could reach outside the root.
+pub fn plan(root: &str, given: &str, windows: bool) -> Result<Vec<String>, Refusal> {
     let (root_start, root_parts) = parse(root, windows)?;
     if root_start == Start::Relative {
         return Err(Refusal::NotUnderRoot);
@@ -193,25 +173,14 @@ pub fn plan(root: &str, given: &str, windows: bool) -> Result<Vec<Step>, Refusal
         }
     };
     let mut depth = 0usize;
-    let planned = below.into_iter().map(|part| {
+    for part in &below {
         depth = match part.as_str() {
             ".." => depth.checked_sub(1).ok_or(Refusal::NotUnderRoot)?,
-            _ => depth + 1,
+            _ if is_usable_name(part, windows) => depth + 1,
+            _ => return Err(Refusal::BadName),
         };
-        to_steps(vec![part], windows).map(|mut s| s.remove(0))
-    });
-    planned.collect()
-}
-
-fn to_steps(parts: Vec<String>, windows: bool) -> Result<Vec<Step>, Refusal> {
-    parts
-        .into_iter()
-        .map(|p| match p.as_str() {
-            ".." => Ok(Step::Parent),
-            _ if is_usable_name(&p, windows) => Ok(Step::Name(p)),
-            _ => Err(Refusal::BadName),
-        })
-        .collect()
+    }
+    Ok(below)
 }
 
 /// The folder every path a client gives must stay inside.
@@ -294,7 +263,7 @@ impl Root {
     }
 
     /// [`plan`] against the canonical root, else against the alias.
-    fn plan(&self, given: &str, windows: bool) -> Result<Vec<Step>, Refusal> {
+    fn plan(&self, given: &str, windows: bool) -> Result<Vec<String>, Refusal> {
         match (plan(&self.text, given, windows), &self.alias) {
             (
                 Err(Refusal::NotUnderRoot | Refusal::OtherDrive | Refusal::OtherShare),
@@ -305,33 +274,34 @@ impl Root {
     }
 
     /// Follows `steps` from the root, looking only at paths inside it.
-    fn walk(&self, steps: Vec<Step>, windows: bool) -> Result<PathBuf, Refusal> {
+    fn walk(&self, steps: Vec<String>, windows: bool) -> Result<PathBuf, Refusal> {
         let (mut current, mut queue) = (self.canonical.clone(), VecDeque::from(steps));
         let (mut missing, mut links) = (false, 0);
-        while let Some(step) = queue.pop_front() {
-            let name = match step {
-                Step::Parent if missing => return Err(Refusal::ParentAfterMissing),
+        while let Some(name) = queue.pop_front() {
+            match name.as_str() {
+                ".." if missing => return Err(Refusal::ParentAfterMissing),
                 // `current` holds no links, so its parent is the real one.
-                Step::Parent if current == self.canonical || !current.pop() => {
+                ".." if current == self.canonical || !current.pop() => {
                     return Err(Refusal::Escapes);
                 }
-                Step::Parent => continue,
-                Step::Name(name) => name,
-            };
+                ".." => continue,
+                _ => {}
+            }
             let next = current.join(&name);
             match std::fs::symlink_metadata(&next) {
                 Ok(meta) if !missing && meta.file_type().is_symlink() => {
                     links += 1;
                     let target = std::fs::read_link(&next).map_err(|_| Refusal::BadLink)?;
-                    let target = target
-                        .to_str()
-                        .filter(|_| links <= 40)
-                        .ok_or(Refusal::BadLink)?;
-                    let mut expanded = if parse(target, windows)?.0 == Start::Relative {
-                        VecDeque::from(to_steps(parse(target, windows)?.1, windows)?)
-                    } else {
-                        current = self.canonical.clone();
-                        VecDeque::from(self.plan(target, windows)?)
+                    let target = target.to_str().filter(|_| links <= 40);
+                    let target = target.ok_or(Refusal::BadLink)?;
+                    let usable = |p: &String| p == ".." || is_usable_name(p, windows);
+                    let mut expanded = match parse(target, windows)? {
+                        (Start::Relative, parts) if parts.iter().all(usable) => parts.into(),
+                        (Start::Relative, _) => return Err(Refusal::BadName),
+                        _ => {
+                            current = self.canonical.clone();
+                            VecDeque::from(self.plan(target, windows)?)
+                        }
                     };
                     expanded.extend(queue);
                     queue = expanded;
@@ -380,26 +350,54 @@ pub fn plain_path(path: &Path) -> PathBuf {
     }
 }
 
-/// Reads a regular file of at most `max` bytes. The reported size is not
-/// trusted; anything but a regular file is refused before it is opened,
-/// because a pipe waits for a writer and a device may never end.
-pub fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>, ReadFailure> {
-    let meta = std::fs::metadata(path)?;
+/// Reads a regular file of at most `max` bytes, not trusting the reported size. Anything else
+/// is refused before it is opened, because a pipe waits for a writer and a device may never end.
+pub fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>, CommandError> {
+    use ErrorCode::{FileNotFound, InvalidArgument, Io, LimitExceeded, PermissionDenied};
+    let shown = display_path(path);
+    let error = |code, why: &str, fix: &str| {
+        CommandError::new(code, format!("{shown} could not be read"), why, fix)
+    };
+    let not_a_file = || {
+        let why = "it is not a regular file (a folder, device or pipe)";
+        error(InvalidArgument, why, "Give the path of a file.")
+    };
+    let too_large = || {
+        let why = format!("Carrysheet reads files up to {} MB", max >> 20);
+        error(LimitExceeded, &why, "Split it into smaller files.")
+    };
+    let failed = |e: std::io::Error| match e.kind() {
+        ErrorKind::NotFound => {
+            let fix = "Check the path, or give the full path to the file.";
+            error(FileNotFound, "there is no file at that path", fix)
+        }
+        ErrorKind::PermissionDenied => {
+            let fix = "Check the file's permissions, or close the program that has it locked.";
+            error(PermissionDenied, "the system refused access", fix)
+        }
+        _ => {
+            let fix = "Check that the path names a readable file.";
+            error(Io, &e.to_string(), fix)
+        }
+    };
+    let meta = std::fs::metadata(path).map_err(failed)?;
     if !meta.is_file() {
-        return Err(ReadFailure::NotAFile);
+        return Err(not_a_file());
     }
     if meta.len() > max {
-        return Err(ReadFailure::TooLarge);
+        return Err(too_large());
     }
-    let file = std::fs::File::open(path)?;
+    let file = std::fs::File::open(path).map_err(failed)?;
     // The path may have been swapped since the checks above.
-    if !file.metadata()?.is_file() {
-        return Err(ReadFailure::NotAFile);
+    if !file.metadata().map_err(failed)?.is_file() {
+        return Err(not_a_file());
     }
     let mut bytes = Vec::new();
-    file.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
+    file.take(max.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(failed)?;
     if bytes.len() as u64 > max {
-        return Err(ReadFailure::TooLarge);
+        return Err(too_large());
     }
     Ok(bytes)
 }
@@ -471,30 +469,7 @@ pub fn home_dir() -> Option<PathBuf> {
 
 /// A path with `~` for the home folder, so no output carries the user name.
 pub fn display_path(path: &Path) -> String {
-    let text = path.display().to_string();
-    home_dir().map_or_else(
-        || text.clone(),
-        |home| display_path_text(&text, &home.display().to_string(), cfg!(windows)),
-    )
-}
-
-/// [`display_path`] on text, for Windows (`windows: true`) or Unix rules.
-pub fn display_path_text(path: &str, home: &str, windows: bool) -> String {
-    let Some(home) = usable_home(home, windows) else {
-        return path.to_owned();
-    };
-    let plain = if windows {
-        strip_verbatim(path)
-    } else {
-        Cow::Borrowed(path)
-    };
-    let rest = match_prefix(&plain, &home, windows).map(|end| &plain[end..]);
-    match rest.map(|r| (r, r.chars().next())) {
-        Some((_, None)) => "~".to_owned(),
-        Some((rest, Some(c))) if is_separator(c, windows) => format!("~{rest}"),
-        // No match, or only part of a name, like /home/alicex for /home/alice.
-        _ => path.to_owned(),
-    }
+    redact_home(&path.display().to_string())
 }
 
 /// Replaces every mention of the home folder in free text with `~`.
@@ -520,8 +495,13 @@ pub fn redact_home_text(text: &str, home: &str, windows: bool) -> String {
             .iter()
             .find(|p| windows && starts_with_ignore_case(rest, p));
         let skip = verbatim.map_or(0, |p| p.len());
-        let found = match_prefix(&rest[skip..], &home, windows)
-            .or_else(|| match_prefix(&rest[skip..], &escaped, windows));
+        // After `\\?\UNC\`, a home on a share is written without its `\\`.
+        let unc = verbatim.is_some_and(|p| p.contains("UNC"));
+        let find = |h: &str| {
+            let h = if unc { h.strip_prefix(r"\\")? } else { h };
+            match_prefix(&rest[skip..], h, windows)
+        };
+        let found = find(&home).or_else(|| find(&escaped));
         if let Some(len) = found {
             out.push('~');
             i += skip + len;

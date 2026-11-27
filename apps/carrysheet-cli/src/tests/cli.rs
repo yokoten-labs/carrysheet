@@ -2,7 +2,6 @@ use crate::cli::*;
 use crate::files::read_bounded;
 use crate::run::command_json;
 use carrysheet::commands::{COMMANDS, CommandError, ErrorCode, command};
-use carrysheet::open::ReadFailure;
 use serde_json::{Map, Value, json};
 
 #[test]
@@ -223,11 +222,9 @@ fn ops_files_are_read_with_a_limit() {
     // The limit holds whatever size the file claims.
     let len = std::fs::metadata(&file).unwrap().len();
     assert_eq!(read_bounded(&file, len).unwrap().len() as u64, len);
-    assert!(matches!(
-        read_bounded(&file, len - 1),
-        Err(ReadFailure::TooLarge)
-    ));
-    assert!(matches!(read_bounded(&file, 0), Err(ReadFailure::TooLarge)));
+    let too_large = |max| read_bounded(&file, max).unwrap_err().code == ErrorCode::LimitExceeded;
+    assert!(too_large(len - 1));
+    assert!(too_large(0));
 
     // A folder is not a file.
     let e = ops_from(&format!("@{}", dir.0.display())).unwrap_err();

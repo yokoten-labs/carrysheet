@@ -277,7 +277,7 @@ fn exercise(kernel: &Kernel, input: Input<'_>, depth: Depth) -> Result<(), Comma
         Input::File(path) => {
             carrysheet::open::check_opens(path)?;
             let read = std::fs::read(path);
-            let bytes = read.map_err(|e| carrysheet::open::ReadFailure::Io(e).error(path))?;
+            let bytes = read.map_err(|e| crate::common::read_error(path, &e))?;
             kernel.open_bytes(path, bytes)?
         }
         Input::Bytes(name, bytes) => kernel.open_bytes(Path::new(name), bytes)?,
