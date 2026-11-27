@@ -56,7 +56,11 @@ fn text_fits_help_and_tool_lists() {
     for c in COMMANDS {
         let (summary, description) = c.doc();
         assert!(!summary.is_empty() && summary.len() <= 72, "{}", c.name);
-        assert!(!summary.ends_with('.') && !summary.contains('\n'), "{}", c.name);
+        assert!(
+            !summary.ends_with('.') && !summary.contains('\n'),
+            "{}",
+            c.name
+        );
         assert_ne!(summary, description, "{}: one doc paragraph", c.name);
         assert!(
             !description.is_empty() && description.len() <= 400,
@@ -128,7 +132,11 @@ fn path_arguments_are_text() {
             found.insert(*name);
         }
     }
-    assert_eq!(found.len(), PATHS.len(), "a name in PATHS is not an argument");
+    assert_eq!(
+        found.len(),
+        PATHS.len(),
+        "a name in PATHS is not an argument"
+    );
 }
 
 // The schemas.
@@ -148,13 +156,27 @@ fn overview_schema_shape() {
     // The struct's doc comment is the tool description, not the schema's.
     assert!(s.get("description").is_none());
     let keys: Vec<_> = s.as_object().unwrap().keys().collect();
-    assert_eq!(keys, ["type", "properties", "required", "additionalProperties"]);
+    assert_eq!(
+        keys,
+        ["type", "properties", "required", "additionalProperties"]
+    );
 }
 
 #[test]
 fn schemas_keep_only_what_every_client_accepts() {
     let s = input_schema(read());
-    assert_eq!(names(read()), ["path", "range", "mode", "max_rows", "max_columns", "cursor", "response_format"]);
+    assert_eq!(
+        names(read()),
+        [
+            "path",
+            "range",
+            "mode",
+            "max_rows",
+            "max_columns",
+            "cursor",
+            "response_format"
+        ]
+    );
     // No `format`, `minimum` or `default` from schemars, and no type lists.
     assert_eq!(
         s["properties"]["max_rows"],
@@ -236,7 +258,13 @@ fn tool_definitions_have_all_annotations() {
                 "openWorldHint"
             ]
         );
-        assert!(t["annotations"].as_object().unwrap().values().all(Value::is_boolean));
+        assert!(
+            t["annotations"]
+                .as_object()
+                .unwrap()
+                .values()
+                .all(Value::is_boolean)
+        );
     }
 }
 
@@ -316,7 +344,10 @@ fn a_wrong_value_names_its_argument() {
         (json!({ "path": 1 }), "`path`"),
         (json!({ "max_rows": "5", "path": "a" }), "`max_rows`"),
         (json!({ "path": "a", "cursor": "c", "mode": 1 }), "`mode`"),
-        (json!({ "path": "a", "max_columns": 1.5, "mode": "all" }), "`max_columns`"),
+        (
+            json!({ "path": "a", "max_columns": 1.5, "mode": "all" }),
+            "`max_columns`",
+        ),
         (json!({ "path": "a", "max_columns": 0 }), "`max_columns`"),
     ] {
         let e = validate_args(read(), &bad).unwrap_err();

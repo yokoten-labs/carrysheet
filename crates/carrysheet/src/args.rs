@@ -247,10 +247,16 @@ macro_rules! command {
             hints: $hints,
             schema: || {
                 let settings = schemars::generate::SchemaSettings::draft2020_12();
-                let generator = settings.with(|s| s.inline_subschemas = true).into_generator();
+                let generator = settings
+                    .with(|s| s.inline_subschemas = true)
+                    .into_generator();
                 generator.into_root_schema_for::<$args>().to_value()
             },
-            check: |given| <$args>::deserialize(given).map(|_| ()).map_err(|e| e.to_string()),
+            check: |given| {
+                <$args>::deserialize(given)
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            },
             #[cfg(feature = "cli")]
             flags: <$args as clap::Args>::augment_args,
         }
@@ -258,7 +264,12 @@ macro_rules! command {
 }
 
 /// The names of the four MCP annotations.
-pub const HINTS: [&str; 4] = ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"];
+pub const HINTS: [&str; 4] = [
+    "readOnlyHint",
+    "destructiveHint",
+    "idempotentHint",
+    "openWorldHint",
+];
 
 /// Never changes anything, and calling it again gives the same answer.
 const READS: [bool; 4] = [true, false, true, false];
@@ -425,10 +436,19 @@ pub fn validate_args(command: &Command, args: &Value) -> Result<Map<String, Valu
         ));
     };
     let schema = input_schema(command);
-    let names: Vec<&str> = schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    let names: Vec<&str> = schema["required"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
     if let Some(unknown) = given.keys().find(|k| !names.contains(&k.as_str())) {
         let why = format!("`{cli}` has no argument named `{unknown}`");
-        return Err(invalid(unknown, why, format!("Use one of: {}.", names.join(", "))));
+        return Err(invalid(
+            unknown,
+            why,
+            format!("Use one of: {}.", names.join(", ")),
+        ));
     }
     if let Err(why) = (command.check)(Value::Object(given.clone())) {
         let name = culprit(command, &given, &why);
@@ -453,12 +473,15 @@ pub fn validate_args(command: &Command, args: &Value) -> Result<Map<String, Valu
 /// The argument a serde error is about: the one named as missing, or the
 /// first whose removal changes the error; for a list, the item too.
 fn culprit(command: &Command, given: &Map<String, Value>, why: &str) -> String {
-    let missing = why.strip_prefix("missing field `").and_then(|rest| rest.split('`').next());
+    let missing = why
+        .strip_prefix("missing field `")
+        .and_then(|rest| rest.split('`').next());
     if let Some(name) = missing.filter(|name| !given.contains_key(*name) && command.has_arg(name)) {
         return name.to_owned();
     }
-    let fails_the_same =
-        |args: Map<String, Value>| (command.check)(Value::Object(args)).err().as_deref() == Some(why);
+    let fails_the_same = |args: Map<String, Value>| {
+        (command.check)(Value::Object(args)).err().as_deref() == Some(why)
+    };
     for (name, value) in given {
         let mut rest = given.clone();
         rest.shift_remove(name);
@@ -488,7 +511,11 @@ fn check_limits(name: &str, key: &str, value: &Value) -> Result<(), CommandError
             }
             if PATHS.contains(&key) && (text.is_empty() || text.contains('\0')) {
                 let why = format!("`{name}` is not a usable path");
-                return Err(invalid(name, why, "Give a file path like book.xlsx or reports/q1.xlsx."));
+                return Err(invalid(
+                    name,
+                    why,
+                    "Give a file path like book.xlsx or reports/q1.xlsx.",
+                ));
             }
             if key == "range" {
                 SheetRange::parse(text)?;
@@ -505,7 +532,10 @@ fn check_limits(name: &str, key: &str, value: &Value) -> Result<(), CommandError
         }
         Value::Array(items) => {
             if items.len() > MAX_LIST_ITEMS {
-                let why = format!("`{name}` has {} items; the limit is {MAX_LIST_ITEMS}", items.len());
+                let why = format!(
+                    "`{name}` has {} items; the limit is {MAX_LIST_ITEMS}",
+                    items.len()
+                );
                 return Err(invalid(name, why, "Split the work into several calls."));
             }
             for (i, item) in items.iter().enumerate() {
@@ -525,12 +555,19 @@ fn check_limits(name: &str, key: &str, value: &Value) -> Result<(), CommandError
 /// Checks that a call which deletes data or overwrites a file says
 /// `confirm: true`. `args` come from [`validate_args`]. `dry_run: true`
 /// never needs it, because nothing is written.
-pub fn check_confirmation(command: &Command, args: &Map<String, Value>) -> Result<(), CommandError> {
+pub fn check_confirmation(
+    command: &Command,
+    args: &Map<String, Value>,
+) -> Result<(), CommandError> {
     let is_true = |name: &str| args.get(name) == Some(&Value::Bool(true));
     if !args.contains_key("confirm") || is_true("confirm") || is_true("dry_run") {
         return Ok(());
     }
-    let ops = args.get("ops").and_then(Value::as_array).into_iter().flatten();
+    let ops = args
+        .get("ops")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
     let deletes = |(i, op): (usize, &Value)| {
         let kind = op.get("op")?.as_str()?.strip_prefix("delete_")?;
         Some(format!("delete {kind} (ops[{i}])"))
@@ -548,7 +585,10 @@ pub fn check_confirmation(command: &Command, args: &Map<String, Value>) -> Resul
     };
     // The same call with `confirm: true`; long lists and text are summed up.
     let mut call = Vec::new();
-    for (name, value) in args.iter().filter(|(name, value)| !value.is_null() && *name != "confirm") {
+    for (name, value) in args
+        .iter()
+        .filter(|(name, value)| !value.is_null() && *name != "confirm")
+    {
         let shown = match value {
             Value::Array(items) if value.to_string().chars().count() > 160 => {
                 format!("[...the same {} items...]", items.len())
@@ -561,7 +601,10 @@ pub fn check_confirmation(command: &Command, args: &Map<String, Value>) -> Resul
     call.push("\"confirm\":true".to_owned());
     Err(CommandError::new(
         ErrorCode::ConfirmationRequired,
-        format!("`{}` would {first}{more}; confirm is not true", command.cli_name()),
+        format!(
+            "`{}` would {first}{more}; confirm is not true",
+            command.cli_name()
+        ),
         "deleting sheets, rows or columns and overwriting files cannot be undone, so they need confirm: true. dry_run lists the changes without it.",
         format!(
             "Call again with confirm set to true: {{{}}}. On the command line, add --confirm.",

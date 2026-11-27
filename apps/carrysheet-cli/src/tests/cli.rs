@@ -57,7 +57,9 @@ fn command_json_lists_flags_and_types() {
     );
     assert_eq!(
         field("type"),
-        ["path", "range", "enum", "integer", "integer", "text", "enum"]
+        [
+            "path", "range", "enum", "integer", "integer", "text", "enum"
+        ]
     );
     assert_eq!(
         field("required"),
@@ -74,12 +76,23 @@ fn command_json_lists_flags_and_types() {
     let types: Vec<_> = args.iter().map(|a| a["type"].clone()).collect();
     assert_eq!(
         types,
-        ["path", "object_list", "path", "boolean", "boolean", "boolean", "boolean"]
+        [
+            "path",
+            "object_list",
+            "path",
+            "boolean",
+            "boolean",
+            "boolean",
+            "boolean"
+        ]
     );
     assert_eq!(args[1]["flag"], "--ops");
     assert_eq!(args[1]["required"], true);
     assert_eq!(c["changes_files"], true);
-    assert_eq!(command_json(command("mcp_serve").unwrap())["cli"], "mcp serve");
+    assert_eq!(
+        command_json(command("mcp_serve").unwrap())["cli"],
+        "mcp serve"
+    );
 }
 
 #[test]
