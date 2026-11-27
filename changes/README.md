@@ -12,5 +12,5 @@ Added
 A dark mode for the settings page (#42).
 ```
 
-`node .yokoten/bin/yokoten.ts changelog` shows what the files add. Before a release,
-`node .yokoten/bin/yokoten.ts changelog --write` moves them into `CHANGELOG.md` and deletes them.
+`yokoten changelog` shows what the files add. Before a release,
+`yokoten changelog --write` moves them into `CHANGELOG.md` and deletes them.
