@@ -215,7 +215,7 @@ fn reading_pages_and_errors() {
 
     let e = call("read", json!({ "path": p(&csv), "range": "Nope!A1" })).unwrap_err();
     assert_eq!(e.code, ErrorCode::NoSuchSheet);
-    let e = call("overview", json!({ "path": p(&dir.join("x.ods")) })).unwrap_err();
+    let e = call("overview", json!({ "path": p(&dir.join("x.numbers")) })).unwrap_err();
     assert_eq!(e.code, ErrorCode::UnsupportedFormat);
     let e = call("overview", json!({ "path": p(&dir.join("gone.xlsx")) })).unwrap_err();
     assert_eq!(e.code, ErrorCode::FileNotFound);

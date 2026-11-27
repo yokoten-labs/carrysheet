@@ -18,7 +18,7 @@ use crate::text::escape;
 pub const MAX_FILE_BYTES: u64 = if cfg!(target_pointer_width = "64") { 1 << 30 } else { 256 << 20 };
 
 /// Extensions [`check_opens`] accepts.
-const OPENS: &[&str] = &["xlsx", "xlsm", "xltx", "xltm", "xls", "xlsb", "csv"];
+const OPENS: &[&str] = &["xlsx", "xlsm", "xltx", "xltm", "xls", "xlsb", "ods", "csv"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SourceKind {
@@ -66,7 +66,7 @@ pub fn check_opens(path: &Path) -> Result<(), CommandError> {
     Err(CommandError::new(
         ErrorCode::UnsupportedFormat,
         format!("{} is not a workbook Carrysheet opens", path.display()),
-        "the extension is not one of .xlsx, .xlsm, .xltx, .xltm, .xls, .xlsb or .csv",
+        "the extension is not one of .xlsx, .xlsm, .xltx, .xltm, .xls, .xlsb, .ods or .csv",
         "Give a spreadsheet file with one of those extensions.",
     ))
 }

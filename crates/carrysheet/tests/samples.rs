@@ -170,6 +170,21 @@ fn overview_says_macros_in_xls_were_not_checked() {
     );
 }
 
+/// Record 0010, decision 3: an .ods file opens through GridCraft.
+#[test]
+fn ods_opens_and_reads() {
+    let mime = b"application/vnd.oasis.opendocument.spreadsheet".to_vec();
+    let content = r#"<?xml version="1.0"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:spreadsheet><table:table table:name="Data"><table:table-row><table:table-cell office:value-type="float" office:value="42"><text:p>42</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>"#;
+    let parts = [("mimetype".to_owned(), mime), ("content.xml".to_owned(), content.into())];
+    let path = scratch("ods").join("book.ods");
+    std::fs::write(&path, stored_zip(&parts)).unwrap();
+    let done = call("overview", json!({ "path": p(&path) })).unwrap();
+    assert_eq!(done["sheets"][0]["name"], "Data", "{done:?}");
+    assert!(done["macros"].as_str().unwrap().contains(".ods"), "{done:?}");
+    let page = call("read", json!({ "path": p(&path), "range": "A1" })).unwrap();
+    assert_eq!(page["rows"][0]["cells"][0], json!(42.0), "{page:?}");
+}
+
 #[test]
 fn macros_are_kept_in_xlsm_and_reported_before_xlsx() {
     let dir = scratch("macro");
