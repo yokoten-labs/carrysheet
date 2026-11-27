@@ -35,7 +35,11 @@ pub const PATHS: &[&str] = &["path", "output", "root"];
 
 /// The largest value of each whole-number argument; the smallest is 1. The
 /// schema carries no limits, because not every client accepts them.
-const LARGEST: &[(&str, u64)] = &[("max_rows", 10_000), ("max_columns", 16_384), ("count", 1_048_576)];
+const LARGEST: &[(&str, u64)] = &[
+    ("max_rows", 10_000),
+    ("max_columns", 16_384),
+    ("count", 1_048_576),
+];
 
 /// On the command line a true/false argument is a switch, such as `--dry-run`.
 #[cfg(feature = "cli")]
@@ -220,7 +224,7 @@ pub struct Command {
     pub name: &'static str,
     /// Offered as a tool by the MCP server.
     pub mcp_tool: bool,
-    /// The MCP annotations, all four set, in the order of [`HINTS`].
+    /// The four MCP annotations: read only, destructive, idempotent, open world.
     pub hints: [bool; 4],
     schema: fn() -> Value,
     check: fn(Value) -> Result<(), String>,
@@ -244,7 +248,7 @@ macro_rules! command {
 }
 
 /// The names of the four MCP annotations.
-pub const HINTS: [&str; 4] = ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"];
+const HINTS: &str = "readOnlyHint destructiveHint idempotentHint openWorldHint";
 
 /// Never changes anything, and calling it again gives the same answer.
 const READS: [bool; 4] = [true, false, true, false];
@@ -289,7 +293,8 @@ impl Command {
     pub fn arg_names(&self) -> Vec<String> {
         let schema = input_schema(self);
         let properties = schema["properties"].as_object();
-        properties.map(|p| p.keys().cloned().collect()).unwrap_or_default()
+        let names = properties.into_iter().flat_map(Map::keys);
+        names.cloned().collect()
     }
 
     /// True when the command takes an argument of this name.
@@ -309,14 +314,15 @@ impl Command {
 
     /// The four MCP annotations under their protocol names.
     pub fn annotations(&self) -> Value {
-        HINTS.into_iter().zip(self.hints).collect()
+        HINTS.split(' ').zip(self.hints).collect()
     }
 }
 
 /// What schemars writes for a struct, with nothing left as a `$ref`.
 fn schema_of<T: JsonSchema>() -> Value {
     let settings = SchemaSettings::draft2020_12().with(|s| s.inline_subschemas = true);
-    settings.into_generator().into_root_schema_for::<T>().to_value()
+    let generator = settings.into_generator();
+    generator.into_root_schema_for::<T>().to_value()
 }
 
 /// What serde says when `given` is not a `T`.
@@ -395,6 +401,10 @@ pub fn tool_definition(command: &Command) -> Value {
     })
 }
 
+/// The checked arguments of a call: every argument of the command by name,
+/// absent ones as `null`.
+pub type Checked = Map<String, Value>;
+
 fn invalid(name: &str, why: impl Into<String>, fix: impl Into<String>) -> CommandError {
     CommandError::invalid_argument(name, why, fix)
 }
@@ -412,18 +422,20 @@ fn without_nulls(value: &Value) -> Value {
 }
 
 /// Checks `args` (a JSON object) on our side, because a client may skip
-/// schema validation. Returns every argument of the command by name, absent
-/// ones as `null`.
-pub fn validate_args(command: &Command, args: &Value) -> Result<Map<String, Value>, CommandError> {
-    let help = format!("Run `carrysheet-cli {} --help` for the arguments.", command.cli_name());
+/// schema validation.
+pub fn validate_args(command: &Command, args: &Value) -> Result<Checked, CommandError> {
+    let cli = command.cli_name();
+    let help = format!("Run `carrysheet-cli {cli} --help` for the arguments.");
     let Value::Object(mut given) = without_nulls(args) else {
+        let why = "the arguments must be a JSON object";
         let fix = format!("Send an object such as {{\"path\": \"book.xlsx\"}}. {help}");
-        return Err(invalid("arguments", "the arguments must be a JSON object", fix));
+        return Err(invalid("arguments", why, fix));
     };
     let names = command.arg_names();
     if let Some(unknown) = given.keys().find(|key| !names.contains(key)) {
-        let why = format!("`{}` has no argument named `{unknown}`", command.cli_name());
-        return Err(invalid(unknown, why, format!("Use one of: {}.", names.join(", "))));
+        let why = format!("`{cli}` has no argument named `{unknown}`");
+        let fix = format!("Use one of: {}.", names.join(", "));
+        return Err(invalid(unknown, why, fix));
     }
     if let Err(why) = (command.check)(given.clone().into()) {
         let name = culprit(command, &given, &why);
@@ -434,7 +446,8 @@ pub fn validate_args(command: &Command, args: &Value) -> Result<Map<String, Valu
             None => help,
         };
         // serde repeats a wrong value; keep a long one out of the error.
-        return Err(invalid(&name, why.chars().take(160).collect::<String>(), fix));
+        let why: String = why.chars().take(160).collect();
+        return Err(invalid(&name, why, fix));
     }
     for (name, value) in &given {
         check_limits(name, name, value)?;
@@ -454,7 +467,8 @@ fn culprit(command: &Command, given: &Map<String, Value>, why: &str) -> String {
     if !given.contains_key(missing) && command.has_arg(missing) {
         return missing.to_owned();
     }
-    let fails_alike = |args: Map<String, Value>| (command.check)(args.into()).err().as_deref() == Some(why);
+    let fails_alike =
+        |args: Map<String, Value>| (command.check)(args.into()).err().as_deref() == Some(why);
     for (name, value) in given {
         let mut rest = given.clone();
         rest.shift_remove(name);
@@ -523,7 +537,7 @@ fn check_limits(name: &str, key: &str, value: &Value) -> Result<(), CommandError
 /// Checks that a call which deletes data or overwrites a file says
 /// `confirm: true`. `args` come from [`validate_args`]. `dry_run: true`
 /// never needs it, because nothing is written.
-pub fn check_confirmation(command: &Command, args: &Map<String, Value>) -> Result<(), CommandError> {
+pub fn check_confirmation(command: &Command, args: &Checked) -> Result<(), CommandError> {
     let is_true = |name: &str| args.get(name) == Some(&Value::Bool(true));
     if !args.contains_key("confirm") || is_true("confirm") || is_true("dry_run") {
         return Ok(());
@@ -533,7 +547,8 @@ pub fn check_confirmation(command: &Command, args: &Map<String, Value>) -> Resul
         let kind = op.get("op")?.as_str()?.strip_prefix("delete_")?;
         Some(format!("delete {kind} (ops[{i}])"))
     };
-    let mut actions: Vec<String> = ops.into_iter().flatten().enumerate().filter_map(deletes).collect();
+    let ops = ops.into_iter().flatten().enumerate();
+    let mut actions: Vec<String> = ops.filter_map(deletes).collect();
     if is_true("overwrite") {
         actions.push("overwrite a file".to_owned());
     }
@@ -572,26 +587,27 @@ pub fn check_confirmation(command: &Command, args: &Map<String, Value>) -> Resul
 
 // Reading the checked arguments of a command.
 
-pub(crate) fn text<'a>(args: &'a Map<String, Value>, name: &str) -> Option<&'a str> {
+pub(crate) fn text<'a>(args: &'a Checked, name: &str) -> Option<&'a str> {
     args.get(name).and_then(Value::as_str)
 }
 
-pub(crate) fn flag(args: &Map<String, Value>, name: &str) -> bool {
+pub(crate) fn flag(args: &Checked, name: &str) -> bool {
     args.get(name).and_then(Value::as_bool) == Some(true)
 }
 
-pub(crate) fn number(args: &Map<String, Value>, name: &str) -> Option<u32> {
+pub(crate) fn number(args: &Checked, name: &str) -> Option<u32> {
     let number = args.get(name)?.as_u64()?;
     Some(u32::try_from(number).unwrap_or(u32::MAX))
 }
 
-pub(crate) fn detailed(args: &Map<String, Value>) -> bool {
+pub(crate) fn detailed(args: &Checked) -> bool {
     text(args, "response_format") == Some("detailed")
 }
 
 /// The workbook path; validation makes sure it is there.
-pub(crate) fn input(args: &Map<String, Value>) -> Result<PathBuf, CommandError> {
-    let missing = || invalid("path", "no workbook was given", "Name the workbook file, like book.xlsx.");
+pub(crate) fn input(args: &Checked) -> Result<PathBuf, CommandError> {
+    let fix = "Name the workbook file, like book.xlsx.";
+    let missing = || invalid("path", "no workbook was given", fix);
     text(args, "path").map(PathBuf::from).ok_or_else(missing)
 }
 
