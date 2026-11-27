@@ -16,7 +16,7 @@ use crate::commands::limits::{MAX_CELL_TEXT_CHARS, MAX_LISTED_SHEETS, MAX_RESPON
 use crate::error::{CommandError, ErrorCode};
 use crate::open::{Book, SourceKind};
 use crate::range::{Shape, SheetRange, cells_text, format_sheet_name};
-use crate::save::clean_from_file;
+use crate::text::escape;
 use crate::{Kernel, internal};
 
 /// One sheet in an [`Overview`].
@@ -655,7 +655,7 @@ impl Book {
             warnings: self
                 .warnings
                 .iter()
-                .map(|w| clean_from_file(w, 200))
+                .map(|w| escape(w, 200))
                 .collect(),
             macros: match self.kind {
                 SourceKind::Package => crate::save::loss::macros(&self.source, true),
@@ -766,7 +766,7 @@ pub(crate) fn overview(
     let mut headers_cut = 0usize;
     for s in overview.sheets.iter().take(MAX_LISTED_SHEETS) {
         let mut v = serde_json::to_value(s).unwrap_or(Value::Null);
-        v["name"] = json!(clean_from_file(&s.name, 64));
+        v["name"] = json!(escape(&s.name, 64));
         // The first row of the used range: usually the headers.
         let header = match &s.used_range {
             Some(_) if text_left == 0 => {

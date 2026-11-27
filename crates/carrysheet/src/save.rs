@@ -14,6 +14,7 @@ use crate::commands::Command;
 use crate::error::{CommandError, ErrorCode};
 pub(crate) mod loss;
 use crate::open::{Book, SourceKind};
+use crate::text::escape;
 use crate::{Answer, Kernel, internal};
 
 /// File formats Carrysheet writes.
@@ -150,39 +151,6 @@ pub struct Encoded {
     pub report: SaveReport,
 }
 
-/// Text from a file, made safe to show: control, bidi and invisible
-/// characters escaped, cut at `max` characters.
-pub fn clean_from_file(text: &str, max: usize) -> String {
-    escape(text, max, false)
-}
-
-/// [`clean_from_file`] in double quotes, with quotes and backslashes escaped,
-/// for naming something from a file inside a message.
-pub fn quote_from_file(text: &str, max: usize) -> String {
-    format!("\"{}\"", escape(text, max, true))
-}
-
-fn escape(text: &str, max: usize, quotes: bool) -> String {
-    let mut out = String::new();
-    for (shown, ch) in text.chars().enumerate() {
-        if shown == max {
-            out.push_str("...");
-            break;
-        }
-        let invisible = ch.is_control()
-            || matches!(ch, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}');
-        if invisible {
-            out.push_str(&format!("\\u{{{:x}}}", ch as u32));
-        } else if quotes && (ch == '"' || ch == '\\') {
-            out.push('\\');
-            out.push(ch);
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
 /// Where `edit` writes when no output is given: beside the original, as
 /// `name-edited.xlsx`, or `name-edited-2.xlsx` and so on when taken.
 /// `exists` says whether a path is taken.
@@ -305,7 +273,7 @@ fn save_failed(e: &gridcraft_engine::EngineError) -> CommandError {
     CommandError::new(
         ErrorCode::Io,
         "the workbook could not be encoded",
-        clean_from_file(&e.to_string(), 200),
+        escape(&e.to_string(), 200),
         "Try another output format; if it keeps failing, report it at https://github.com/yokoten-labs/carrysheet/issues.",
     )
 }
@@ -374,7 +342,7 @@ fn open_warnings(book: &Book, report: &mut SaveReport) {
         "missing",
     ];
     for w in &book.warnings {
-        let text = clean_from_file(w, 200);
+        let text = escape(w, 200);
         if LOST.iter().any(|l| w.contains(l)) {
             report.lost.push(Loss {
                 feature: format!("content the opened file could not give: {text}"),
@@ -434,7 +402,7 @@ fn csv_bytes_of(
             CommandError::new(
                 ErrorCode::LimitExceeded,
                 "the csv file would be too large",
-                clean_from_file(&e.to_string(), 200),
+                escape(&e.to_string(), 200),
                 "Save as .xlsx, or copy the part you need to a new sheet and save that.",
             )
         })?;
@@ -616,5 +584,5 @@ fn loss_error(output: &Path, report: &SaveReport) -> CommandError {
 
 /// A part name from a file, as shown in reports.
 pub fn part_name(name: &str) -> String {
-    quote_from_file(name, 64)
+    crate::text::quote(name, 64)
 }

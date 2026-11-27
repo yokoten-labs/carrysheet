@@ -17,7 +17,8 @@ pub use crate::commands::limits::{MAX_BATCH_CELLS, MAX_FILL_CELLS, MAX_OPS};
 use crate::error::{CommandError, ErrorCode};
 use crate::open::Book;
 use crate::range::{Shape, SheetRange, validate_sheet_name};
-use crate::save::{EncodeOptions, clean_from_file, finish_save, output_format};
+use crate::save::{EncodeOptions, finish_save, output_format};
+use crate::text::escape;
 use crate::view::value_json;
 use crate::{Answer, Kernel, internal};
 
@@ -657,7 +658,7 @@ fn op_failed(i: usize, op: &EditOp, e: EngineError) -> CommandError {
     CommandError::new(
         ErrorCode::InvalidArgument,
         format!("ops[{i}] ({}) could not be applied", op.kind.as_str()),
-        clean_from_file(&e.to_string(), 200),
+        escape(&e.to_string(), 200),
         "Change or remove this operation and call again; nothing was saved.",
     )
 }

@@ -7,4 +7,5 @@ mod kernel;
 mod range;
 mod save;
 mod save_loss;
+mod text;
 mod view;

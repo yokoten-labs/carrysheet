@@ -8,6 +8,7 @@
 //! - [`edit`]: the `edit` command.
 //! - [`save`]: `convert`, and what a save keeps and loses.
 //! - [`range`]: A1 ranges with a sheet name.
+//! - [`text`]: text from a file, made safe to show.
 //! - [`error`]: errors with a code, what, why and fix, and exit codes.
 //! - [`commands`]: the command table, its schemas, the limit values.
 //!
@@ -19,6 +20,7 @@ pub mod error;
 pub mod open;
 pub mod range;
 pub mod save;
+pub mod text;
 pub mod view;
 
 #[cfg(test)]
@@ -37,7 +39,8 @@ use crate::commands::table::Command;
 use crate::edit::{EditOp, EditResult};
 use crate::error::{CommandError, ErrorCode};
 use crate::open::{Book, MAX_FILE_BYTES};
-use crate::save::{EncodeOptions, Encoded, FileFormat, clean_from_file};
+use crate::save::{EncodeOptions, Encoded, FileFormat};
+use crate::text::escape;
 use crate::view::{Evaluation, Overview, ReadPage, ReadRequest};
 
 /// The commands [`run`] runs: those that work on a workbook.
@@ -274,7 +277,7 @@ pub(crate) fn internal(doing: &str, detail: &str) -> CommandError {
         format!("Carrysheet's kernel failed while {doing}; nothing was written"),
         format!(
             "a bug in the calculation kernel ({GRIDCRAFT_VERSION}) stopped the work: {}",
-            clean_from_file(detail, 160)
+            escape(detail, 160)
         ),
         "Please report it at https://github.com/yokoten-labs/carrysheet/issues, with the file if you can share it. Do not trust other results for this file until then.",
     )

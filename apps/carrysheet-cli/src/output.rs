@@ -5,7 +5,7 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use carrysheet::commands::{CommandError, ErrorCode};
-use carrysheet::save::clean_from_file;
+use carrysheet::text::escape;
 use clap::error::ErrorKind;
 use serde_json::{Map, Value, json};
 
@@ -55,10 +55,10 @@ pub fn print_done(done: &Done, json: bool) {
 fn scalar(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
-        Value::String(s) => clean_from_file(&redact_home(s), 2000),
+        Value::String(s) => escape(&redact_home(s), 2000),
         Value::Number(n) if !n.is_f64() => n.to_string(),
         Value::Number(n) => n.as_f64().unwrap_or_default().to_string(),
-        other => clean_from_file(&redact_home(&other.to_string()), 2000),
+        other => escape(&redact_home(&other.to_string()), 2000),
     }
 }
 

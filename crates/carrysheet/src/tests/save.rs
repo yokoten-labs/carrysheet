@@ -4,12 +4,10 @@ use std::path::Path;
 
 #[test]
 fn file_text_is_quoted_escaped_and_cut() {
-    assert_eq!(quote_from_file("xl/a.xml", 64), "\"xl/a.xml\"");
-    assert_eq!(
-        quote_from_file("a\u{202E}b\n\"", 64),
-        "\"a\\u{202e}b\\u{a}\\\"\""
-    );
-    assert_eq!(quote_from_file(&"x".repeat(100), 3), "\"xxx...\"");
+    assert_eq!(part_name("xl/a.xml"), "\"xl/a.xml\"");
+    assert_eq!(part_name("a\u{202E}b\n\""), "\"a\\u{202e}b\\u{a}\\\"\"");
+    let cut = format!("\"{}\"…[cut: 36 more characters]", "x".repeat(64));
+    assert_eq!(part_name(&"x".repeat(100)), cut);
 }
 
 #[test]

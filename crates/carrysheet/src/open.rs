@@ -12,7 +12,7 @@ use gridcraft_engine::{DocState, EngineError, Session};
 
 use crate::error::{CommandError, ErrorCode};
 use crate::internal;
-use crate::save::clean_from_file;
+use crate::text::escape;
 
 /// The largest file opened. 32-bit programs get less (record 0003, point 4).
 pub const MAX_FILE_BYTES: u64 = if cfg!(target_pointer_width = "64") {
@@ -138,7 +138,7 @@ fn open_error(path: &Path, e: &EngineError) -> CommandError {
         return internal("opening the file", detail);
     }
     let shown = path.display();
-    let why = clean_from_file(&text, 200);
+    let why = escape(&text, 200);
     if text.contains(gridcraft_engine::io::PASSWORD_REQUIRED) {
         return CommandError::new(
             ErrorCode::UnsupportedFormat,

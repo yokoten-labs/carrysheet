@@ -104,9 +104,9 @@ characters such as Unicode tag characters (U+E0000 to U+E007F) can hide such
 text from a person while a model still reads it ("ASCII smuggling").
 
 **Now:**
-- Text from files that crates show in messages is escaped and cut
-  (`clean_from_file` in carrysheet::commands); the MCP log goes through the
-  same helper.
+- Text from files that the library shows in messages and results is escaped
+  and cut by one helper, `carrysheet::text`, with a Unicode range table
+  ([issue 67][i67]). The text form for people and the MCP log use it too.
 - Changes need `dry_run` or confirmation: overwriting and deleting need
   `confirm` (or `--yes` on the command line), and `--read-only` hides every
   tool that changes files.
@@ -114,8 +114,6 @@ text from a person while a model still reads it ("ASCII smuggling").
   what a steered agent can reach through us.
 
 **Open:**
-- One shared escape function for all file text, generated from Unicode data
-  ([issue 67][i67]).
 - Comments returned in a clearly marked data field, never as instructions
   ([issue 64][i64]).
 - The review view, where a person keeps or undoes each change an agent made

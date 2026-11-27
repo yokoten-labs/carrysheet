@@ -160,6 +160,12 @@ fn paths_are_confined_and_resolved() {
 }
 
 #[test]
+fn log_lines_escape_tag_characters_and_backslashes() {
+    let line = log_line("x\u{E0041}\u{202E}\u{1b}[31m\\u{41}");
+    assert_eq!(line, "carrysheet-cli: x\\u{e0041}\\u{202e}\\u{1b}[31m\\\\u{41}\n");
+}
+
+#[test]
 fn log_lines_are_cleaned_like_file_text() {
     let line = log_line("forged\r\n2026-01-01 carrysheet-cli: \u{1b}[31mred\u{202e}");
     assert_eq!(line.matches('\n').count(), 1, "{line}");

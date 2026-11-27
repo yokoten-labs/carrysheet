@@ -23,7 +23,7 @@ use std::time::Instant;
 use carrysheet::commands::schema::tool_definition;
 use carrysheet::commands::table::{ArgType, Command, mcp_tools};
 use carrysheet::commands::{CommandError, ErrorCode, validate_args};
-use carrysheet::save::clean_from_file;
+use carrysheet::text::escape;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, ListToolsResult,
     PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
@@ -73,7 +73,7 @@ pub fn log(message: &str) {
 }
 
 pub(crate) fn log_line(message: &str) -> String {
-    let line = clean_from_file(&redact_home(message), MAX_LOG_LINE);
+    let line = escape(&redact_home(message), MAX_LOG_LINE);
     format!("carrysheet-cli: {line}\n")
 }
 
