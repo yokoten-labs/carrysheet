@@ -73,6 +73,8 @@ pub(crate) struct Local {
     seen: Arc<Mutex<guard::Seen>>,
     /// Why the progress handler stopped the last query.
     stopped: Arc<AtomicU8>,
+    /// Switches the progress handler on and off per query.
+    meter: Arc<guard::Meter>,
     /// Whether the running query is past its time limit; our functions read
     /// it too.
     late: Arc<guard::Late>,
@@ -124,13 +126,17 @@ impl Local {
         let seen = Arc::new(Mutex::new(guard::Seen::default()));
         let names: Vec<String> = tables.iter().map(|t| t.name.clone()).collect();
         let late = Arc::new(guard::Late::default());
-        guard::lock(&conn, &limits, &names, Arc::clone(&seen), &late).map_err(internal)?;
+        guard::lock(&mut conn, &limits, &names, Arc::clone(&seen), &late).map_err(internal)?;
+        let stopped = Arc::new(AtomicU8::new(guard::STOPPED_NONE));
+        let meter =
+            guard::meter(&mut conn, Arc::clone(&stopped), Arc::clone(&late)).map_err(internal)?;
         Ok(Local {
             conn,
             tables,
             limits,
             seen,
-            stopped: Arc::new(AtomicU8::new(guard::STOPPED_NONE)),
+            stopped,
+            meter,
             late,
             data_bytes,
             _reservation: reservation,
@@ -230,7 +236,6 @@ impl Local {
         }
         let columns: Vec<ResultColumn> = stmt
             .columns()
-            .iter()
             .map(|c| ResultColumn {
                 name: c.name().to_owned(),
                 declared_type: c.decl_type().map(str::to_owned),
@@ -261,16 +266,9 @@ impl Local {
             .min(self.limits.max_page_cells / width)
             .max(1);
 
-        let watchdog = guard::watch(
-            &self.conn,
-            &self.limits,
-            start,
-            Arc::clone(&self.stopped),
-            &self.late,
-        )
-        .map_err(internal)?;
+        let watchdog = guard::watch(&self.meter, &self.limits, start, &self.stopped, &self.late);
         let collected = self.collect(&mut stmt, page.offset, max_rows, &booleans);
-        let _ = guard::unwatch(&self.conn);
+        guard::unwatch(&self.meter);
         drop(watchdog);
         let (rows, more) = collected.map_err(|e| self.sql_error(e, sql, offset))?;
 
@@ -901,6 +899,14 @@ fn sql_reason(message: &str) -> Option<(QueryErrorCode, &'static str, &'static s
             QueryErrorCode::TooLarge,
             "A query may read at most 200 tables in all, and each use of a WITH table counts the tables it reads again: a chain of WITH tables that each use the one before twice doubles at every step.",
             "Use each WITH table once (join it to itself through another WITH table if needed), or split the chain over several queries.",
+        ),
+        (
+            // SQLite 3.54 and later also give this for a chain of WITH tables
+            // that opens more than SQLITE_LIMIT_EXPR_DEPTH (500) cursors.
+            &["VIEWs and/or subqueries nested too deep"],
+            QueryErrorCode::TooLarge,
+            "A query may nest at most 500 subqueries and open at most 500 tables, and each use of a WITH table counts the tables it reads again: a chain of WITH tables that each use the one before twice doubles at every step.",
+            "Nest fewer subqueries, use each WITH table once (join it to itself through another WITH table if needed), or split the chain over several queries.",
         ),
         (
             &["ambiguous column name"],

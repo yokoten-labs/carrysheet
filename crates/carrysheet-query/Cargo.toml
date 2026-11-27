@@ -17,7 +17,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # The web (wasm32) build leaves it out: there the crate has the input types,
 # header naming and date helper, but no QueryEngine.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-rusqlite = { version = "0.40.2", default-features = false, features = [
+rusqlite = { version = "0.41.1", default-features = false, features = [
     "bundled",
     "column_decltype",
     "functions",
@@ -28,7 +28,7 @@ rusqlite = { version = "0.40.2", default-features = false, features = [
 # The query worker caps its own address space (RLIMIT_AS) without unsafe
 # code. Already in Cargo.lock through tempfile and terminal_size.
 [target.'cfg(target_os = "linux")'.dependencies]
-rustix = { version = "1.1.5", default-features = false, features = ["std", "process"] }
+rustix = { version = "1.1.6", default-features = false, features = ["std", "process"] }
 
 # The test binary is its own query worker, so it has its own main.
 [[test]]

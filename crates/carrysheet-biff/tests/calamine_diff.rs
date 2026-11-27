@@ -48,7 +48,7 @@ fn theirs(d: &Data) -> Option<Val> {
     }
 }
 
-/// calamine 0.36 formula text we do not compare against, with the reason:
+/// calamine 0.38 formula text we do not compare against, with the reason:
 ///
 /// - `$`: calamine swaps the row and column relative flags of BIFF8
 ///   PtgRef/PtgArea ([MS-XLS] ColRelU in RgceLoc: bit 14 is colRelative and
@@ -69,36 +69,21 @@ fn calamine_is_off(f: &str) -> bool {
         || f.starts_with("Unrecognised")
 }
 
-/// Files where calamine 0.36 reads cell text wrongly, with the reason. Each
+/// Files where calamine 0.38 reads cell text wrongly, with the reason. Each
 /// must still differ (so the list cannot go stale), and nothing else may.
 ///
-/// The first two are the same calamine bug: an SST string with fHighByte = 1 is
-/// UTF-16LE whatever the CODEPAGE record says ([MS-XLS] 2.5.293
-/// XLUnicodeRichExtendedString), but calamine runs it through the code page
-/// (1252), giving "T\0i\0t\0e\0l\0" for "Titel" and "?" for U+25A0.
-const CALAMINE_VALUE_BUGS: &[(&str, &str)] = &[
-    (
-        "sheet_name_parsing.xls",
-        "UTF-16 SST strings decoded as code page 1252",
-    ),
-    (
-        "biff5-rich-text-string.xls",
-        "UTF-16 SST string decoded as code page 1252 (H3: U+25A0, U+2022, U+2019)",
-    ),
-    // calamine 0.36 reads a chart's cached series values (SIIndex followed
-    // by NUMBER records inside an embedded chart substream, [MS-XLS] 2.4.236)
-    // as cells of the sheet that holds the chart. 0.37 no longer does.
-    ("WithChart.xls", "chart series cache read as sheet cells"),
-    ("OOM_alloc.xls", "chart series cache read as sheet cells"),
-];
-
-/// Single formulas calamine 0.36 renders wrongly, as "file / sheet / cell",
-/// with the reason. Each must still differ.
-const CALAMINE_FORMULA_BUGS: &[(&str, &str)] = &[(
-    "SharedFormulaTest.xls / 0 / DY1",
-    "shared PtgRefN column offset applied past column 255 wrongly (DZ1 shown as Z1); \
-     [MS-XLS] RgceLocRel adds the signed offset to the cell column",
+/// The bug: an SST string with fHighByte = 1 is UTF-16LE whatever the
+/// CODEPAGE record says ([MS-XLS] 2.5.293 XLUnicodeRichExtendedString), but
+/// calamine runs it through the code page (1252), giving "T\0i\0t\0e\0l\0"
+/// for "Titel".
+const CALAMINE_VALUE_BUGS: &[(&str, &str)] = &[(
+    "sheet_name_parsing.xls",
+    "UTF-16 SST strings decoded as code page 1252",
 )];
+
+/// Single formulas calamine 0.38 renders wrongly, as "file / sheet / cell",
+/// with the reason. Each must still differ.
+const CALAMINE_FORMULA_BUGS: &[(&str, &str)] = &[];
 
 #[derive(Default)]
 struct Tally {
@@ -198,8 +183,8 @@ fn values_and_formulas_match_calamine() {
             println!("{file}: we refuse it (see samples.rs)");
             continue;
         };
-        // calamine 0.36 panics on some damaged files; that is calamine's
-        // problem, not a difference to report.
+        // No file panics in calamine 0.38 today; the catch stays as a guard.
+        // A panic is calamine's problem, not a difference to report.
         let mut part = Tally::default();
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             compare(&file, &book, &bytes, &mut part)

@@ -23,19 +23,13 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 # problem. Never ship one.
 yanked = "deny"
 # Unmaintained or unsound crates fail anywhere in the graph, not only our
-# direct dependencies. A known case we accept goes in `ignore` with a reason
-# and an `expiry`, so it is looked at again.
+# direct dependencies. A known case we accept goes in `ignore` as `{ id,
+# reason }`, and the reason names a date to look at it again (cargo-deny
+# 0.19 has no expiry key).
 unmaintained = "all"
 unsound = "all"
-# zip 8.x (RUSTSEC-2026-0367/0368/0369): unsafe permissions and symlinks in
-# ZipArchive::extract. Only calamine 0.36 pulls zip in, as a dev-dependency of
-# carrysheet-biff for its differential test, which never extracts an archive.
-# The fix is zip 9, which needs calamine 0.37 (released 2026-10-18, inside the
-# 7-day wait). Move to calamine 0.37 and drop these after 2026-10-25.
 ignore = [
-    { id = "RUSTSEC-2026-0367", reason = "dev-only zip via calamine 0.36; extract() unused" },
-    { id = "RUSTSEC-2026-0368", reason = "dev-only zip via calamine 0.36; extract() unused" },
-    { id = "RUSTSEC-2026-0369", reason = "dev-only zip via calamine 0.36; extract() unused" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained and has no fixed release; rmcp (MCP server, kept by record 0009) requires it. Look again 2027-02-27." },
 ]
 
 [licenses]

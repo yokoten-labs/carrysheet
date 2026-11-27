@@ -1,0 +1,19 @@
+# Written by yokoten init. The owner reviews every change to these paths: the rules
+# the agents work under, their config, the hooks and CI (yokoten's lead-only defaults).
+# Turn on "Require review from Code Owners" in branch protection, or GitHub asks
+# nobody. `yokoten check --pr` makes a change here tier A either way.
+
+/AGENTS.md          @coo1white
+/CLAUDE.md          @coo1white
+/yokoten.json       @coo1white
+/.claude/           @coo1white
+/.claude-plugin/    @coo1white
+/.codex/            @coo1white
+/.gemini/           @coo1white
+/.agents/hooks.json @coo1white
+/.muse/             @coo1white
+/.dsh/              @coo1white
+/.grok/             @coo1white
+/.githooks/         @coo1white
+/.github/           @coo1white
+/.yokoten/          @coo1white

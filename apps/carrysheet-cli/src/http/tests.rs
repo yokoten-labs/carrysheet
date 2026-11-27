@@ -772,6 +772,19 @@ fn guard_checks_without_a_network() {
         guard.check_request(&Method::POST, &uri, headers)
     };
     assert_eq!(check(&headers), Ok(()));
+    // Content-Type is matched by media type alone, as rmcp reads it.
+    for (content_type, expected) in [
+        ("application/json; charset=utf-8", Ok(())),
+        ("application/jsonx", Err(Refusal::UnsupportedMediaType)),
+        ("Application/JSON ; charset=UTF-8", Ok(())),
+    ] {
+        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+        assert_eq!(check(&headers), expected, "{content_type}");
+    }
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
     headers.insert(header::CONTENT_LENGTH, HeaderValue::from_static("101"));
     assert_eq!(check(&headers), Err(Refusal::TooLarge));
     headers.insert(header::CONTENT_LENGTH, HeaderValue::from_static("100"));
