@@ -17,9 +17,9 @@ fn cell_parse_basic() {
 }
 
 #[test]
-fn cell_parse_absolute_forms() {
+fn cell_parse_accepts_dollar_and_does_not_write_it_back() {
     for s in ["$A$1", "$A1", "A$1", "A1"] {
-        assert_eq!(range(s).to_string(), s);
+        assert_eq!(range(s).to_string(), "A1");
     }
 }
 
@@ -34,10 +34,18 @@ fn cell_limits() {
     let last = range("XFD1048576").range.end;
     assert_eq!((last.row, last.col), (MAX_ROWS - 1, MAX_COLS - 1));
     // More than 7 digits is no row, as in GridCraft, leading zeros or not.
-    for s in ["A1048577", "A0", "A99999999999999999999", "A00000001"] {
-        assert!(error(s).contains("has a row outside 1 to"), "{s}");
+    for s in [
+        "A1048577",
+        "A0",
+        "A99999999999999999999",
+        "A00000001",
+        "XFE1",
+    ] {
+        assert!(
+            error(s).contains("columns go from A to XFD, rows from 1 to 1048576"),
+            "{s}"
+        );
     }
-    assert!(error("XFE1").contains("has a column past XFD"));
 }
 
 #[test]
@@ -66,27 +74,27 @@ fn range_cells() {
     let cells = r.range;
     assert_eq!((cells.height(), cells.width(), cells.count()), (10, 3, 30));
     assert_eq!(r.to_string(), "A1:C10");
-    assert_eq!(cells_text(cells), "A1:C10");
+    assert_eq!(r.a1(), "A1:C10");
 }
 
 #[test]
-fn range_same_cell_twice_keeps_colon() {
+fn range_same_cell_twice_is_one_cell() {
     assert_eq!(range("A1:A1").to_string(), "A1");
-    assert_eq!(range("$A$1:A1").to_string(), "$A$1:A1");
+    assert_eq!(range("$A$1:A1").to_string(), "A1");
 }
 
 #[test]
 fn range_normalizes_corners() {
     assert_eq!(range("C10:A1").to_string(), "A1:C10");
     assert_eq!(range("A10:C1").to_string(), "A1:C10");
-    assert_eq!(range("$C$10:A1").to_string(), "A1:$C$10");
+    assert_eq!(range("$C$10:A1").to_string(), "A1:C10");
     assert_eq!(range("C:A").to_string(), "A:C");
     assert_eq!(range("5:2").to_string(), "2:5");
 }
 
 #[test]
-fn range_absolute() {
-    assert_eq!(range("$A$1:$B$2").to_string(), "$A$1:$B$2");
+fn range_absolute_is_read_as_relative() {
+    assert_eq!(range("$A$1:$B$2").to_string(), "A1:B2");
 }
 
 #[test]
@@ -96,7 +104,7 @@ fn range_whole_columns() {
     assert_eq!(r.range.height(), MAX_ROWS);
     assert_eq!(r.range.width(), 3);
     assert_eq!(r.to_string(), "A:C");
-    assert_eq!(range("$a:$c").to_string(), "$A:$C");
+    assert_eq!(range("$a:$c").to_string(), "A:C");
     assert_eq!(range("XFD:XFD").range.width(), 1);
 }
 
@@ -106,7 +114,7 @@ fn range_whole_rows() {
     assert_eq!(r.shape, Shape::Rows);
     assert_eq!((r.range.height(), r.range.width()), (4, MAX_COLS));
     assert_eq!(r.to_string(), "2:5");
-    assert_eq!(range("$1:$1048576").to_string(), "$1:$1048576");
+    assert_eq!(range("$1:$1048575").to_string(), "1:1048575");
 }
 
 #[test]
@@ -114,9 +122,13 @@ fn whole_sheet_cell_count_does_not_overflow() {
     let r = range("A1:XFD1048576").range;
     assert_eq!(r.count(), u64::from(MAX_ROWS) * u64::from(MAX_COLS));
     assert_eq!(range("1:1048576").range.count(), r.count());
-    // Written as cells, it is shown as cells.
+    // The whole sheet is shown as cells, however it was written.
     assert_eq!(range("A1:XFD1048576").to_string(), "A1:XFD1048576");
-    assert_eq!(cells_text(r), "A1:XFD1048576");
+    assert_eq!(range("1:1048576").to_string(), "A1:XFD1048576");
+    assert_eq!(range("A1:XFD1048576").shape, Shape::Cells);
+    // A column written as cells is a whole column.
+    assert_eq!(range("A1:A1048576").shape, Shape::Columns);
+    assert_eq!(range("A1:A1048576").to_string(), "A:A");
 }
 
 #[test]
@@ -139,13 +151,15 @@ fn range_rejects() {
         "A0:B2",
         "+5:+7",
         "$$A:$$B",
+        " A1:B2",
+        "1:2 ",
         "Sheet1!A1!B2",
     ] {
         assert!(SheetRange::parse(s).is_err(), "{s:?} should fail");
     }
     assert_eq!(
         error("A1:XFE1"),
-        "\"A1:XFE1\" has a column past XFD, the last of the 16384 columns"
+        "\"A1:XFE1\" is not a valid reference: write cells like B7 or A1:C10, whole columns like A:C, or whole rows like 2:5; columns go from A to XFD, rows from 1 to 1048576"
     );
     assert!(error("A1:").starts_with("\"A1:\" is not a valid reference: "));
 }
@@ -188,22 +202,25 @@ fn sheet_names_valid_and_invalid() {
 
 #[test]
 fn sheet_name_quoting() {
-    for plain in ["Sheet1", "Data", "_x", "a.b", "Totals2026x"] {
-        assert!(!sheet_name_needs_quotes(plain), "{plain}");
+    for plain in [
+        "Sheet1",
+        "Data",
+        "_x",
+        "a.b",
+        "Totals2026x",
+        "売上",
+        "Report",
+        "ABCD1",
+    ] {
         assert_eq!(format_sheet_name(plain), plain);
     }
     for quoted in [
-        "My sheet", "売上", "1st", ".a", "A1", "xfd1", "R1C1", "R", "C", "rc", "R2", "C10", "TRUE",
-        "false", "a-b", "a!b", "It's",
+        "My sheet", "1st", "A1", "xfd1", "C10", "TRUE", "false", "a-b", "a!b",
     ] {
-        assert!(sheet_name_needs_quotes(quoted), "{quoted}");
+        assert_eq!(format_sheet_name(quoted), format!("'{quoted}'"));
     }
     assert_eq!(format_sheet_name("It's"), "'It''s'");
     assert_eq!(format_sheet_name("Q1 売上"), "'Q1 売上'");
-    // Names that only start like a reference stay plain.
-    assert!(!sheet_name_needs_quotes("Report"));
-    assert!(!sheet_name_needs_quotes("Cost"));
-    assert!(!sheet_name_needs_quotes("ABCD1"));
 }
 
 #[test]
@@ -217,7 +234,7 @@ fn sheet_range_unqualified() {
 fn sheet_range_plain_name() {
     let r = range("Sheet1!$A$1:C3");
     assert_eq!(r.sheet.as_deref(), Some("Sheet1"));
-    assert_eq!(r.to_string(), "Sheet1!$A$1:C3");
+    assert_eq!(r.to_string(), "Sheet1!A1:C3");
 }
 
 #[test]
@@ -229,16 +246,16 @@ fn sheet_range_quoted_cjk() {
 
     let r = range("'売上'!A1");
     assert_eq!(r.sheet.as_deref(), Some("売上"));
-    assert_eq!(r.to_string(), "'売上'!A1");
+    assert_eq!(r.to_string(), "売上!A1");
 }
 
 #[test]
-fn sheet_range_unquoted_cjk_is_accepted_and_quoted_on_output() {
+fn sheet_range_unquoted_cjk_is_accepted() {
     let r = range("売上!A1");
     assert_eq!(r.sheet.as_deref(), Some("売上"));
-    assert_eq!(r.to_string(), "'売上'!A1");
+    assert_eq!(r.to_string(), "売上!A1");
     let r = range("시트1!A:A");
-    assert_eq!(r.to_string(), "'시트1'!A:A");
+    assert_eq!(r.to_string(), "시트1!A:A");
 }
 
 #[test]
@@ -263,12 +280,15 @@ fn sheet_range_round_trips() {
     for s in [
         "Sheet1!A1",
         "'My sheet'!A1:B2",
-        "'Q1 売上'!$A$1:$C$3",
+        "'Q1 売上'!A1:C3",
+        "売上!B2",
         "Data!A:C",
         "Data!2:5",
         "'1st'!A1",
         "'A1'!B2",
         "'It''s'!XFD1048576",
+        "'a''''b'!A1",
+        "'a''!b'!A1",
         "A1",
     ] {
         let r = range(s);
@@ -294,6 +314,7 @@ fn sheet_range_rejects() {
         "'History'!A1",
         "Sheet1!XFE1",
         "a-b!A1",
+        "'a'b'!A1",
     ] {
         assert!(SheetRange::parse(s).is_err(), "{s:?} should fail");
     }
@@ -301,14 +322,13 @@ fn sheet_range_rejects() {
 
 #[test]
 fn sheet_range_errors_name_the_whole_input() {
-    assert_eq!(
-        error("Sheet1!A0"),
-        "\"Sheet1!A0\" has a row outside 1 to 1048576, the rows a sheet can have"
-    );
+    assert!(error("Sheet1!A0").starts_with("\"Sheet1!A0\" is not a valid reference: "));
     let msg = error("My sheet!A1");
     assert!(msg.contains("single quotes"), "{msg}");
     assert!(error("Sheet1:Sheet3!A1").contains("several sheets"));
-    assert!(error("Sheet1!").contains("the range after '!' is empty"));
+    assert!(error("Sheet1!").starts_with("\"Sheet1!\" is not a valid reference: "));
+    assert!(error("'Sheet1'A1").contains("ends with '!"));
+    assert!(error("'a'b'!A1").contains("as ''"));
 }
 
 #[test]

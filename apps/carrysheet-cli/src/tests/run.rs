@@ -48,7 +48,7 @@ fn deleting_needs_confirm_or_yes() {
 }
 
 #[test]
-fn missing_input_is_reported_first() {
+fn missing_input_is_reported() {
     let e = run_json("overview", json!({ "path": "no-such-book.xlsx" })).unwrap_err();
     assert_eq!(e.code, ErrorCode::FileNotFound);
     assert!(e.what.contains("no-such-book.xlsx"));
@@ -61,7 +61,7 @@ fn commands_lists_everything() {
         done.data["commands"].as_array().unwrap().len(),
         COMMANDS.len()
     );
-    assert_eq!(done.data["commands"][0]["implemented"], true);
+    assert!(done.data["commands"][0].get("implemented").is_none());
     let plain = done.plain.unwrap();
     assert_eq!(plain["commands"].as_array().unwrap().len(), COMMANDS.len());
     assert!(
@@ -72,8 +72,8 @@ fn commands_lists_everything() {
     );
 }
 
-// Issue 102: `commands` says every listed command is implemented, so
-// none may fall through to `not_implemented`.
+// Issue 102: every command `commands` lists is built, so none may fall
+// through to the arm no command reaches.
 #[test]
 fn every_listed_command_runs() {
     use carrysheet::ENGINE_COMMANDS;

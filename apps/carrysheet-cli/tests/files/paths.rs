@@ -3,36 +3,37 @@ use crate::files::*;
 #[test]
 fn home_becomes_tilde() {
     let home = "/home/alice";
-    let shown = |p: &str| display_path_text(p, home, false);
+    let shown = |p: &str| redact_home_text(p, home, false);
     assert_eq!(shown("/home/alice/books/a.xlsx"), "~/books/a.xlsx");
     assert_eq!(shown(home), "~");
     assert_eq!(shown("/home/alice/"), "~/");
-    assert_eq!(shown("/home/alicex/a"), "/home/alicex/a");
+    // A name that only starts with the home folder's hides more, never less.
+    assert_eq!(shown("/home/alicex/a"), "~x/a");
     assert_eq!(shown("rel/a"), "rel/a");
     // Unix names are case-sensitive.
     assert_eq!(shown("/home/Alice/a"), "/home/Alice/a");
-    assert_eq!(display_path_text("/x/a", "/", false), "/x/a");
+    assert_eq!(redact_home_text("/x/a", "/", false), "/x/a");
 }
 
 #[test]
 fn windows_paths_ignore_case_separators_and_verbatim_prefixes() {
     let home = r"C:\Users\Alice";
-    let shown = |p: &str| display_path_text(p, home, true);
+    let shown = |p: &str| redact_home_text(p, home, true);
     assert_eq!(shown(r"C:\Users\Alice\books\a.xlsx"), r"~\books\a.xlsx");
     assert_eq!(shown(r"c:\users\ALICE\a.xlsx"), r"~\a.xlsx");
     assert_eq!(shown("C:/Users/Alice/a.xlsx"), "~/a.xlsx");
     assert_eq!(shown(r"\\?\C:\Users\Alice\a.xlsx"), r"~\a.xlsx");
     assert_eq!(shown(r"\\?\c:\users\alice"), "~");
-    assert_eq!(shown(r"C:\Users\Alicex\a"), r"C:\Users\Alicex\a");
+    assert_eq!(shown(r"C:\Users\Alicex\a"), r"~x\a");
     assert_eq!(shown(r"D:\data\a.xlsx"), r"D:\data\a.xlsx");
     // A verbatim or slash-ended home folder.
     assert_eq!(
-        display_path_text(r"C:\Users\Alice\a", r"\\?\C:\Users\Alice\", true),
+        redact_home_text(r"C:\Users\Alice\a", r"\\?\C:\Users\Alice\", true),
         r"~\a"
     );
     // A home folder on a network share.
     assert_eq!(
-        display_path_text(
+        redact_home_text(
             r"\\?\UNC\server\home\alice\a.xlsx",
             r"\\server\home\alice",
             true
@@ -40,7 +41,7 @@ fn windows_paths_ignore_case_separators_and_verbatim_prefixes() {
         r"~\a.xlsx"
     );
     // A drive root is not a home folder worth hiding.
-    assert_eq!(display_path_text(r"C:\a", r"C:\", true), r"C:\a");
+    assert_eq!(redact_home_text(r"C:\a", r"C:\", true), r"C:\a");
 }
 
 #[test]

@@ -6,7 +6,6 @@ use std::path::Path;
 use carrysheet::args::{COMMANDS, Command, OPERATION_EXAMPLE, command, input_schema};
 use carrysheet::commands::limits::MAX_CLI_SECONDS;
 use carrysheet::commands::{CommandError, ErrorCode};
-use carrysheet::open::ReadFailure;
 use clap::{ArgMatches, Args};
 use serde_json::{Map, Value};
 
@@ -97,26 +96,10 @@ fn parse_json_arg(name: &str, text: &str) -> Result<Value, CommandError> {
         None => text.to_owned(),
         Some(file) => {
             let path = Path::new(file);
-            let shown = crate::files::display_path(path);
-            let what = format!("cannot read {flag} from {shown}");
-            let bytes = crate::files::read_bounded(path, MAX_ARG_FILE_BYTES).map_err(|e| match e {
-                ReadFailure::Io(e) => {
-                    let is_missing = e.kind() == std::io::ErrorKind::NotFound;
-                    let code = if is_missing { ErrorCode::FileNotFound } else { ErrorCode::Io };
-                    let fix = format!("Check the file path after @ and that you can read it, or pass the JSON itself to {flag}.");
-                    CommandError::new(code, &what, e.to_string(), fix)
-                }
-                ReadFailure::NotAFile => {
-                    let why = format!("{shown} is not a regular file (a folder, device or pipe)");
-                    let fix = format!("Save the JSON to a file and pass {flag} @file.json, or pass the JSON itself.");
-                    CommandError::invalid_argument(name, why, fix)
-                }
-                ReadFailure::TooLarge => {
-                    let why = format!("{shown} is larger than 16 MB");
-                    CommandError::invalid_argument(name, why, "Split the operations into several files.")
-                }
-            })?;
+            let bytes = crate::files::read_bounded(path, MAX_ARG_FILE_BYTES)?;
             String::from_utf8(bytes).map_err(|_| {
+                let shown = crate::files::display_path(path);
+                let what = format!("cannot read {flag} from {shown}");
                 let why = "the file is not UTF-8 text";
                 let fix = "Save the file as UTF-8 and try again.";
                 CommandError::new(ErrorCode::InvalidArgument, &what, why, fix)

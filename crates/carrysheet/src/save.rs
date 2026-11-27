@@ -20,13 +20,13 @@ use crate::open::{Book, SourceKind};
 use crate::text::escape;
 use crate::{Answer, Kernel, internal};
 
-/// File formats Carrysheet writes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// File formats Carrysheet writes (record 0010, decision 3).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 pub enum FileFormat {
+    #[default]
     Xlsx,
-    Xls,
     Csv,
 }
 
@@ -36,17 +36,9 @@ impl FileFormat {
     pub fn from_extension(ext: &str) -> Option<FileFormat> {
         match ext.to_ascii_lowercase().as_str() {
             "xlsx" | "xlsm" => Some(FileFormat::Xlsx),
-            "xls" => Some(FileFormat::Xls),
             "csv" => Some(FileFormat::Csv),
             _ => None,
         }
-    }
-
-    /// The format of a path, from its extension.
-    pub fn from_path(path: &Path) -> Option<FileFormat> {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .and_then(FileFormat::from_extension)
     }
 }
 
@@ -99,7 +91,7 @@ pub struct PartCounts {
 }
 
 /// What a save will keep and lose, found before writing anything.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct SaveReport {
     pub format: FileFormat,
     /// What the saved file will not have that the opened one had. Empty
@@ -119,10 +111,7 @@ impl SaveReport {
     pub fn new(format: FileFormat) -> SaveReport {
         SaveReport {
             format,
-            lost: Vec::new(),
-            dropped_parts: Vec::new(),
-            parts: None,
-            notes: Vec::new(),
+            ..SaveReport::default()
         }
     }
 
@@ -257,12 +246,6 @@ pub(crate) fn encode(
     csv_bytes: usize,
 ) -> Result<Encoded, CommandError> {
     match format {
-        FileFormat::Xls => Err(CommandError::new(
-            ErrorCode::NotImplemented,
-            "writing .xls is not built yet",
-            "Carrysheet reads .xls but writes only .xlsx, .xlsm and .csv so far",
-            "Write .xlsx (or .xlsm to keep macros) instead.",
-        )),
         FileFormat::Xlsx => encode_xlsx(book, path),
         FileFormat::Csv => encode_csv(book, options, csv_bytes),
     }
@@ -323,17 +306,10 @@ fn encode_xlsx(book: &Book, path: &Path) -> Result<Encoded, CommandError> {
     }
     // What opening the file could not read or keep: a loss when content was
     // dropped or unreadable, a note otherwise.
-    const LOST: [&str; 6] = [
-        "dropped",
-        "skipped",
-        "could not be read",
-        "not kept",
-        "not retained",
-        "missing",
-    ];
+    const LOST: &str = "dropped|skipped|could not be read|not kept|not retained|missing";
     for w in &book.warnings {
         let text = escape(w, 200);
-        if LOST.iter().any(|l| w.contains(l)) {
+        if LOST.split('|').any(|l| w.contains(l)) {
             let feature = format!("content the opened file could not give: {text}");
             report.lost.push(Loss::all(feature, 1));
         } else {
@@ -348,8 +324,7 @@ fn encode_xlsx(book: &Book, path: &Path) -> Result<Encoded, CommandError> {
     Ok(Encoded { bytes, report })
 }
 
-/// Text a spreadsheet program may run as a formula when it opens a csv
-/// file (formula injection): it starts with one of these.
+/// How text starts that a spreadsheet may run as a formula from csv (formula injection).
 const CSV_FORMULA_STARTS: [char; 6] = ['=', '+', '-', '@', '\t', '\r'];
 
 /// One sheet's values as csv. Text that a spreadsheet could take for a
@@ -410,32 +385,26 @@ fn encode_csv(
             .iter()
             .any(|(_, c)| c.formula.is_some() || !c.value.is_empty())
     };
-    let others = wb
-        .sheets
-        .iter()
-        .enumerate()
-        .filter(|(i, sh)| *i != si && has_content(sh))
-        .count() as u64;
-    if others > 0 {
-        report.lost.push(Loss::all("other sheets", others));
-    }
-    let formulas = wb.sheets.get(si).map_or(0, |sh| {
-        sh.cells.iter().filter(|(_, c)| c.formula.is_some()).count()
-    }) as u64;
-    if formulas > 0 {
-        report
-            .lost
-            .push(Loss::all("formulas (their values are kept)", formulas));
+    let others = wb.sheets.iter().enumerate();
+    let others = others.filter(|(i, sh)| *i != si && has_content(sh));
+    // What csv cannot hold, counted in GridCraft's model, so .xls and .xlsb
+    // sources are counted too.
+    let formulas = sh.cells.iter().filter(|(_, c)| c.formula.is_some());
+    let counts = [
+        ("other sheets", others.count()),
+        ("formulas (their values are kept)", formulas.count()),
+        ("conditional formatting", sh.cond_formats.len()),
+        ("data validation", sh.validations.len()),
+        ("sparklines", sh.sparklines.len()),
+        ("hyperlinks", sh.hyperlinks.len()),
+        ("merged cells", sh.merges.len()),
+        ("defined names", wb.names.len()),
+    ];
+    for (feature, n) in counts.into_iter().filter(|(_, n)| *n > 0) {
+        report.lost.push(Loss::all(feature, n as u64));
     }
     match book.kind {
-        SourceKind::Package => match loss::source_features(&book.source) {
-            Ok(features) => {
-                for (feature, n) in features {
-                    report.lost.push(Loss::all(feature, n));
-                }
-            }
-            Err(why) => report.lost.push(loss::unchecked_loss(&why)),
-        },
+        SourceKind::Package => report.lost.extend(loss::source_features(&book.source)),
         SourceKind::Csv => {}
         SourceKind::Imported(format) => report.lost.push(Loss::all(
             format!("anything else the .{format} file holds"),
@@ -453,13 +422,7 @@ pub(crate) fn convert(
     bytes: Vec<u8>,
 ) -> Result<Answer, CommandError> {
     let path = input(args)?;
-    let output = text(args, "output").map(PathBuf::from).ok_or_else(|| {
-        CommandError::invalid_argument(
-            "output",
-            "no output file was given",
-            "Name the file to write, like book.csv.",
-        )
-    })?;
+    let output = PathBuf::from(text(args, "output").unwrap_or_default());
     let format = output_format(&output, text(args, "format"))?;
     let book = kernel.open_bytes(&path, bytes)?;
     let options = EncodeOptions {
@@ -478,10 +441,8 @@ pub(crate) fn output_format(
     output: &Path,
     format: Option<&str>,
 ) -> Result<FileFormat, CommandError> {
-    let by_name = match format {
-        Some(f) => FileFormat::from_extension(f),
-        None => FileFormat::from_path(output),
-    };
+    let extension = output.extension().and_then(|e| e.to_str());
+    let by_name = format.or(extension).and_then(FileFormat::from_extension);
     by_name.ok_or_else(|| {
         CommandError::new(
             ErrorCode::UnsupportedFormat,
@@ -521,8 +482,10 @@ pub(crate) fn finish_save(
     if loses && !flag(args, "confirm_loss") {
         return Err(loss_error(output, &report));
     }
-    let save = Some(bytes);
-    Ok(Answer { data, save })
+    Ok(Answer {
+        data,
+        save: Some(bytes),
+    })
 }
 
 fn loss_error(output: &Path, report: &SaveReport) -> CommandError {
@@ -548,9 +511,4 @@ fn loss_error(output: &Path, report: &SaveReport) -> CommandError {
         why,
         fix,
     )
-}
-
-/// A part name from a file, as shown in reports.
-pub fn part_name(name: &str) -> String {
-    crate::text::quote(name, 64)
 }

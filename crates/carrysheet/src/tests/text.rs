@@ -41,8 +41,6 @@ fn every_class_is_escaped() {
         assert!(is_hidden(c), "{class} U+{:04X}", u32::from(c));
         let want = format!("a\\u{{{:x}}}b", u32::from(c));
         assert_eq!(escape(&format!("a{c}b"), 100), want, "{class}");
-        let shown = if c == '\n' { '\n' } else { '\u{FFFD}' };
-        assert_eq!(terminal(&format!("a{c}b")).chars().nth(1), Some(shown));
     }
     assert_eq!(escape("a\\u{1b}", 100), "a\\\\u{1b}");
     assert_eq!(quote("say \"hi\"\\", 100), "\"say \\\"hi\\\"\\\\\"");
@@ -61,20 +59,7 @@ fn visible_text_is_kept() {
         "\u{a0}",
     ] {
         assert_eq!(escape(text, 100), text);
-        assert_eq!(terminal(text), text);
-        assert!(!has_hidden(text));
     }
-}
-
-#[test]
-fn terminal_and_predicate() {
-    assert_eq!(
-        terminal("a\x1b[31mb\u{202E}c\td\u{200B}e\u{E0041}\r\nf"),
-        "a\u{FFFD}[31mb\u{FFFD}c\td\u{FFFD}e\u{FFFD}\u{FFFD}\nf"
-    );
-    assert!(!has_hidden("line\r\n\tnext"));
-    assert!(has_hidden("a\u{E0041}"));
-    assert!(has_hidden("a\u{1b}"));
 }
 
 #[test]
@@ -84,11 +69,8 @@ fn no_scalar_value_survives_escaping() {
             continue;
         };
         let one = c.to_string();
-        for out in [escape(&one, 16), quote(&one, 16), terminal(&one)] {
-            assert!(
-                !out.chars().any(|o| is_hidden(o) && o != '\t' && o != '\n'),
-                "U+{cp:04X} -> {out:?}"
-            );
+        for out in [escape(&one, 16), quote(&one, 16)] {
+            assert!(!out.chars().any(is_hidden), "U+{cp:04X} -> {out:?}");
         }
         assert!(!escape(&one, 16).contains(CUT), "U+{cp:04X}");
     }
@@ -165,7 +147,6 @@ fn a_cut_never_splits_an_escape() {
 fn table_is_sorted_and_named() {
     assert!(HIDDEN.windows(2).all(|w| w[0].1 + 1 < w[1].0));
     assert!(HIDDEN.iter().all(|&(a, b)| a <= b && b <= 0x10_FFFF));
-    assert_eq!(UNICODE_VERSION, "18.0.0");
     for c in (0..=0x10_FFFFu32).filter_map(char::from_u32) {
         if c.is_control() {
             assert!(is_hidden(c), "U+{:04X}", u32::from(c));

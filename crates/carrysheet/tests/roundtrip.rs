@@ -51,7 +51,7 @@ fn open_read_edit_eval_save_reopen() {
 
     let o = call("overview", json!({ "path": p(&book) })).unwrap();
     assert_eq!(o["sheets"][0]["used_range"], "A1:B4");
-    assert_eq!(o["sheets"][0]["header"]["cells"], json!(["Item", "Price"]));
+    assert_eq!(o["sheets"][0].get("header"), None);
 
     // Values keep their types: "3" from csv is a number.
     let page = call("read", json!({ "path": p(&book), "range": "A1:B4" })).unwrap();
@@ -276,7 +276,7 @@ fn reading_pages_and_errors() {
         json!({ "path": p(&csv), "output": p(&dir.join("x.xls")) }),
     )
     .unwrap_err();
-    assert_eq!(e.code, ErrorCode::NotImplemented);
+    assert_eq!(e.code, ErrorCode::UnsupportedFormat);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

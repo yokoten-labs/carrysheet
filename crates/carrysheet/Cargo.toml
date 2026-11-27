@@ -22,8 +22,8 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # decision 6); the version rmcp already brings.
 schemars = "1.2"
 clap = { version = "4.5", default-features = false, features = ["std", "derive"], optional = true }
-# Lists and unpacks package parts for the save-loss report: the version
-# GridCraft pins, so both list a package's parts the same way.
+# Lists package parts for the save-loss report and reads [Content_Types].xml:
+# the version GridCraft pins, so both list a package's parts the same way.
 zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2"] }
 # The csv front end: decodes legacy encodings (record 0010, decision 3);
 # the versions the old csv reader used.

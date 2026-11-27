@@ -56,14 +56,6 @@ fn non_finite_numbers_become_text() {
 }
 
 #[test]
-fn open_missing_file_is_a_clear_error() {
-    let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
-    let e = crate::open::ReadFailure::Io(missing).error(Path::new("nope.xlsx"));
-    assert_eq!(e.code, ErrorCode::FileNotFound);
-    assert!(e.what.contains("nope.xlsx"));
-}
-
-#[test]
 fn overview_counts() {
     let (e, b) = engine();
     let o = e.overview(&b).unwrap();
@@ -200,13 +192,19 @@ fn cursors_are_checked() {
     }
     // A sheet name may hold '@'.
     let c = ReadCursor::parse("'a@b'!A1:C9@B4:B6").unwrap();
-    assert_eq!(c.sheet(), "a@b");
-    assert_eq!(c.rest_of_band().to_string(), "B4:C6");
+    assert_eq!(c.sheet, "a@b");
+    let (page, next) = c.plan(&ReadRequest::default()).unwrap();
+    assert_eq!(page.a1(), "B4:C6");
+    assert_eq!(next.unwrap().to_string(), "'a@b'!A1:C9@A7:A9");
     assert_eq!(c.to_string(), "'a@b'!A1:C9@B4:B6");
     assert_eq!(
         serde_json::to_value(&c).unwrap(),
         json!("'a@b'!A1:C9@B4:B6")
     );
+    // A band over a whole column reads back as written.
+    let c = ReadCursor::parse("Grid!A1:B1048576@A1:A1048576").unwrap();
+    assert_eq!(c.to_string(), "Grid!A:B@A:A");
+    assert_eq!(ReadCursor::parse(&c.to_string()).unwrap(), c);
 
     // A band taller than the request allows is refused, not overrun.
     let (e, b) = grid(10, 2);
@@ -289,8 +287,6 @@ fn read_modes() {
         e.read_range(&b, &req).unwrap().rows[0].cells[0]["formula"],
         Value::Null
     );
-    assert_eq!(ReadMode::parse("both"), Some(ReadMode::Both));
-    assert_eq!(ReadMode::parse("all"), None);
 }
 
 #[test]

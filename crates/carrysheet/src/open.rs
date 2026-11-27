@@ -52,66 +52,17 @@ impl std::fmt::Debug for Book {
     }
 }
 
-/// Why the program could not read a workbook it was given.
-#[derive(Debug)]
-pub enum ReadFailure {
-    Io(std::io::Error),
-    /// A folder, device, pipe or socket: it may never end, or block.
-    NotAFile,
-    TooLarge,
+/// The error for bytes over [`MAX_FILE_BYTES`].
+pub(crate) fn too_large(path: &Path) -> CommandError {
+    CommandError::new(
+        ErrorCode::LimitExceeded,
+        format!("{} is too large to open", path.display()),
+        format!("Carrysheet opens files up to {} MB", MAX_FILE_BYTES >> 20),
+        "Split the workbook, or save a copy with fewer sheets or rows.",
+    )
 }
 
-impl From<std::io::Error> for ReadFailure {
-    fn from(e: std::io::Error) -> Self {
-        ReadFailure::Io(e)
-    }
-}
-
-impl ReadFailure {
-    /// The error for a workbook at `path` that could not be read.
-    pub fn error(&self, path: &Path) -> CommandError {
-        let shown = path.display();
-        let (code, why, fix) = match self {
-            ReadFailure::NotAFile => {
-                return CommandError::new(
-                    ErrorCode::InvalidArgument,
-                    format!("{shown} is not a file"),
-                    "the path names a folder or a device",
-                    "Give the path of a workbook file.",
-                );
-            }
-            ReadFailure::TooLarge => {
-                return CommandError::new(
-                    ErrorCode::LimitExceeded,
-                    format!("{shown} is too large to open"),
-                    format!("Carrysheet opens files up to {} MB", MAX_FILE_BYTES >> 20),
-                    "Split the workbook, or save a copy with fewer sheets or rows.",
-                );
-            }
-            ReadFailure::Io(e) => match e.kind() {
-                std::io::ErrorKind::NotFound => (
-                    ErrorCode::FileNotFound,
-                    "there is no file at that path".to_owned(),
-                    "Check the path, or give the full path to the workbook.",
-                ),
-                std::io::ErrorKind::PermissionDenied => (
-                    ErrorCode::PermissionDenied,
-                    "the system refused access".to_owned(),
-                    "Check the file's permissions, or close the program that has it locked.",
-                ),
-                _ => (
-                    ErrorCode::Io,
-                    e.to_string(),
-                    "Check that the path names a readable file.",
-                ),
-            },
-        };
-        CommandError::new(code, format!("{shown} could not be read"), why, fix)
-    }
-}
-
-/// Refuses a file whose extension is not one Carrysheet opens, before the
-/// program reads it.
+/// Refuses a file whose extension Carrysheet does not open, before it is read.
 pub fn check_opens(path: &Path) -> Result<(), CommandError> {
     if OPENS.contains(&extension(path).as_str()) {
         return Ok(());
@@ -130,15 +81,13 @@ fn extension(path: &Path) -> String {
     ext.map(str::to_ascii_lowercase).unwrap_or_default()
 }
 
-/// Turns GridCraft's open error (plain text) into one with a code. The
-/// text can quote the file, so it is cleaned and cut.
+/// GridCraft's open error (plain text, which can quote the file) with a code.
 fn open_error(path: &Path, e: &EngineError) -> CommandError {
     let text = e.to_string();
     if let EngineError::Internal(_, detail) = e {
         return internal("opening the file", detail);
     }
-    let shown = path.display();
-    let why = escape(&text, 200);
+    let (shown, why) = (path.display(), escape(&text, 200));
     if text.contains(gridcraft_engine::io::PASSWORD_REQUIRED) {
         return CommandError::new(
             ErrorCode::UnsupportedFormat,
@@ -243,10 +192,9 @@ pub(crate) fn no_such_sheet(name: &str) -> CommandError {
     )
 }
 
-/// The csv front end: decodes the bytes, lets GridCraft split the fields as
-/// text, and makes a field a number only when it prints back the same, so
-/// `007`, `1E5` and `SEPT1` stay as written (record 0006). One sheet, named
-/// after the file; a warning when the encoding was guessed.
+/// The csv front end: decodes, lets GridCraft split the fields as text, and
+/// makes a field a number only when it prints back the same, so `007`, `1E5`
+/// and `SEPT1` stay (record 0006). One sheet, named after the file.
 fn read_csv(path: &Path, name: &str, bytes: &[u8]) -> Result<Opened, CommandError> {
     let (text, warnings) = decode_text(path, bytes)?;
     let options = gridcraft_xlsx::CsvOptions {
@@ -296,8 +244,7 @@ fn read_csv(path: &Path, name: &str, bytes: &[u8]) -> Result<Opened, CommandErro
 /// A workbook and what GridCraft skipped or repaired while reading it.
 type Opened = (Workbook, Vec<String>);
 
-/// Excel shows at most 30 decimals and 15 significant digits, so a field
-/// with more stays text, before any format code is built.
+/// Excel shows at most 30 decimals (and 15 significant digits); more stays text.
 const MAX_DECIMALS: usize = 30;
 type Found = Option<(f64, StyleId)>;
 

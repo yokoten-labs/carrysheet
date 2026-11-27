@@ -182,7 +182,6 @@ fn commands_json_is_json_only_and_every_schema_passes_the_lint() {
         for key in ["summary", "description", "cli"] {
             assert!(c[key].is_string(), "{} {key}", table.name);
         }
-        assert!(c["implemented"].is_boolean());
         if c["mcp_tool"] == true {
             tools.push(serde_json::json!({
                 "name": c["name"],
@@ -294,14 +293,6 @@ fn dry_run_only_on_commands_that_change_files() {
 }
 
 #[test]
-fn every_command_is_implemented() {
-    let listing = json_only(&run(&["commands", "--json"]));
-    for c in listing["commands"].as_array().unwrap() {
-        assert_eq!(c["implemented"], true, "{}", c["name"]);
-    }
-}
-
-#[test]
 fn missing_files_are_shown_with_tilde() {
     let home = temp_home();
     let missing = home.join("reports").join("q1.xlsx");
@@ -335,7 +326,7 @@ fn typed_text_in_errors_is_shown_with_tilde() {
         // A reference error repeats the reference.
         vec!["read", book, &quoted, "--json"],
         vec!["read", book, &quoted],
-        // The confirmation example repeats the call.
+        // A confirmation error on a file in the home folder.
         vec!["edit", book, "--ops", ops, "--json"],
         vec!["edit", book, "--ops", ops],
     ] {

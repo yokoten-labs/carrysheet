@@ -1,8 +1,5 @@
-//! Looking at a workbook: `overview`, `read` in pages, and `eval`.
-//!
-//! Each command takes arguments checked by
-//! [`validate_args`](crate::commands::validate_args) (absent ones are `null`)
-//! and returns the JSON fields of the result.
+//! Looking at a workbook: `overview`, `read` in pages, and `eval`. Each command takes
+//! arguments checked by [`validate_args`](crate::commands::validate_args).
 
 use std::fmt;
 
@@ -16,7 +13,7 @@ use crate::args::{detailed, input, number, shown, text};
 use crate::commands::limits::{MAX_CELL_TEXT_CHARS, MAX_LISTED_SHEETS, MAX_RESPONSE_TEXT_CHARS};
 use crate::error::{CommandError, ErrorCode};
 use crate::open::{Book, SourceKind};
-use crate::range::{Shape, SheetRange, cells_text, format_sheet_name};
+use crate::range::{Shape, SheetRange, format_sheet_name};
 use crate::text::escape;
 use crate::{Kernel, internal};
 
@@ -38,8 +35,7 @@ pub struct Overview {
     /// `1900` or `1904`.
     pub date_system: String,
     pub defined_names: usize,
-    /// When the file holds macros (which kinds, never run, kept on save or
-    /// not), or that they were not checked. Absent: none, or a csv file.
+    /// Which macros the file holds (never run; kept on save or not), or that they were not checked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub macros: Option<String>,
     /// What GridCraft skipped or repaired while reading the file.
@@ -58,25 +54,16 @@ pub enum ReadMode {
     Both,
 }
 
-impl ReadMode {
-    pub fn parse(name: &str) -> Option<ReadMode> {
-        serde_json::from_value(json!(name)).ok()
-    }
-}
-
-/// Rows, columns and cells per page when none is asked for (10,000 cells
-/// are about 8k tokens of short values).
+/// Rows, columns and cells per page when none is asked for (10,000 short values: about 8k tokens).
 pub const DEFAULT_PAGE_ROWS: u32 = 200;
 pub const DEFAULT_PAGE_COLUMNS: u32 = 50;
 pub const DEFAULT_PAGE_CELLS: u32 = 10_000;
 
-/// A request for one page of a range: at most `max_rows` rows, `max_columns`
-/// columns and `max_cells` cells (each at least 1). A wide range is read in
-/// bands of rows: across a band a page at a time, then down to the next one.
+/// A request for one page: at most `max_rows` rows, `max_columns` columns and `max_cells` cells
+/// (each at least 1). A wide range is read in bands of rows: across a band, then down.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReadRequest {
-    /// The range; `None` means the used range of the first sheet. A range
-    /// without a sheet name means the first sheet.
+    /// The range; `None` means the used range. No sheet name means the first sheet.
     pub range: Option<SheetRange>,
     /// Where an earlier page said to continue. When set, `range` is ignored.
     pub cursor: Option<ReadCursor>,
@@ -84,8 +71,7 @@ pub struct ReadRequest {
     pub max_rows: u32,
     pub max_columns: u32,
     pub max_cells: u32,
-    /// `response_format: detailed`: each cell as an object with its value,
-    /// type, formula and number format, whatever `mode` says.
+    /// `response_format: detailed`: each cell as an object with value, type, formula and format.
     pub detailed: bool,
 }
 
@@ -121,15 +107,11 @@ impl ReadRequest {
     }
 }
 
-/// Where a paged read continues: the whole area being read and the next
-/// page's place in it. Pages go across a band of rows, then down.
-///
-/// Written as the area, `@`, then the next page's first column over the
-/// rows of its band, such as `Data!A1:CZ500@AY1:AY200`. Agents pass it back
-/// as it came; [`ReadCursor::parse`] checks it.
+/// Where a paged read continues, written as the area, `@`, then the next page's first column
+/// over the rows of its band: `Data!A1:CZ500@AY1:AY200`. [`ReadCursor::parse`] checks it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadCursor {
-    sheet: String,
+    pub(crate) sheet: String,
     area: RangeRef,
     next: CellRef,
     band_end_row: u32,
@@ -144,17 +126,6 @@ impl ReadCursor {
             next: area.start,
             band_end_row: request.band_end(&area, area.start.row),
         }
-    }
-
-    pub fn sheet(&self) -> &str {
-        &self.sheet
-    }
-
-    /// The cells the next page may cover: its band of rows, from its first
-    /// column to the area's last.
-    pub fn rest_of_band(&self) -> RangeRef {
-        let end = CellRef::new(self.band_end_row, self.area.end.col);
-        RangeRef::new(self.next, end)
     }
 
     /// Reads a cursor written by [`ReadCursor`]'s `Display`.
@@ -193,9 +164,8 @@ impl ReadCursor {
         })
     }
 
-    /// Plans the page this cursor points at. The cursor fixes its rows and
-    /// `request` its width; a band taller than `request` allows is refused,
-    /// so a page never holds more than `max_rows` rows or `max_cells` cells.
+    /// Plans the page this cursor points at: its rows from the cursor, its width from `request`.
+    /// A band taller than `request` allows is refused.
     pub fn plan(&self, request: &ReadRequest) -> Result<PagePlan, CommandError> {
         let (max_rows, max_columns, max_cells) = request.limits();
         let height = self.band_end_row - self.next.row + 1;
@@ -239,7 +209,7 @@ impl fmt::Display for ReadCursor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let band = RangeRef::new(self.next, CellRef::new(self.band_end_row, self.next.col));
         let sheet = format_sheet_name(&self.sheet);
-        write!(f, "{sheet}!{}@{}", cells_text(self.area), cells_text(band))
+        write!(f, "{sheet}!{}@{}", self.area.a1(), band.a1())
     }
 }
 
@@ -267,8 +237,7 @@ pub struct ReadPage {
     /// Column letters, like `["A", "B", "C"]`.
     pub columns: Vec<String>,
     pub rows: Vec<ReadRow>,
-    /// Where the next page starts, to pass back as the next request's
-    /// cursor; `null` on the last page.
+    /// Where the next page starts, to pass back as `cursor`; `null` on the last page.
     pub next_cursor: Option<ReadCursor>,
     /// Cells whose text or formula was cut to keep the answer small.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -313,8 +282,7 @@ impl CutText {
     }
 }
 
-/// `text` cut at `max` characters, or `None` when it is not longer. Counts
-/// characters without looking past `max + 1` of them.
+/// `text` cut at `max` characters, or `None` when it is not longer.
 pub fn cut_text(text: &str, max: usize) -> Option<String> {
     if text.len() <= max {
         return None;
@@ -323,8 +291,7 @@ pub fn cut_text(text: &str, max: usize) -> Option<String> {
     Some(text.get(..end).unwrap_or(text).to_owned())
 }
 
-/// Characters each text in a page of `cells` cells may keep, so the page
-/// stays under [`MAX_RESPONSE_TEXT_CHARS`].
+/// Characters each text in a page of `cells` cells may keep, under [`MAX_RESPONSE_TEXT_CHARS`].
 pub fn text_room(cells: u64) -> usize {
     let each = MAX_RESPONSE_TEXT_CHARS as u64 / cells.max(1);
     usize::try_from(each)
@@ -345,8 +312,7 @@ pub struct Evaluation {
     pub cut: Option<String>,
 }
 
-/// A cell value as JSON: numbers and booleans as themselves, errors as
-/// their text (`#DIV/0!`), empty as `null`. An array shows its top-left value.
+/// A cell value as JSON; an error as its text (`#DIV/0!`), an array as its top-left value.
 pub fn value_json(v: &CellValue) -> Value {
     match v {
         CellValue::Empty => Value::Null,
@@ -372,8 +338,7 @@ fn kind(v: &CellValue) -> &'static str {
     }
 }
 
-/// `v` with text cut at `max` characters (counted in `cut`), without
-/// copying the whole text first. An array gives its top-left value.
+/// `v` with text cut at `max` characters, counted in `cut`. An array gives its top-left value.
 fn cut_value(v: &CellValue, max: usize, cut: &mut u64) -> CellValue {
     match v {
         CellValue::Text(t) => match cut_text(t, max) {
@@ -392,9 +357,8 @@ fn cut_value(v: &CellValue, max: usize, cut: &mut u64) -> CellValue {
     }
 }
 
-/// The part of `wanted` inside the used range, or `None`. Whole columns also
-/// lose the empty rows above the data, and whole rows the empty columns left
-/// of it; a cell range keeps the start it asked for.
+/// The part of `wanted` inside the used range, or `None`. Whole columns also lose the empty
+/// rows above the data, and whole rows the empty columns left of it.
 pub fn clip_to_used(wanted: &SheetRange, used: RangeRef) -> Option<RangeRef> {
     let (start, end) = (wanted.range.start, wanted.range.end);
     let top = match wanted.shape {
@@ -439,8 +403,7 @@ impl View<'_> {
         bounds.filter(|all| all.end.is_valid())
     }
 
-    /// How the cell at `at` shows in a page, with its text and formula cut
-    /// at `max_chars` characters, and whether anything was cut.
+    /// How the cell at `at` shows in a page, cut at `max_chars`, and whether it was cut.
     fn cell_json(&self, at: CellRef, max_chars: usize, request: &ReadRequest) -> (Value, bool) {
         let mut cut = 0u64;
         let formula = self.sh.cell(at).and_then(|c| c.formula.as_ref()).map(|f| {
@@ -487,9 +450,8 @@ fn read_page(sheet: &View<'_>, request: &ReadRequest) -> Result<ReadPage, Comman
                 None => used,
             };
             let Some(area) = area else {
-                let sheet = name.clone();
                 return Ok(ReadPage {
-                    sheet,
+                    sheet: name.clone(),
                     ..ReadPage::default()
                 });
             };
@@ -520,7 +482,7 @@ fn read_page(sheet: &View<'_>, request: &ReadRequest) -> Result<ReadPage, Comman
         .collect();
     Ok(ReadPage {
         sheet: name.clone(),
-        range: Some(cells_text(page)),
+        range: Some(page.a1()),
         columns: (page.start.col..=page.end.col)
             .map(col_to_letters)
             .collect(),
@@ -538,25 +500,22 @@ impl Kernel {
     pub fn overview(&self, book: &Book) -> Result<Overview, CommandError> {
         self.guard("reading the workbook", || {
             let wb = book.wb()?;
-            let sheets = wb
-                .sheets
-                .iter()
-                .map(|sh| {
-                    let mut sheet = SheetOverview {
-                        name: sh.name.clone(),
-                        used_range: View { wb, sh }.used_range().map(cells_text),
-                        cells: 0,
-                        formulas: 0,
-                        errors: 0,
-                    };
-                    for (_, cell) in sh.cells.iter() {
-                        sheet.formulas += usize::from(cell.formula.is_some());
-                        sheet.cells += usize::from(cell.formula.is_some() || !cell.value.is_empty());
-                        sheet.errors += usize::from(matches!(cell.value, CellValue::Error(_)));
-                    }
-                    sheet
-                })
-                .collect();
+            let mut sheets = Vec::new();
+            for sh in &wb.sheets {
+                let mut sheet = SheetOverview {
+                    name: sh.name.clone(),
+                    used_range: View { wb, sh }.used_range().map(|used| used.a1()),
+                    cells: 0,
+                    formulas: 0,
+                    errors: 0,
+                };
+                for (_, cell) in sh.cells.iter() {
+                    sheet.formulas += usize::from(cell.formula.is_some());
+                    sheet.cells += usize::from(cell.formula.is_some() || !cell.value.is_empty());
+                    sheet.errors += usize::from(matches!(cell.value, CellValue::Error(_)));
+                }
+                sheets.push(sheet);
+            }
             Ok(Overview {
                 sheets,
                 date_system: match wb.date_system {
@@ -584,7 +543,7 @@ impl Kernel {
         self.guard("reading cells", || {
             let wb = book.wb()?;
             let sheet = match &request.cursor {
-                Some(cursor) => Some(cursor.sheet()),
+                Some(cursor) => Some(cursor.sheet.as_str()),
                 None => request.range.as_ref().and_then(|r| r.sheet.as_deref()),
             };
             let sh = wb.sheets.get(book.sheet_index(sheet)?);
@@ -593,8 +552,7 @@ impl Kernel {
         })
     }
 
-    /// Computes a formula (en-US, with or without `=`) without changing the
-    /// book. Unqualified references point at `sheet`, or the first sheet.
+    /// Computes an en-US formula without changing the book; `sheet` (or the first) is the default.
     pub fn evaluate(
         &self,
         book: &Book,
@@ -661,10 +619,7 @@ impl Kernel {
     }
 }
 
-/// Header cells shown per sheet in `overview`; a detailed one shows a page's width.
-const HEADER_CELLS: u32 = 20;
-
-/// Sheets, used ranges, header rows and counts.
+/// Sheets, used ranges and counts.
 pub(crate) fn overview(
     kernel: &Kernel,
     args: &Map<String, Value>,
@@ -673,48 +628,10 @@ pub(crate) fn overview(
     let path = input(args)?;
     let book = kernel.open_bytes(&path, bytes)?;
     let overview = kernel.overview(&book)?;
-    let width = if detailed(args) {
-        DEFAULT_PAGE_COLUMNS
-    } else {
-        HEADER_CELLS
-    };
     let mut sheets = Vec::new();
-    // Header rows stop when the answer holds this much text.
-    let mut text_left = MAX_RESPONSE_TEXT_CHARS;
-    let mut headers_cut = 0usize;
     for s in overview.sheets.iter().take(MAX_LISTED_SHEETS) {
         let mut v = serde_json::to_value(s).unwrap_or(Value::Null);
         v["name"] = json!(escape(&s.name, 64));
-        // The first row of the used range: usually the headers.
-        let header = match &s.used_range {
-            Some(_) if text_left == 0 => {
-                headers_cut += 1;
-                Value::Null
-            }
-            Some(used) => {
-                let range = SheetRange::parse(&format!("{}!{used}", format_sheet_name(&s.name)))?;
-                let first_row = range.range.start.row + 1;
-                let request = ReadRequest {
-                    range: Some(range),
-                    max_rows: 1,
-                    max_columns: width,
-                    ..ReadRequest::default()
-                };
-                let page = kernel.read_range(&book, &request)?;
-                let mut header = json!({
-                    "row": first_row,
-                    "columns": page.columns,
-                    "cells": page.rows.first().map(|r| r.cells.clone()).unwrap_or_default(),
-                });
-                if let Some(cut) = &page.cut {
-                    header["cut"] = json!(cut);
-                }
-                text_left = text_left.saturating_sub(header.to_string().len());
-                header
-            }
-            None => Value::Null,
-        };
-        v["header"] = header;
         sheets.push(v);
     }
     let mut data = Map::new();
@@ -723,13 +640,12 @@ pub(crate) fn overview(
     // Replacing a field keeps its place in the answer.
     data.insert("sheets".into(), Value::Array(sheets));
     let total = overview.sheets.len();
-    if total > MAX_LISTED_SHEETS || headers_cut > 0 {
+    if total > MAX_LISTED_SHEETS {
         data.insert("sheets_total".into(), json!(total));
         data.insert(
             "hint".into(),
             json!(format!(
-                "The answer was cut to stay small: {} of {total} sheet(s) listed, {headers_cut} header row(s) left out. Read a sheet's first row with read and a range like 'Name'!1:1.",
-                total.min(MAX_LISTED_SHEETS)
+                "The answer was cut to stay small: {MAX_LISTED_SHEETS} of {total} sheet(s) listed. Read a sheet's first row with read and a range like 'Name'!1:1."
             )),
         );
     }
@@ -744,7 +660,7 @@ pub(crate) fn read(
 ) -> Result<Map<String, Value>, CommandError> {
     let path = input(args)?;
     // validate_args has checked the mode.
-    let mode = text(args, "mode").and_then(ReadMode::parse);
+    let mode = args.get("mode").and_then(|m| ReadMode::deserialize(m).ok());
     let request = ReadRequest {
         range: text(args, "range").map(SheetRange::parse).transpose()?,
         cursor: text(args, "cursor").map(ReadCursor::parse).transpose()?,

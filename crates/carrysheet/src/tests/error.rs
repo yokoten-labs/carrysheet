@@ -9,7 +9,6 @@ fn exit_codes() {
     assert_eq!(ErrorCode::InvalidArgument.exit_code(), ExitCode::Usage);
     assert_eq!(ErrorCode::InvalidReference.exit_code(), ExitCode::Usage);
     assert_eq!(ErrorCode::NothingToDo.exit_code().code(), 3);
-    assert_eq!(ErrorCode::Declined.exit_code(), ExitCode::Failed);
     assert_eq!(ErrorCode::ConfirmationRequired.exit_code().code(), 1);
     assert_eq!(
         serde_json::to_value(ErrorCode::ConfirmationRequired).unwrap(),

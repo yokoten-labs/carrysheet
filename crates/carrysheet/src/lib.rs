@@ -1,9 +1,7 @@
 //! Carrysheet as a library: bytes in, JSON out, on GridCraft (vendored in
-//! `vendor/gridcraft`, record 0003). The program reads and writes the files
-//! (record 0010, decision 2).
-//!
-//! This file runs one command; [`Kernel`] puts every call into GridCraft
-//! within [`Limits`] and behind `catch_unwind`.
+//! `vendor/gridcraft`, record 0003); the program reads and writes the files
+//! (record 0010, decision 2). [`Kernel`] runs every GridCraft call within
+//! [`Limits`] and behind `catch_unwind`.
 
 pub mod args;
 pub mod commands;
@@ -30,7 +28,7 @@ use crate::args::Command;
 use crate::commands::limits as values;
 use crate::edit::{EditOp, EditResult};
 use crate::error::{CommandError, ErrorCode};
-use crate::open::{Book, MAX_FILE_BYTES, ReadFailure};
+use crate::open::{Book, MAX_FILE_BYTES};
 use crate::save::{EncodeOptions, Encoded, FileFormat};
 use crate::text::escape;
 
@@ -49,8 +47,7 @@ pub const LIMITS: Limits = Limits {
     min_inflate_ratio: values::MIN_INFLATE_RATIO,
 };
 
-/// The JSON fields of a command's result, and for a save the bytes the
-/// caller writes to `output` (the caller then adds `written` and `bytes`).
+/// A command's JSON fields, and for a save the bytes the caller writes.
 #[derive(Debug)]
 pub struct Answer {
     pub data: Map<String, Value>,
@@ -74,8 +71,7 @@ pub fn run(
     run_within(kernel, command, args, input, None)
 }
 
-/// [`run`], where `seconds` replaces the time limit. One budget covers
-/// opening, the work and the save.
+/// [`run`] with `seconds` as the time limit, one budget for open, work and save.
 pub fn run_within(
     kernel: &Kernel,
     command: &Command,
@@ -90,7 +86,7 @@ pub fn run_within(
         "eval" => view::eval(kernel, args, input).map(Answer::from),
         "edit" => edit::edit(kernel, args, input),
         "convert" => save::convert(kernel, args, input),
-        _ => Err(CommandError::not_implemented(&command.cli_name())),
+        _ => Err(internal("running a command", "it is not an engine command")),
     };
     // A limit that ran out wins over what the calls returned.
     kernel.end_call()?;
@@ -98,14 +94,12 @@ pub fn run_within(
 }
 
 thread_local! {
-    /// True between `begin_call` and `end_call`: one budget covers the
-    /// whole command, so the calls in between neither reset nor clear it.
+    /// True between `begin_call` and `end_call`, whose one budget covers the command.
     static IN_COMMAND: Cell<bool> = const { Cell::new(false) };
 }
 
-/// GridCraft, with every call inside the limits and the panic guard. A
-/// caught panic is an `internal_error`, never a success (record 0003, point
-/// 1; on wasm32 it aborts). A call out of work or time is `limit_exceeded`.
+/// GridCraft behind the limits and the panic guard: a caught panic is an `internal_error`, never
+/// a success (record 0003, point 1; wasm32 aborts); out of work or time is `limit_exceeded`.
 #[derive(Debug, Clone, Copy)]
 pub struct Kernel {
     limits: Limits,
@@ -149,13 +143,12 @@ impl Kernel {
     /// and picks the format when the bytes do not say.
     pub fn open_bytes(&self, path: &Path, bytes: Vec<u8>) -> Result<Book, CommandError> {
         if bytes.len() as u64 > MAX_FILE_BYTES {
-            return Err(ReadFailure::TooLarge.error(path));
+            return Err(open::too_large(path));
         }
         self.guard("opening the file", || Book::from_bytes(path, bytes))
     }
 
-    /// Applies operations in order, all or nothing: on an error the book is
-    /// left as it was. One-shot calls keep no undo history.
+    /// Applies operations in order, all or nothing, with no undo history kept.
     pub fn edit(&self, book: &mut Book, ops: &[EditOp]) -> Result<EditResult, CommandError> {
         self.guard("editing", || edit::apply(book, ops))
     }

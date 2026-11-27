@@ -1,5 +1,4 @@
-//! `carrysheet-cli`: Carrysheet on the command line, generated from the
-//! argument structs in `carrysheet::args`.
+//! `carrysheet-cli`: Carrysheet on the command line, made from `carrysheet::args`.
 //!
 //! Exit codes: 0 done, 1 failed, 2 usage error, 3 nothing to do.
 
@@ -17,8 +16,7 @@ use carrysheet::commands::{CommandError, ErrorCode, ExitCode, validate_args};
 use clap::{ArgMatches, FromArgMatches};
 use serde_json::Value;
 
-/// True when `--json`, or any `--json=` form (which clap refuses), comes before
-/// any `--`: then even a command line clap cannot parse gets its error as JSON.
+/// `--json`, or a `--json=` form clap refuses, before any `--`: a clap error is JSON too.
 fn wants_json(args: &[OsString]) -> bool {
     args.iter()
         .skip(1)
@@ -33,7 +31,9 @@ fn main() -> std::process::ExitCode {
         Ok(m) => m,
         Err(e) => return output::handle_clap_error(&e, wants_json(&args)).into(),
     };
-    let json = matches.get_flag("json");
+    // In `mcp serve` stdout carries JSON-RPC only, also after the session ends.
+    let serving = cli::chosen(&matches).is_some_and(|(c, _)| c.name == "mcp_serve");
+    let json = matches.get_flag("json") && !serving;
     let code = match run_command(&matches) {
         Ok(Some(done)) => {
             output::print_done(&done, json);
@@ -66,8 +66,7 @@ fn run_command(matches: &ArgMatches) -> Result<Option<run::Done>, CommandError> 
     run::run(command, &args, &ctx).map(Some).map_err(with_yes)
 }
 
-/// Nobody is asked to confirm: a refusal for want of a confirmation also
-/// names `--yes`, which gives every confirmation at once.
+/// Nobody is asked: a refusal for want of a confirmation also names `--yes`.
 fn with_yes(mut err: CommandError) -> CommandError {
     if err.code == ErrorCode::ConfirmationRequired {
         err.fix

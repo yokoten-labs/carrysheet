@@ -6,8 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-use carrysheet::commands::{COMMANDS, Command, CommandError, validate_args};
-use carrysheet::open::{ReadFailure, check_opens};
+use carrysheet::commands::{COMMANDS, Command, CommandError, ErrorCode, validate_args};
+use carrysheet::open::check_opens;
 use carrysheet::save::prepare_output;
 use carrysheet::{Kernel, Limits};
 use serde_json::{Map, Value};
@@ -301,6 +301,16 @@ pub fn run(
     run_within(kernel, command, args, None)
 }
 
+/// The program's read error in short, as the library has no file access.
+pub fn read_error(path: &Path, e: &std::io::Error) -> CommandError {
+    let code = match e.kind() {
+        std::io::ErrorKind::NotFound => ErrorCode::FileNotFound,
+        _ => ErrorCode::Io,
+    };
+    let what = format!("{} could not be read", path.display());
+    CommandError::new(code, what, e.to_string(), "Check the path.")
+}
+
 /// [`run`] with a time limit in seconds.
 pub fn run_within(
     kernel: &Kernel,
@@ -312,7 +322,7 @@ pub fn run_within(
     let output = prepare_output(command, &mut args, &|p: &Path| p.exists())?;
     let path = PathBuf::from(args["path"].as_str().unwrap_or(""));
     check_opens(&path)?;
-    let input = std::fs::read(&path).map_err(|e| ReadFailure::Io(e).error(&path))?;
+    let input = std::fs::read(&path).map_err(|e| read_error(&path, &e))?;
     let answer = carrysheet::run_within(kernel, command, &args, input, seconds)?;
     let mut data = answer.data;
     if let (Some(bytes), Some(output)) = (answer.save, output) {
