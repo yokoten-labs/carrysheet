@@ -13,6 +13,9 @@ use gridcraft_engine::core::{
     CellRef, MAX_COLS, MAX_ROWS, RangeRef, col_to_letters, letters_to_col,
 };
 
+use crate::commands::paths::redact_home;
+use crate::text::quote;
+
 /// Why a reference or sheet name could not be used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefError(String);
@@ -24,7 +27,10 @@ impl fmt::Display for RefError {
 }
 
 fn invalid(input: &str, reason: &str) -> RefError {
-    RefError(format!("\"{input}\" is not a valid reference: {reason}"))
+    RefError(format!(
+        "{} is not a valid reference: {reason}",
+        quote(&redact_home(input), 200)
+    ))
 }
 
 /// Checks a sheet name against Excel's rules: 1 to 31 characters (UTF-16),
@@ -46,7 +52,8 @@ pub fn validate_sheet_name(name: &str) -> Result<(), RefError> {
         return Ok(());
     };
     Err(RefError(format!(
-        "\"{name}\" is not a valid sheet name: {reason}"
+        "{} is not a valid sheet name: {reason}",
+        quote(&redact_home(name), 64)
     )))
 }
 

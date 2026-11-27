@@ -104,8 +104,14 @@ fn the_text_form_escapes_hidden_characters_and_backslashes() {
     let mut data = Map::new();
     let hostile = "x\u{E0041}\u{202E}\u{1b}[31m\\u{41}";
     data.insert("value".to_owned(), Value::String(hostile.to_owned()));
-    data.insert("plain".to_owned(), Value::String("Módulo 日本語 😀".to_owned()));
+    data.insert(
+        "plain".to_owned(),
+        Value::String("Módulo 日本語 😀".to_owned()),
+    );
     let text = render(&data);
-    assert!(text.contains("value: x\\u{e0041}\\u{202e}\\u{1b}[31m\\\\u{41}\n"), "{text}");
+    assert!(
+        text.contains("value: x\\u{e0041}\\u{202e}\\u{1b}[31m\\\\u{41}\n"),
+        "{text}"
+    );
     assert!(text.contains("plain: Módulo 日本語 😀\n"), "{text}");
 }
