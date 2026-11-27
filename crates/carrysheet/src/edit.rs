@@ -207,13 +207,24 @@ fn parse_op(i: usize, item: Operation) -> Result<EditOp, CommandError> {
                     "Add \"value\": \"SUM(B2:B9)\".",
                 ));
             }
-            if let Some(why) = refused_formula(formula) {
-                return Err(CommandError::new(
-                    ErrorCode::InvalidArgument,
-                    format!("ops[{i}] writes a formula Carrysheet does not let agents write"),
-                    why,
-                    "Write the value instead, or ask a person to add this formula in a spreadsheet app.",
-                ));
+            match check_formula(formula) {
+                None => {}
+                Some(Refusal::Unreadable(why)) => {
+                    return Err(CommandError::new(
+                        ErrorCode::InvalidArgument,
+                        format!("ops[{i}] has a formula Carrysheet cannot read"),
+                        why,
+                        "Correct the formula (use , between arguments) and call again; nothing was saved.",
+                    ));
+                }
+                Some(Refusal::Refused(why)) => {
+                    return Err(CommandError::new(
+                        ErrorCode::InvalidArgument,
+                        format!("ops[{i}] writes a formula Carrysheet does not let agents write"),
+                        why,
+                        "Write the value instead, or ask a person to add this formula in a spreadsheet app.",
+                    ));
+                }
             }
             text = Some(formula.to_owned());
         }
@@ -323,6 +334,18 @@ fn outside_file(sheets: &[&str]) -> Option<String> {
 /// names that name a file; and what does not parse, which includes links
 /// to other workbooks (`[1]Sheet!A1`) and DDE (`app|topic!item`).
 pub fn refused_formula(formula: &str) -> Option<String> {
+    check_formula(formula).map(|r| match r {
+        Refusal::Unreadable(why) | Refusal::Refused(why) => why,
+    })
+}
+
+/// Why [`check_formula`] refused: a typo the agent can fix, or a policy refusal.
+enum Refusal {
+    Unreadable(String),
+    Refused(String),
+}
+
+fn check_formula(formula: &str) -> Option<Refusal> {
     // The kernel closes up to 8 missing parentheses, as Excel does.
     let mut closed = formula.to_owned();
     let mut parsed = parse(&closed);
@@ -337,9 +360,9 @@ pub fn refused_formula(formula: &str) -> Option<String> {
         Ok(expr) => expr,
         Err(e) => {
             let e = escape(&e.to_string(), 100);
-            return Some(format!(
-                "Carrysheet cannot read it to check it ({e}); links to other workbooks and DDE are refused"
-            ));
+            return Some(Refusal::Unreadable(format!(
+                "{e}; links to other workbooks and DDE are not allowed"
+            )));
         }
     };
     let mut why = None;
@@ -362,7 +385,7 @@ pub fn refused_formula(formula: &str) -> Option<String> {
             why = found;
         }
     });
-    why
+    why.map(Refusal::Refused)
 }
 
 /// What one cell held before and after an edit.

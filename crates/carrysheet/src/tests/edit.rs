@@ -188,3 +188,21 @@ fn every_refused_function_is_refused_in_every_spelling() {
     assert_eq!(names, 29, "the list of refused functions changed");
     assert!(slipped.is_empty(), "not refused: {slipped:?}");
 }
+
+#[test]
+fn a_formula_typo_is_not_a_policy_refusal() {
+    for typo in ["SUM(A1;A2)", "A1+", "SUM(A1:)", "\"open"] {
+        let e = parse_ops(&json!([{ "op": "set_formula", "target": "B2", "value": typo }]))
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidArgument);
+        assert!(e.what.contains("cannot read"), "{typo}: {}", e.what);
+        assert!(
+            e.fix.starts_with("Correct the formula"),
+            "{typo}: {}",
+            e.fix
+        );
+    }
+    let e = parse_ops(&json!([{ "op": "set_formula", "target": "B2", "value": "WEBSERVICE(A1)" }]))
+        .unwrap_err();
+    assert!(e.what.contains("does not let agents write"), "{}", e.what);
+}
