@@ -44,7 +44,7 @@ These apply to every crate and every command.
    `overview`, never run. Refreshing external data is not done
    ([issue 27][i27]).
 8. **Privacy in output.** The home folder is shown as `~` in messages and
-   logs (`carrysheet::commands::paths`). Release binaries are
+   logs (`apps/carrysheet-cli/src/files.rs`). Release binaries are
    checked for build-machine paths, the user name and email addresses
    (the `release-scan` job in `.github/workflows/ci.yml`).
 
@@ -135,12 +135,15 @@ back, a new record decides it (decision 7), and this part returns with it.
 model behind it) sends arguments meant to reach files outside the user's
 folder, very large arguments, or a flood of calls.
 
-**Now** (`apps/carrysheet-cli/src/mcp.rs`, `crates/carrysheet/src/commands`):
+**Now** (`apps/carrysheet-cli/src/mcp.rs`, `apps/carrysheet-cli/src/files.rs`):
 - Every path argument must resolve inside `--root`. Paths are checked as
   text first (device namespaces, other drives and network shares, `..` above
   the root, names Windows reserves) and then walked one name at a time,
   following links and junctions and checking each target, with at most 40
   links.
+- A read opens the resolved path; nothing checks it again after the walk.
+  A process that swaps a folder for a link in that moment can make one read
+  land outside the root. Writes are checked again just before and after.
 - Without `--root`, the server refuses to serve a whole drive or the home
   folder. With `--root` set to one of them, it logs a warning.
 - Arguments are validated against the tool schema: lists of at most 10,000

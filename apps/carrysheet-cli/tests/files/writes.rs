@@ -115,3 +115,21 @@ fn every_way_of_showing_hides_the_home_folder() {
     assert!(e.what.contains(&home), "the field keeps the text");
     assert!(!redact_error(&e).to_json().to_string().contains(&home));
 }
+
+#[test]
+fn reads_refuse_too_large_files_before_reading() {
+    use carrysheet::open::ReadFailure;
+    let dir = std::env::temp_dir().join(format!("carrysheet-read-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let book = dir.join("big.xlsx");
+    // Sparse: the size says too large, but no byte was ever written.
+    std::fs::File::create(&book).unwrap().set_len(17).unwrap();
+    assert!(matches!(
+        read_bounded(&book, 16),
+        Err(ReadFailure::TooLarge)
+    ));
+    assert_eq!(read_bounded(&book, 17).unwrap().len(), 17);
+    assert!(matches!(read_bounded(&dir, 16), Err(ReadFailure::NotAFile)));
+    let _ = std::fs::remove_dir_all(&dir);
+}

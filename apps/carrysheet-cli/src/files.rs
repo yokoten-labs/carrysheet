@@ -83,7 +83,10 @@ fn parse(text: &str, windows: bool) -> Result<(Start, Vec<String>), Refusal> {
         .map(|p| p.len())
     {
         let rest = s[len..].to_owned();
-        if rest.len() >= 4 && rest[..4].eq_ignore_ascii_case(r"UNC\") {
+        if rest
+            .get(..4)
+            .is_some_and(|p| p.eq_ignore_ascii_case(r"UNC\"))
+        {
             s = format!(r"\\{}", &rest[4..]);
         } else if is_drive(&rest) {
             s = rest;
@@ -381,11 +384,15 @@ pub fn plain_path(path: &Path) -> PathBuf {
 /// trusted; anything but a regular file is refused before it is opened,
 /// because a pipe waits for a writer and a device may never end.
 pub fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>, ReadFailure> {
-    let file = match std::fs::metadata(path)?.is_file() {
-        true => std::fs::File::open(path)?,
-        false => return Err(ReadFailure::NotAFile),
-    };
-    // The path may have been swapped since the check above.
+    let meta = std::fs::metadata(path)?;
+    if !meta.is_file() {
+        return Err(ReadFailure::NotAFile);
+    }
+    if meta.len() > max {
+        return Err(ReadFailure::TooLarge);
+    }
+    let file = std::fs::File::open(path)?;
+    // The path may have been swapped since the checks above.
     if !file.metadata()?.is_file() {
         return Err(ReadFailure::NotAFile);
     }
