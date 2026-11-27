@@ -5,9 +5,7 @@ use serde_json::{Map, Value};
 
 #[test]
 fn usage_errors_carry_the_suggestion() {
-    let err = crate::cli::build()
-        .try_get_matches_from([BIN, "commands", "--jsno"])
-        .unwrap_err();
+    let err = crate::cli::build().try_get_matches_from([BIN, "commands", "--jsno"]).unwrap_err();
     let e = usage_error(&err);
     assert_eq!(e.code, ErrorCode::Usage);
     assert!(e.what.contains("--jsno"), "{}", e.what);
@@ -24,25 +22,17 @@ fn usage_of(args: &[&str]) -> CommandError {
 #[test]
 fn missing_arguments_are_named() {
     let e = usage_of(&[BIN, "edit"]);
-    assert!(
-        e.what.ends_with("not provided: --ops <JSON>, <PATH>"),
-        "{}",
-        e.what
-    );
+    assert!(e.what.ends_with("not provided: --ops <JSON>, <PATH>"), "{}", e.what);
     assert!(e.fix.contains("Usage: carrysheet-cli edit"), "{}", e.fix);
-    let e = usage_of(&[BIN, "eval", "a.xlsx"]);
-    assert!(e.what.contains("<FORMULA>"), "{}", e.what);
+    let e = usage_of(&[BIN, "read"]);
+    assert!(e.what.contains("<PATH>"), "{}", e.what);
 }
 
 #[test]
 fn bad_values_list_the_possible_ones() {
     let e = usage_of(&[BIN, "read", "a.xlsx", "--mode", "x"]);
     assert_eq!(e.what, "invalid value 'x' for '--mode <MODE>'");
-    assert!(
-        e.fix.contains("[possible values: values, formulas, both]"),
-        "{}",
-        e.fix
-    );
+    assert!(e.fix.contains("[possible values: values, formulas, both]"), "{}", e.fix);
     let e = usage_of(&[BIN, "convert", "a.xlsx", "b.x", "--format", "ods"]);
     assert!(e.fix.contains("xlsx, csv"), "{}", e.fix);
     let e = usage_of(&[BIN, "read", "a.xlsx", "--mode", "bo"]);
@@ -82,9 +72,7 @@ fn usage_errors_join_clap_lists() {
 
 #[test]
 fn unknown_commands_get_a_suggestion() {
-    let err = crate::cli::build()
-        .try_get_matches_from([BIN, "overveiw"])
-        .unwrap_err();
+    let err = crate::cli::build().try_get_matches_from([BIN, "overveiw"]).unwrap_err();
     let e = usage_error(&err);
     assert!(e.fix.contains("overview"), "{}", e.fix);
 }
@@ -102,14 +90,8 @@ fn the_text_form_escapes_hidden_characters_and_backslashes() {
     let mut data = Map::new();
     let hostile = "x\u{E0041}\u{202E}\u{1b}[31m\\u{41}";
     data.insert("value".to_owned(), Value::String(hostile.to_owned()));
-    data.insert(
-        "plain".to_owned(),
-        Value::String("Módulo 日本語 😀".to_owned()),
-    );
+    data.insert("plain".to_owned(), Value::String("Módulo 日本語 😀".to_owned()));
     let text = render(&data);
-    assert!(
-        text.contains("value: x\\u{e0041}\\u{202e}\\u{1b}[31m\\\\u{41}\n"),
-        "{text}"
-    );
+    assert!(text.contains("value: x\\u{e0041}\\u{202e}\\u{1b}[31m\\\\u{41}\n"), "{text}");
     assert!(text.contains("plain: Módulo 日本語 😀\n"), "{text}");
 }

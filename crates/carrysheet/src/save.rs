@@ -70,24 +70,8 @@ impl Loss {
     /// A feature the saved file will not have at all.
     pub fn all(feature: impl Into<String>, before: u64) -> Loss {
         let feature = feature.into();
-        Loss {
-            feature,
-            before,
-            after: 0,
-        }
+        Loss { feature, before, after: 0 }
     }
-}
-
-/// How the package parts of the opened file fare in the saved one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
-pub struct PartCounts {
-    /// Written back byte for byte.
-    pub identical: u64,
-    /// Written again by the kernel (content kept, bytes differ).
-    pub rewritten: u64,
-    pub dropped: u64,
-    /// New in the saved file.
-    pub added: u64,
 }
 
 /// What a save will keep and lose, found before writing anything.
@@ -100,8 +84,6 @@ pub struct SaveReport {
     /// Package parts of the opened file that the saved one will not have,
     /// as quoted and shortened names, at most [`MAX_LISTED_PARTS`].
     pub dropped_parts: Vec<String>,
-    /// For an xlsx opened and saved as xlsx: the parts compared.
-    pub parts: Option<PartCounts>,
     /// Things worth knowing that are not losses, such as a cache Excel
     /// rebuilds itself.
     pub notes: Vec<String>,
@@ -109,10 +91,7 @@ pub struct SaveReport {
 
 impl SaveReport {
     pub fn new(format: FileFormat) -> SaveReport {
-        SaveReport {
-            format,
-            ..SaveReport::default()
-        }
+        SaveReport { format, ..SaveReport::default() }
     }
 
     /// True when saving would lose something, so it needs `confirm`.
@@ -147,39 +126,11 @@ pub struct Encoded {
     pub report: SaveReport,
 }
 
-/// Where `edit` writes when no output is given: beside the original, as
-/// `name-edited.xlsx`, or `name-edited-2.xlsx` and so on when taken.
-/// `exists` says whether a path is taken.
-pub fn default_output(
-    input: &Path,
-    exists: &dyn Fn(&Path) -> bool,
-) -> Result<PathBuf, CommandError> {
-    let stem = input
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "book".to_owned());
-    let ext = input
-        .extension()
-        .map(|e| format!(".{}", e.to_string_lossy()))
-        .unwrap_or_default();
-    let dir = input.parent().unwrap_or(Path::new(""));
-    for n in 1..=99 {
-        let name = if n == 1 {
-            format!("{stem}-edited{ext}")
-        } else {
-            format!("{stem}-edited-{n}{ext}")
-        };
-        let candidate = dir.join(name);
-        if !exists(&candidate) {
-            return Ok(candidate);
-        }
-    }
-    Err(CommandError::new(
-        ErrorCode::FileExists,
-        format!("no free name beside {}", input.display()),
-        "the names name-edited.xlsx to name-edited-99.xlsx are all taken",
-        "Pass output with the file to write.",
-    ))
+/// Where `edit` writes when no output is given: `name-edited.xlsx` beside the original.
+pub fn default_output(input: &Path) -> PathBuf {
+    let stem = input.file_stem().map_or_else(|| "book".into(), |s| s.to_string_lossy());
+    let ext = input.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    input.with_file_name(format!("{stem}-edited{ext}"))
 }
 
 /// Refuses to replace an existing file unless `overwrite` is set.
@@ -215,10 +166,12 @@ pub fn prepare_output(
     let output = match text(args, "output") {
         Some(o) => PathBuf::from(o),
         None if overwrite => path,
-        None => default_output(&path, exists)?,
+        None => default_output(&path),
     };
     output_format(&output, text(args, "format"))?;
-    check_output(&output, overwrite, exists)?;
+    if !flag(args, "dry_run") {
+        check_output(&output, overwrite, exists)?;
+    }
     args.insert("output".into(), json!(output.to_string_lossy()));
     Ok(Some(output))
 }
@@ -258,17 +211,13 @@ fn encode_xlsx(book: &Book, path: &Path) -> Result<Encoded, CommandError> {
     let name = name.unwrap_or_else(|| "book.xlsx".to_owned());
     // Relative links to other workbooks still name the same files from
     // the output's folder.
-    let target_dir = std::path::absolute(path)
-        .ok()
-        .and_then(|p| p.parent().map(Path::to_path_buf));
+    let target_dir = std::path::absolute(path).ok().and_then(|p| p.parent().map(Path::to_path_buf));
     let moved = target_dir.is_some() && target_dir != wb.source_dir;
     let has_links = wb.preserved.as_deref().is_some_and(|p| {
-        p.parts.iter().flat_map(|part| part.rels.iter()).any(|r| {
-            r.external
-                && r.rel_type
-                    .to_ascii_lowercase()
-                    .ends_with("externallinkpath")
-        })
+        p.parts
+            .iter()
+            .flat_map(|part| part.rels.iter())
+            .any(|r| r.external && r.rel_type.to_ascii_lowercase().ends_with("externallinkpath"))
     });
     let wb: Cow<'_, Workbook> = match target_dir.and_then(|d| gridcraft_xlsx::rebase_links(wb, &d))
     {
@@ -372,19 +321,14 @@ fn encode_csv(
         )
     })?;
     let mut report = SaveReport::new(FileFormat::Csv);
-    report
-        .notes
-        .push("csv keeps the values of one sheet as they are shown; no formatting".into());
+    report.notes.push("csv keeps the values of one sheet as they are shown; no formatting".into());
     if escaped > 0 {
         report.notes.push(format!(
             "{escaped} cells start with = + - @ or a tab and were written with a ' in front, so a spreadsheet does not run them as formulas; use --csv-raw to write them as they are"
         ));
     }
-    let has_content = |sh: &Sheet| {
-        sh.cells
-            .iter()
-            .any(|(_, c)| c.formula.is_some() || !c.value.is_empty())
-    };
+    let has_content =
+        |sh: &Sheet| sh.cells.iter().any(|(_, c)| c.formula.is_some() || !c.value.is_empty());
     let others = wb.sheets.iter().enumerate();
     let others = others.filter(|(i, sh)| *i != si && has_content(sh));
     // What csv cannot hold, counted in GridCraft's model, so .xls and .xlsb
@@ -406,10 +350,9 @@ fn encode_csv(
     match book.kind {
         SourceKind::Package => report.lost.extend(loss::source_features(&book.source)),
         SourceKind::Csv => {}
-        SourceKind::Imported(format) => report.lost.push(Loss::all(
-            format!("anything else the .{format} file holds"),
-            1,
-        )),
+        SourceKind::Imported(format) => {
+            report.lost.push(Loss::all(format!("anything else the .{format} file holds"), 1))
+        }
     }
     Ok(Encoded { bytes, report })
 }
@@ -425,10 +368,7 @@ pub(crate) fn convert(
     let output = PathBuf::from(text(args, "output").unwrap_or_default());
     let format = output_format(&output, text(args, "format"))?;
     let book = kernel.open_bytes(&path, bytes)?;
-    let options = EncodeOptions {
-        sheet: text(args, "sheet"),
-        csv_raw: flag(args, "csv_raw"),
-    };
+    let options = EncodeOptions { sheet: text(args, "sheet"), csv_raw: flag(args, "csv_raw") };
     let encoded = kernel.encode(&book, &output, format, &options)?;
     let mut data = Map::new();
     data.insert("file".into(), shown(&path));
@@ -482,19 +422,14 @@ pub(crate) fn finish_save(
     if loses && !flag(args, "confirm_loss") {
         return Err(loss_error(output, &report));
     }
-    Ok(Answer {
-        data,
-        save: Some(bytes),
-    })
+    Ok(Answer { data, save: Some(bytes) })
 }
 
 fn loss_error(output: &Path, report: &SaveReport) -> CommandError {
     let mut fix = String::from(
         "Call again with confirm_loss set to true to save without them (--confirm-loss on the command line), or with dry_run to see the report.",
     );
-    let keeps_macros = output
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("xlsm"));
+    let keeps_macros = output.extension().is_some_and(|e| e.eq_ignore_ascii_case("xlsm"));
     if report.lost.iter().any(|l| l.feature == "VBA project") && !keeps_macros {
         fix.push_str(" To keep macros, write an .xlsm file instead.");
     }

@@ -38,7 +38,7 @@ fn cells(page: &Map<String, Value>) -> Vec<Vec<Value>> {
 }
 
 #[test]
-fn open_read_edit_eval_save_reopen() {
+fn open_read_edit_save_reopen() {
     let dir = scratch("roundtrip");
     let csv = dir.join("prices.csv");
     std::fs::write(&csv, "Item,Price\nTea,3\nCake,4.5\nJam,2\n").unwrap();
@@ -79,74 +79,46 @@ fn open_read_edit_eval_save_reopen() {
         json!({ "sheet": "prices", "cell": "B2", "before": 3.0, "after": 5.0 })
     );
 
-    let done = call(
-        "edit",
-        json!({ "path": p(&book), "ops": ops, "output": p(&edited) }),
-    )
-    .unwrap();
+    let done = call("edit", json!({ "path": p(&book), "ops": ops, "output": p(&edited) })).unwrap();
     assert_eq!(done["written"], true, "{done:?}");
     assert_eq!(done["save"]["lost"], json!([]));
 
     // Reopen: the same values, formulas computed.
-    let page = call(
-        "read",
-        json!({ "path": p(&edited), "range": "A1:C6", "mode": "both" }),
-    )
-    .unwrap();
+    let page =
+        call("read", json!({ "path": p(&edited), "range": "A1:C6", "mode": "both" })).unwrap();
     let rows = cells(&page);
     assert_eq!(rows[1][1]["value"], json!(5.0));
     assert_eq!(rows[1][2], json!({ "value": 10.0, "formula": "=B2*2" }));
     assert_eq!(rows[3][2]["formula"], "=B4*2");
     assert_eq!(rows[4][0]["value"], "=not a formula");
     assert_eq!(rows[4][1]["value"], "007");
-    assert_eq!(
-        rows[5][1],
-        json!({ "value": 11.5, "formula": "=SUM(B2:B4)" })
-    );
+    assert_eq!(rows[5][1], json!({ "value": 11.5, "formula": "=SUM(B2:B4)" }));
 
-    let e = call(
-        "eval",
-        json!({ "path": p(&edited), "formula": "=SUM(C2:C4)+COUNTA(A:A)" }),
-    )
-    .unwrap();
-    assert_eq!(e["value"], json!(28.0));
-    assert_eq!(e["kind"], "number");
-    let e = call(
-        "eval",
-        json!({ "path": p(&edited), "formula": "SEQUENCE(2,2)" }),
-    )
-    .unwrap();
-    assert_eq!(e["value"], json!([[1.0, 2.0], [3.0, 4.0]]));
+    // A dry run shows what a formula computes, without writing.
+    let ops = json!([{ "op": "set_formula", "target": "E1", "value": "=SUM(C2:C4)+COUNTA(A:A)" }]);
+    let e = call("edit", json!({ "path": p(&edited), "ops": ops, "dry_run": true })).unwrap();
+    assert_eq!(e["changes"][0]["after"]["value"], json!(28.0), "{e:?}");
 
     // Detailed reads carry types and formats.
-    let page = call(
-        "read",
-        json!({ "path": p(&edited), "range": "B5", "response_format": "detailed" }),
-    )
-    .unwrap();
+    let page =
+        call("read", json!({ "path": p(&edited), "range": "B5", "response_format": "detailed" }))
+            .unwrap();
     assert_eq!(cells(&page)[0][0]["type"], "text");
 
     // A file is never replaced without overwrite.
-    let e = call(
-        "edit",
-        json!({ "path": p(&book), "ops": ops, "output": p(&edited) }),
-    )
-    .unwrap_err();
+    let e =
+        call("edit", json!({ "path": p(&book), "ops": ops, "output": p(&edited) })).unwrap_err();
     assert_eq!(e.code, ErrorCode::FileExists);
 
     // Without output, edit writes beside the original.
-    let done = call(
-        "edit",
-        json!({ "path": p(&book), "ops": [{ "op": "clear", "target": "A:A" }] }),
-    )
-    .unwrap();
-    assert!(
-        done["output"]
-            .as_str()
-            .unwrap()
-            .ends_with("prices-edited.xlsx")
-    );
+    let done =
+        call("edit", json!({ "path": p(&book), "ops": [{ "op": "clear", "target": "A:A" }] }))
+            .unwrap();
+    assert!(done["output"].as_str().unwrap().ends_with("prices-edited.xlsx"));
     assert_eq!(done["changes_total"], 4);
+    // A dry run still works once that file exists: it writes nothing.
+    let e = call("edit", json!({ "path": p(&book), "ops": ops, "dry_run": true })).unwrap();
+    assert_eq!(e["dry_run"], true, "{e:?}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -182,27 +154,13 @@ fn rows_columns_and_sheets() {
     assert_eq!(done["written"], true, "{done:?}");
     assert_eq!(done["ops"][1]["done"], "2 row(s) inserted before row 2");
     let o = call("overview", json!({ "path": p(&out) })).unwrap();
-    let names: Vec<_> = o["sheets"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|s| s["name"].clone())
-        .collect();
+    let names: Vec<_> = o["sheets"].as_array().unwrap().iter().map(|s| s["name"].clone()).collect();
     assert_eq!(names, [json!("Data"), json!("Notes")]);
-    let page = call(
-        "read",
-        json!({ "path": p(&out), "range": "Data!A1:D5", "mode": "formulas" }),
-    )
-    .unwrap();
+    let page = call("read", json!({ "path": p(&out), "range": "Data!A1:D5", "mode": "formulas" }))
+        .unwrap();
     let rows = cells(&page);
-    assert_eq!(
-        rows[0],
-        vec![Value::Null, json!("a"), json!("b"), Value::Null]
-    );
-    assert_eq!(
-        rows[3][3], "=B4+C4",
-        "the formula moved with its row and column"
-    );
+    assert_eq!(rows[0], vec![Value::Null, json!("a"), json!("b"), Value::Null]);
+    assert_eq!(rows[3][3], "=B4+C4", "the formula moved with its row and column");
     let page = call("read", json!({ "path": p(&out), "range": "Notes!A1" })).unwrap();
     assert_eq!(cells(&page)[0][0], json!(true));
 
@@ -260,22 +218,12 @@ fn reading_pages_and_errors() {
 
     let e = call("read", json!({ "path": p(&csv), "range": "Nope!A1" })).unwrap_err();
     assert_eq!(e.code, ErrorCode::NoSuchSheet);
-    let e = call("eval", json!({ "path": p(&csv), "formula": "1/0" })).unwrap();
-    assert_eq!(
-        (e["kind"].as_str(), e["value"].as_str()),
-        (Some("error"), Some("#DIV/0!"))
-    );
-    let e = call("eval", json!({ "path": p(&csv), "formula": "1+*2" })).unwrap_err();
-    assert_eq!(e.code, ErrorCode::Formula);
-    let e = call("overview", json!({ "path": p(&dir.join("x.ods")) })).unwrap_err();
+    let e = call("overview", json!({ "path": p(&dir.join("x.numbers")) })).unwrap_err();
     assert_eq!(e.code, ErrorCode::UnsupportedFormat);
     let e = call("overview", json!({ "path": p(&dir.join("gone.xlsx")) })).unwrap_err();
     assert_eq!(e.code, ErrorCode::FileNotFound);
-    let e = call(
-        "convert",
-        json!({ "path": p(&csv), "output": p(&dir.join("x.xls")) }),
-    )
-    .unwrap_err();
+    let e =
+        call("convert", json!({ "path": p(&csv), "output": p(&dir.join("x.xls")) })).unwrap_err();
     assert_eq!(e.code, ErrorCode::UnsupportedFormat);
 
     let _ = std::fs::remove_dir_all(&dir);

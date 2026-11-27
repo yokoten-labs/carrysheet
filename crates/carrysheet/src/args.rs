@@ -28,11 +28,8 @@ pub const MAX_TEXT_CHARS: usize = 32_767;
 pub const PATHS: &[&str] = &["path", "output", "root"];
 
 /// The largest value of each whole-number argument, from 1; not in the schema, for strict clients.
-const LARGEST: &[(&str, u64)] = &[
-    ("max_rows", 10_000),
-    ("max_columns", 16_384),
-    ("count", 1_048_576),
-];
+const LARGEST: &[(&str, u64)] =
+    &[("max_rows", 10_000), ("max_columns", 16_384), ("count", 1_048_576)];
 
 /// On the command line a true/false argument is a switch, such as `--dry-run`.
 #[cfg(feature = "cli")]
@@ -73,21 +70,6 @@ pub struct Read {
     /// concise (default), or detailed: adds types, formats and formulas.
     #[cfg_attr(feature = "cli", arg(long))]
     pub response_format: Option<ResponseFormat>,
-}
-
-/// Compute a formula against a workbook without saving
-///
-/// Evaluate a formula against the workbook without changing it. Use to test a formula before writing it with edit.
-#[derive(Deserialize, JsonSchema)]
-#[cfg_attr(feature = "cli", derive(clap::Args))]
-pub struct Eval {
-    /// The workbook: xlsx, xlsm, xlsb, xls or csv.
-    pub path: String,
-    /// An en-US formula, with or without =, like SUM(Sheet1!B2:B9).
-    pub formula: String,
-    /// Where unqualified references point. Default: the first sheet.
-    #[cfg_attr(feature = "cli", arg(long))]
-    pub sheet: Option<String>,
 }
 
 /// Save a workbook as xlsx or csv, to a new file
@@ -245,7 +227,6 @@ const READS: [bool; 4] = [true, false, true, false];
 pub const COMMANDS: &[Command] = &[
     command!("overview", Overview, true, READS),
     command!("read", Read, true, READS),
-    command!("eval", Eval, true, READS),
     command!("convert", Convert, true, [false, true, true, false]),
     command!("edit", Edit, true, [false, true, false, false]),
     command!("mcp_serve", McpServe, false, [false, true, false, false]),

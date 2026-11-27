@@ -34,17 +34,8 @@ fn cell_limits() {
     let last = range("XFD1048576").range.end;
     assert_eq!((last.row, last.col), (MAX_ROWS - 1, MAX_COLS - 1));
     // More than 7 digits is no row, as in GridCraft, leading zeros or not.
-    for s in [
-        "A1048577",
-        "A0",
-        "A99999999999999999999",
-        "A00000001",
-        "XFE1",
-    ] {
-        assert!(
-            error(s).contains("columns go from A to XFD, rows from 1 to 1048576"),
-            "{s}"
-        );
+    for s in ["A1048577", "A0", "A99999999999999999999", "A00000001", "XFE1"] {
+        assert!(error(s).contains("columns go from A to XFD, rows from 1 to 1048576"), "{s}");
     }
 }
 
@@ -70,7 +61,6 @@ fn range_single_cell() {
 #[test]
 fn range_cells() {
     let r = range("A1:C10");
-    assert_eq!(r.shape, Shape::Cells);
     let cells = r.range;
     assert_eq!((cells.height(), cells.width(), cells.count()), (10, 3, 30));
     assert_eq!(r.to_string(), "A1:C10");
@@ -100,7 +90,6 @@ fn range_absolute_is_read_as_relative() {
 #[test]
 fn range_whole_columns() {
     let r = range("A:C");
-    assert_eq!(r.shape, Shape::Columns);
     assert_eq!(r.range.height(), MAX_ROWS);
     assert_eq!(r.range.width(), 3);
     assert_eq!(r.to_string(), "A:C");
@@ -111,7 +100,6 @@ fn range_whole_columns() {
 #[test]
 fn range_whole_rows() {
     let r = range("2:5");
-    assert_eq!(r.shape, Shape::Rows);
     assert_eq!((r.range.height(), r.range.width()), (4, MAX_COLS));
     assert_eq!(r.to_string(), "2:5");
     assert_eq!(range("$1:$1048575").to_string(), "1:1048575");
@@ -125,9 +113,7 @@ fn whole_sheet_cell_count_does_not_overflow() {
     // The whole sheet is shown as cells, however it was written.
     assert_eq!(range("A1:XFD1048576").to_string(), "A1:XFD1048576");
     assert_eq!(range("1:1048576").to_string(), "A1:XFD1048576");
-    assert_eq!(range("A1:XFD1048576").shape, Shape::Cells);
     // A column written as cells is a whole column.
-    assert_eq!(range("A1:A1048576").shape, Shape::Columns);
     assert_eq!(range("A1:A1048576").to_string(), "A:A");
 }
 
@@ -165,58 +151,11 @@ fn range_rejects() {
 }
 
 #[test]
-fn sheet_names_valid_and_invalid() {
-    for ok in [
-        "Sheet1",
-        "売上",
-        "Q1 売上",
-        "It's",
-        "a.b",
-        "1",
-        "データ_2026",
-    ] {
-        assert!(validate_sheet_name(ok).is_ok(), "{ok}");
-    }
-    let long = "x".repeat(32);
-    for bad in [
-        "",
-        "a:b",
-        "a/b",
-        "a\\b",
-        "a?",
-        "a*",
-        "[a]",
-        "'a",
-        "a'",
-        "History",
-        "history",
-        long.as_str(),
-        "a\u{7}",
-    ] {
-        assert!(validate_sheet_name(bad).is_err(), "{bad:?}");
-    }
-    // 31 CJK characters fit (one UTF-16 unit each); an emoji takes two.
-    assert!(validate_sheet_name(&"表".repeat(31)).is_ok());
-    assert!(validate_sheet_name(&"😀".repeat(16)).is_err());
-}
-
-#[test]
 fn sheet_name_quoting() {
-    for plain in [
-        "Sheet1",
-        "Data",
-        "_x",
-        "a.b",
-        "Totals2026x",
-        "売上",
-        "Report",
-        "ABCD1",
-    ] {
+    for plain in ["Sheet1", "Data", "_x", "a.b", "Totals2026x", "売上", "Report", "ABCD1"] {
         assert_eq!(format_sheet_name(plain), plain);
     }
-    for quoted in [
-        "My sheet", "1st", "A1", "xfd1", "C10", "TRUE", "false", "a-b", "a!b",
-    ] {
+    for quoted in ["My sheet", "1st", "A1", "xfd1", "C10", "TRUE", "false", "a-b", "a!b"] {
         assert_eq!(format_sheet_name(quoted), format!("'{quoted}'"));
     }
     assert_eq!(format_sheet_name("It's"), "'It''s'");
@@ -310,8 +249,6 @@ fn sheet_range_rejects() {
         "My sheet!A1",
         "Sheet1:Sheet3!A1",
         "Sheet1!A1:B2:C3",
-        "'a:b'!A1",
-        "'History'!A1",
         "Sheet1!XFE1",
         "a-b!A1",
         "'a'b'!A1",

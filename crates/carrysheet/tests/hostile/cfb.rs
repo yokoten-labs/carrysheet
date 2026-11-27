@@ -31,19 +31,13 @@ fn get32(b: &[u8], at: usize) -> Option<u32> {
 pub fn compound(streams: &[(&str, &[u8])]) -> Vec<u8> {
     let entries = 1 + streams.len();
     let dir_sectors = (entries * 128).div_ceil(SECTOR);
-    let data_sectors: Vec<usize> = streams
-        .iter()
-        .map(|(_, d)| d.len().div_ceil(SECTOR))
-        .collect();
+    let data_sectors: Vec<usize> = streams.iter().map(|(_, d)| d.len().div_ceil(SECTOR)).collect();
     let others = dir_sectors + data_sectors.iter().sum::<usize>();
     let mut fat_sectors = 1;
     while fat_sectors * (SECTOR / 4) < others + fat_sectors {
         fat_sectors += 1;
     }
-    assert!(
-        fat_sectors <= 109,
-        "the test writer keeps the FAT in the header"
-    );
+    assert!(fat_sectors <= 109, "the test writer keeps the FAT in the header");
     let total = fat_sectors + others;
     let mut fat = vec![FREE; fat_sectors * SECTOR / 4];
     for slot in fat.iter_mut().take(fat_sectors) {
@@ -51,11 +45,7 @@ pub fn compound(streams: &[(&str, &[u8])]) -> Vec<u8> {
     }
     let chain = |start: usize, count: usize, fat: &mut Vec<u32>| {
         for i in 0..count {
-            fat[start + i] = if i + 1 == count {
-                END_OF_CHAIN
-            } else {
-                (start + i + 1) as u32
-            };
+            fat[start + i] = if i + 1 == count { END_OF_CHAIN } else { (start + i + 1) as u32 };
         }
     };
     let dir_start = fat_sectors;
@@ -63,11 +53,7 @@ pub fn compound(streams: &[(&str, &[u8])]) -> Vec<u8> {
     let mut starts = Vec::new();
     let mut next = dir_start + dir_sectors;
     for &count in &data_sectors {
-        starts.push(if count == 0 {
-            END_OF_CHAIN
-        } else {
-            next as u32
-        });
+        starts.push(if count == 0 { END_OF_CHAIN } else { next as u32 });
         chain(next, count, &mut fat);
         next += count;
     }
@@ -104,11 +90,7 @@ pub fn compound(streams: &[(&str, &[u8])]) -> Vec<u8> {
         out[e + 67] = 1;
         put32(&mut out, e + 68, NO_STREAM);
         // Siblings in a chain to the right: a valid, if unbalanced, tree.
-        let right = if k == 0 || k + 1 == entries {
-            NO_STREAM
-        } else {
-            (k + 1) as u32
-        };
+        let right = if k == 0 || k + 1 == entries { NO_STREAM } else { (k + 1) as u32 };
         put32(&mut out, e + 72, right);
         let child = if k == 0 && entries > 1 { 1 } else { NO_STREAM };
         put32(&mut out, e + 76, child);
@@ -162,10 +144,8 @@ fn directory(file: &[u8]) -> Option<(usize, Vec<u32>, Vec<u8>)> {
             fat.extend((0..size / 4).filter_map(|j| get32(s, j * 4)));
         }
     }
-    let regular = |id: u32| {
-        file.get((id as usize + 1) * size..(id as usize + 2) * size)
-            .map(<[u8]>::to_vec)
-    };
+    let regular =
+        |id: u32| file.get((id as usize + 1) * size..(id as usize + 2) * size).map(<[u8]>::to_vec);
     let dir = chain(get32(file, 48)?, &fat, &regular)?;
     Some((size, fat, dir))
 }
@@ -211,9 +191,7 @@ pub fn read_stream(file: &[u8], name: &str) -> Option<Vec<u8>> {
                 .filter_map(|i| get32(&mini_fat_bytes, i * 4))
                 .collect();
             let mini = |id: u32| {
-                container
-                    .get(id as usize * 64..id as usize * 64 + 64)
-                    .map(<[u8]>::to_vec)
+                container.get(id as usize * 64..id as usize * 64 + 64).map(<[u8]>::to_vec)
             };
             chain(start, &mini_fat, &mini)?
         } else {

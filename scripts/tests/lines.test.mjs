@@ -14,8 +14,8 @@ const scriptPath = join(dirname(fileURLToPath(import.meta.url)), "..", "lines.mj
 const lineText = (n) => "x\n".repeat(n);
 
 // Runs checkTree on an in-memory tree: { path: text }.
-function checkFiles(tree, max) {
-  return checkTree(Object.keys(tree), (path) => tree[path], max);
+function checkFiles(tree) {
+  return checkTree(Object.keys(tree), (path) => tree[path]);
 }
 
 test("lines.mjs stays at most 80 lines", () => {
@@ -67,11 +67,6 @@ test("exactly the cap passes; above the target prints a note", () => {
   assert.ok(!checkFiles({ "a.rs": lineText(4500) }).out.some((line) => line.startsWith("note:")));
 });
 
-test("--max replaces the cap", () => {
-  assert.equal(checkFiles({ "a.rs": lineText(6000) }, 7000).code, 0);
-  assert.equal(checkFiles({ "a.rs": lineText(6000) }, 5999).code, 1);
-});
-
 test("Rust rules: #[path, include!( and an unguarded mod tests;", () => {
   const text = '#[path = "x.rs"]\nmod x;\ninclude!("y.rs");\nmod tests;\n#[cfg(test)]\n\nmod tests;\ninclude_str!("z");\n';
   assert.deepEqual(findRustHits("a.rs", text), ['a.rs:1: #[path = "x.rs"]', 'a.rs:3: include!("y.rs");', "a.rs:4: mod tests;"]);
@@ -79,13 +74,10 @@ test("Rust rules: #[path, include!( and an unguarded mod tests;", () => {
   assert.equal(findRustHits("a.rs", "pub mod tests;\n").length, 1);
 });
 
-test("Rust rules fail with and without --max", () => {
-  const tree = { "src/lib.rs": "mod tests;\n" };
-  for (const max of [undefined, 100]) {
-    const result = checkFiles(tree, max);
-    assert.equal(result.code, 1, `--max ${max}`);
-    assert.match(result.out.find((line) => line.startsWith("error:")), /src\/lib\.rs:1: mod tests;\n {2}Why: .*\n {2}Fix: /);
-  }
+test("Rust rules fail under the cap", () => {
+  const result = checkFiles({ "src/lib.rs": "mod tests;\n" });
+  assert.equal(result.code, 1);
+  assert.match(result.out.find((line) => line.startsWith("error:")), /src\/lib\.rs:1: mod tests;\n {2}Why: .*\n {2}Fix: /);
 });
 
 test("patch files: counts added lines and prints the number", () => {
@@ -117,10 +109,11 @@ test("the command line: a git tree, exit codes and usage", (t) => {
   const ok = run();
   assert.equal(ok.status, 0, ok.stderr);
   assert.match(ok.stdout, /^lines: 10 counted, cap 5,000, room left 4,990\n$/);
-  const over = run("--max", "5");
+  writeFileSync(join(dir, "src", "lib.rs"), lineText(CAP + 1));
+  const over = run();
   assert.equal(over.status, 1);
-  assert.match(over.stderr, /error: 10 lines of code, above the cap of 5 by 5\./);
-  for (const args of [["--max"], ["--max", "0"], ["--max", "x"], ["--other"]]) {
+  assert.match(over.stderr, /error: 5,001 lines of code, above the cap of 5,000 by 1\./);
+  for (const args of [["--max", "99999"], ["--max"], ["--other"]]) {
     const usage = run(...args);
     assert.equal(usage.status, 2, args.join(" "));
     assert.match(usage.stderr, /^error: unknown arguments\.\n {2}Why: .*\n {2}Fix: /);

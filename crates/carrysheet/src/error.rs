@@ -35,8 +35,6 @@ pub enum ErrorCode {
     InvalidArgument,
     /// A cell or range reference is not valid A1 text.
     InvalidReference,
-    /// The command exists but is not built yet.
-    NotImplemented,
     /// The work was already done; nothing changed.
     NothingToDo,
     /// A file or folder does not exist.
@@ -57,8 +55,6 @@ pub enum ErrorCode {
     NoSuchSheet,
     /// Deleting or overwriting needs `confirm: true`, and it was not given.
     ConfirmationRequired,
-    /// A formula could not be computed.
-    Formula,
     /// Reading or writing failed.
     Io,
     /// A bug in Carrysheet (including a caught panic in the kernel).
@@ -67,7 +63,7 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
-    /// The code as written in JSON, such as `not_implemented`.
+    /// The code as written in JSON, such as `invalid_argument`.
     pub fn as_str(self) -> String {
         let name = serde_json::to_value(self).unwrap_or_default();
         name.as_str().unwrap_or_default().to_owned()
@@ -112,22 +108,7 @@ impl CommandError {
         why: impl Into<String>,
         fix: impl Into<String>,
     ) -> Self {
-        CommandError {
-            code,
-            what: what.into(),
-            why: why.into(),
-            fix: fix.into(),
-        }
-    }
-
-    /// A command that is not built yet, by how it is typed (`mcp install`).
-    pub fn not_implemented(cli_name: &str) -> Self {
-        CommandError::new(
-            ErrorCode::NotImplemented,
-            format!("`{cli_name}` is not implemented yet"),
-            "Carrysheet is in early development; this command is planned for the first release but not built.",
-            "Run `carrysheet-cli commands` to see which commands work today.",
-        )
+        CommandError { code, what: what.into(), why: why.into(), fix: fix.into() }
     }
 
     /// An argument with a wrong value.
@@ -153,10 +134,7 @@ impl CommandError {
 
     /// Plain text for a terminal: three lines, no colour, the fix second.
     pub fn to_text(&self) -> String {
-        format!(
-            "error: {}\n  fix: {}\n  why: {}",
-            self.what, self.fix, self.why
-        )
+        format!("error: {}\n  fix: {}\n  why: {}", self.what, self.fix, self.why)
     }
 }
 

@@ -27,17 +27,10 @@ fn windows_paths_ignore_case_separators_and_verbatim_prefixes() {
     assert_eq!(shown(r"C:\Users\Alicex\a"), r"~x\a");
     assert_eq!(shown(r"D:\data\a.xlsx"), r"D:\data\a.xlsx");
     // A verbatim or slash-ended home folder.
-    assert_eq!(
-        redact_home_text(r"C:\Users\Alice\a", r"\\?\C:\Users\Alice\", true),
-        r"~\a"
-    );
+    assert_eq!(redact_home_text(r"C:\Users\Alice\a", r"\\?\C:\Users\Alice\", true), r"~\a");
     // A home folder on a network share.
     assert_eq!(
-        redact_home_text(
-            r"\\?\UNC\server\home\alice\a.xlsx",
-            r"\\server\home\alice",
-            true
-        ),
+        redact_home_text(r"\\?\UNC\server\home\alice\a.xlsx", r"\\server\home\alice", true),
         r"~\a.xlsx"
     );
     // A drive root is not a home folder worth hiding.
@@ -51,15 +44,9 @@ fn redacts_home_in_text() {
         redact_home_text("failed at /home/alice/a.xlsx and /home/alice", home, false),
         "failed at ~/a.xlsx and ~"
     );
-    assert_eq!(
-        redact_home_text("/HOME/ALICE/a", home, false),
-        "/HOME/ALICE/a"
-    );
+    assert_eq!(redact_home_text("/HOME/ALICE/a", home, false), "/HOME/ALICE/a");
     assert_eq!(redact_home_text("/x", "/", false), "/x");
-    assert_eq!(
-        redact_home_text("日本 /home/alice/表", home, false),
-        "日本 ~/表"
-    );
+    assert_eq!(redact_home_text("日本 /home/alice/表", home, false), "日本 ~/表");
 }
 
 #[test]
@@ -77,10 +64,7 @@ fn redacts_windows_style_home() {
         redact_home_text(r"open \\?\C:\Users\alice\d.xlsx failed", home, true),
         r"open ~\d.xlsx failed"
     );
-    assert_eq!(
-        redact_home_text(r"x C:\Users\alice\e", r"\\?\C:\Users\alice", true),
-        r"x ~\e"
-    );
+    assert_eq!(redact_home_text(r"x C:\Users\alice\e", r"\\?\C:\Users\alice", true), r"x ~\e");
     // A name escaped by carrysheet::text shows each `\` as `\\`.
     assert_eq!(
         redact_home_text(r#""C:\\Users\\alice\\q1.xlsx"!A1"#, home, true),

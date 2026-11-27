@@ -18,10 +18,7 @@ fn windows_network_and_device_paths_are_refused_on_text_alone() {
         (r"\\.\pipe\x", Refusal::DeviceNamespace),
         (r"\\.\COM1", Refusal::DeviceNamespace),
         (r"//./pipe/x", Refusal::DeviceNamespace),
-        (
-            r"\\?\GLOBALROOT\Device\HarddiskVolume1\a",
-            Refusal::DeviceNamespace,
-        ),
+        (r"\\?\GLOBALROOT\Device\HarddiskVolume1\a", Refusal::DeviceNamespace),
         (r"\\?\Volume{1234}\a.xlsx", Refusal::DeviceNamespace),
         (r"\??\GLOBALROOT\x", Refusal::DeviceNamespace),
         (r"\\server", Refusal::DeviceNamespace),
@@ -61,22 +58,10 @@ fn windows_paths_inside_the_root_are_planned() {
 #[test]
 fn a_root_on_a_share_allows_only_that_share() {
     let root = r"\\Srv\Team\books";
-    assert_eq!(
-        plan(root, r"\\srv\team\BOOKS\a.xlsx", true),
-        Ok(names(&["a.xlsx"]))
-    );
-    assert_eq!(
-        plan(root, r"\\?\UNC\srv\team\books\a.xlsx", true),
-        Ok(names(&["a.xlsx"]))
-    );
-    assert_eq!(
-        plan(root, r"\\srv\other\a.xlsx", true),
-        Err(Refusal::OtherShare)
-    );
-    assert_eq!(
-        plan(root, r"\\evil\team\books\a.xlsx", true),
-        Err(Refusal::OtherShare)
-    );
+    assert_eq!(plan(root, r"\\srv\team\BOOKS\a.xlsx", true), Ok(names(&["a.xlsx"])));
+    assert_eq!(plan(root, r"\\?\UNC\srv\team\books\a.xlsx", true), Ok(names(&["a.xlsx"])));
+    assert_eq!(plan(root, r"\\srv\other\a.xlsx", true), Err(Refusal::OtherShare));
+    assert_eq!(plan(root, r"\\evil\team\books\a.xlsx", true), Err(Refusal::OtherShare));
     assert_eq!(plan(root, r"C:\a.xlsx", true), Err(Refusal::OtherDrive));
 }
 
@@ -100,11 +85,7 @@ fn windows_reserved_names_are_refused_anywhere_in_the_path() {
         "a?.xlsx",
         "a\u{1b}.xlsx",
     ] {
-        assert_eq!(
-            plan(WIN_ROOT, given, true),
-            Err(Refusal::BadName),
-            "{given}"
-        );
+        assert_eq!(plan(WIN_ROOT, given, true), Err(Refusal::BadName), "{given}");
     }
 }
 
@@ -112,15 +93,9 @@ fn windows_reserved_names_are_refused_anywhere_in_the_path() {
 fn unix_rules() {
     let root = "/home/a/books";
     assert_eq!(plan(root, "a.xlsx", false), Ok(names(&["a.xlsx"])));
-    assert_eq!(
-        plan(root, "/home/a/books/sub/a.xlsx", false),
-        Ok(names(&["sub", "a.xlsx"]))
-    );
+    assert_eq!(plan(root, "/home/a/books/sub/a.xlsx", false), Ok(names(&["sub", "a.xlsx"])));
     assert_eq!(plan(root, "/etc/passwd", false), Err(Refusal::NotUnderRoot));
-    assert_eq!(
-        plan(root, "/home/a/Books/x", false),
-        Err(Refusal::NotUnderRoot)
-    );
+    assert_eq!(plan(root, "/home/a/Books/x", false), Err(Refusal::NotUnderRoot));
     assert_eq!(plan(root, "../x", false), Err(Refusal::NotUnderRoot));
     // Backslashes and reserved Windows names are ordinary on Unix.
     assert_eq!(plan(root, r"..\x", false), Ok(names(&[r"..\x"])));
@@ -146,16 +121,7 @@ fn device_names() {
     ] {
         assert!(is_windows_device_name(name), "{name}");
     }
-    for name in [
-        "null",
-        "com10",
-        "book.xlsx",
-        "console",
-        "lpt",
-        "",
-        "com⁴",
-        "comx",
-    ] {
+    for name in ["null", "com10", "book.xlsx", "console", "lpt", "", "com⁴", "comx"] {
         assert!(!is_windows_device_name(name), "{name}");
     }
 }
@@ -171,11 +137,7 @@ fn verbatim_prefixes_are_dropped_when_safe() {
         ("/home/a/b.xlsx", "/home/a/b.xlsx"),
     ];
     for (input, expected) in cases {
-        assert_eq!(
-            plain_path(Path::new(input)),
-            PathBuf::from(expected),
-            "{input}"
-        );
+        assert_eq!(plain_path(Path::new(input)), PathBuf::from(expected), "{input}");
     }
     let long = format!(r"\\?\C:\{}", "a".repeat(300));
     assert_eq!(plain_path(Path::new(&long)), PathBuf::from(&long));
@@ -215,14 +177,8 @@ fn paths_inside_the_root_resolve() {
     assert!(root.is_folder(&s.0.join("root/sub/..")));
     assert!(!root.is_folder(&s.0.join("root/sub")));
     assert_eq!(root.resolve("book.xlsx").unwrap(), dir.join("book.xlsx"));
-    assert_eq!(
-        root.resolve("sub/../book.xlsx").unwrap(),
-        dir.join("book.xlsx")
-    );
-    assert_eq!(
-        root.resolve("./sub/new.csv").unwrap(),
-        dir.join("sub").join("new.csv")
-    );
+    assert_eq!(root.resolve("sub/../book.xlsx").unwrap(), dir.join("book.xlsx"));
+    assert_eq!(root.resolve("./sub/new.csv").unwrap(), dir.join("sub").join("new.csv"));
     // A file that does not exist yet, such as an output.
     assert_eq!(root.resolve("new.xlsx").unwrap(), dir.join("new.xlsx"));
     assert_eq!(
@@ -263,11 +219,7 @@ fn links_out_of_the_root_are_refused() {
     let s = scratch("links");
     let root_dir = s.0.join("root");
     symlink(s.0.join("outside"), root_dir.join("escape")).unwrap();
-    symlink(
-        s.0.join("outside/secret.xlsx"),
-        root_dir.join("secret.xlsx"),
-    )
-    .unwrap();
+    symlink(s.0.join("outside/secret.xlsx"), root_dir.join("secret.xlsx")).unwrap();
     symlink(s.0.join("outside/nothing"), root_dir.join("dangling")).unwrap();
     symlink("../outside", root_dir.join("relative-escape")).unwrap();
     symlink("loop-b", root_dir.join("loop-a")).unwrap();
@@ -288,15 +240,9 @@ fn links_out_of_the_root_are_refused() {
     // Links that stay inside are followed.
     let dir = root.dir();
     assert_eq!(root.resolve("alias.xlsx").unwrap(), dir.join("book.xlsx"));
-    assert_eq!(
-        root.resolve("to-sub/new.csv").unwrap(),
-        dir.join("sub").join("new.csv")
-    );
+    assert_eq!(root.resolve("to-sub/new.csv").unwrap(), dir.join("sub").join("new.csv"));
     // `..` after a link goes to the real parent of its target.
-    assert_eq!(
-        root.resolve("to-sub/../book.xlsx").unwrap(),
-        dir.join("book.xlsx")
-    );
+    assert_eq!(root.resolve("to-sub/../book.xlsx").unwrap(), dir.join("book.xlsx"));
     // The root itself may be reached through a link.
     symlink(&root_dir, s.0.join("link-to-root")).unwrap();
     let via_link = Root::new(&s.0.join("link-to-root")).unwrap();
@@ -304,10 +250,7 @@ fn links_out_of_the_root_are_refused() {
     assert!(via_link.resolve("book.xlsx").is_ok());
     // Absolute paths may name the root the way it was given.
     let through_link = s.0.join("link-to-root").join("book.xlsx");
-    assert_eq!(
-        via_link.resolve(through_link.to_str().unwrap()).unwrap(),
-        dir.join("book.xlsx")
-    );
+    assert_eq!(via_link.resolve(through_link.to_str().unwrap()).unwrap(), dir.join("book.xlsx"));
 }
 
 #[test]

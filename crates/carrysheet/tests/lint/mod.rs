@@ -24,9 +24,8 @@ pub const ALLOWED_KEYWORDS: &[&str] = &[
 ];
 
 /// Types a schema may name.
-pub const ALLOWED_TYPES: &[&str] = &[
-    "object", "string", "integer", "number", "boolean", "array", "null",
-];
+pub const ALLOWED_TYPES: &[&str] =
+    &["object", "string", "integer", "number", "boolean", "array", "null"];
 
 /// The most characters all tool definitions together may take (name,
 /// description, schema and annotations as compact JSON).
@@ -98,11 +97,7 @@ pub struct Violation {
 
 impl fmt::Display for Violation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let at = if self.path.is_empty() {
-            "/"
-        } else {
-            &self.path
-        };
+        let at = if self.path.is_empty() { "/" } else { &self.path };
         write!(f, "{:?} at {at}: {}", self.rule, self.detail)
     }
 }
@@ -111,9 +106,7 @@ impl fmt::Display for Violation {
 pub fn is_valid_property_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
-        && name
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 /// True for `[a-z][a-z0-9_]{0,63}`.
@@ -127,20 +120,12 @@ struct Linter {
 
 impl Linter {
     fn report(&mut self, rule: Rule, path: &str, detail: impl Into<String>) {
-        self.violations.push(Violation {
-            rule,
-            path: path.to_owned(),
-            detail: detail.into(),
-        });
+        self.violations.push(Violation { rule, path: path.to_owned(), detail: detail.into() });
     }
 
     fn root(&mut self, schema: &Value) {
         let Some(map) = schema.as_object() else {
-            self.report(
-                Rule::RootNotObject,
-                "",
-                "the root schema is not a JSON object",
-            );
+            self.report(Rule::RootNotObject, "", "the root schema is not a JSON object");
             return;
         };
         for k in ["anyOf", "oneOf", "allOf"] {
@@ -149,18 +134,10 @@ impl Linter {
             }
         }
         if map.get("type").and_then(Value::as_str) != Some("object") {
-            self.report(
-                Rule::RootNotObject,
-                "",
-                "the root `type` must be \"object\"",
-            );
+            self.report(Rule::RootNotObject, "", "the root `type` must be \"object\"");
         }
         if !map.get("properties").is_some_and(Value::is_object) {
-            self.report(
-                Rule::RootNotObject,
-                "",
-                "the root has no `properties` object",
-            );
+            self.report(Rule::RootNotObject, "", "the root has no `properties` object");
         }
         self.node(schema, "", true);
     }
@@ -176,11 +153,9 @@ impl Linter {
                 "$ref" | "$defs" | "definitions" => {
                     self.report(Rule::Ref, path, format!("`{key}` is not allowed"))
                 }
-                "format" | "pattern" => self.report(
-                    Rule::FormatOrPattern,
-                    path,
-                    format!("`{key}` is not allowed"),
-                ),
+                "format" | "pattern" => {
+                    self.report(Rule::FormatOrPattern, path, format!("`{key}` is not allowed"))
+                }
                 "oneOf" | "allOf" | "not" if !is_root => {
                     self.report(Rule::Combinator, path, format!("`{key}` is not allowed"))
                 }
@@ -408,9 +383,7 @@ impl Linter {
 
 /// Checks one input schema. Returns every violation; empty means it passes.
 pub fn lint_schema(schema: &Value) -> Vec<Violation> {
-    let mut l = Linter {
-        violations: Vec::new(),
-    };
+    let mut l = Linter { violations: Vec::new() };
     l.root(schema);
     l.violations
 }
@@ -418,9 +391,7 @@ pub fn lint_schema(schema: &Value) -> Vec<Violation> {
 /// Checks MCP tool definitions (`{"name","description","inputSchema","annotations"}`):
 /// names, descriptions, annotations, the total size, and every schema.
 pub fn lint_tools(tools: &[Value]) -> Vec<Violation> {
-    let mut l = Linter {
-        violations: Vec::new(),
-    };
+    let mut l = Linter { violations: Vec::new() };
     let mut names = HashSet::new();
     let mut total = 0;
     for (i, tool) in tools.iter().enumerate() {
@@ -434,11 +405,7 @@ pub fn lint_tools(tools: &[Value]) -> Vec<Violation> {
                 format!("tool name \"{name}\" must match [a-z][a-z0-9_]{{0,63}}"),
             );
         } else if !names.insert(name.to_owned()) {
-            l.report(
-                Rule::BadToolName,
-                &path,
-                format!("tool name \"{name}\" twice"),
-            );
+            l.report(Rule::BadToolName, &path, format!("tool name \"{name}\" twice"));
         }
         match tool.get("description").and_then(Value::as_str) {
             Some(d) if !d.trim().is_empty() && d.chars().count() <= MAX_DESCRIPTION_CHARS => {}
@@ -448,22 +415,9 @@ pub fn lint_tools(tools: &[Value]) -> Vec<Violation> {
                 "the description is missing, empty or too long",
             ),
         }
-        for key in [
-            "readOnlyHint",
-            "destructiveHint",
-            "idempotentHint",
-            "openWorldHint",
-        ] {
-            if !tool
-                .get("annotations")
-                .and_then(|a| a.get(key))
-                .is_some_and(Value::is_boolean)
-            {
-                l.report(
-                    Rule::MissingAnnotation,
-                    &path,
-                    format!("`{key}` is not set"),
-                );
+        for key in ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] {
+            if !tool.get("annotations").and_then(|a| a.get(key)).is_some_and(Value::is_boolean) {
+                l.report(Rule::MissingAnnotation, &path, format!("`{key}` is not set"));
             }
         }
         match tool.get("inputSchema") {

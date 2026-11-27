@@ -4,7 +4,6 @@ use crate::error::*;
 fn exit_codes() {
     assert_eq!(ExitCode::Done.code(), 0);
     assert_eq!(ErrorCode::Io.exit_code().code(), 1);
-    assert_eq!(ErrorCode::NotImplemented.exit_code(), ExitCode::Failed);
     assert_eq!(ErrorCode::Usage.exit_code().code(), 2);
     assert_eq!(ErrorCode::InvalidArgument.exit_code(), ExitCode::Usage);
     assert_eq!(ErrorCode::InvalidReference.exit_code(), ExitCode::Usage);
@@ -18,34 +17,24 @@ fn exit_codes() {
 
 #[test]
 fn json_shape() {
-    let e = CommandError::not_implemented("mcp install");
+    let e = CommandError::invalid_argument("max_rows", "it is 0", "Use 1 or more.");
     let v = e.to_envelope();
     assert_eq!(v["ok"], false);
     let err = v["error"].as_object().unwrap();
     let keys: Vec<_> = err.keys().map(String::as_str).collect();
     assert_eq!(keys, ["code", "what", "fix", "why"]);
-    assert_eq!(err["code"], "not_implemented");
-    assert!(err["what"].as_str().unwrap().contains("mcp install"));
+    assert_eq!(err["code"], "invalid_argument");
+    assert!(err["what"].as_str().unwrap().contains("max_rows"));
     // The serde form matches the hand-written one.
     assert_eq!(serde_json::to_value(&e).unwrap(), e.to_json());
-    assert_eq!(
-        serde_json::to_string(&e).unwrap(),
-        e.to_json().to_string(),
-        "same key order"
-    );
+    assert_eq!(serde_json::to_string(&e).unwrap(), e.to_json().to_string(), "same key order");
 }
 
 #[test]
 fn codes_serialize_as_snake_case() {
-    assert_eq!(
-        serde_json::to_value(ErrorCode::NotImplemented).unwrap(),
-        "not_implemented"
-    );
+    assert_eq!(serde_json::to_value(ErrorCode::InvalidArgument).unwrap(), "invalid_argument");
     assert_eq!(ErrorCode::FileNotFound.to_string(), "file_not_found");
-    assert_eq!(
-        serde_json::to_value(ErrorCode::Internal).unwrap(),
-        ErrorCode::Internal.as_str()
-    );
+    assert_eq!(serde_json::to_value(ErrorCode::Internal).unwrap(), ErrorCode::Internal.as_str());
     assert_eq!(ErrorCode::Internal.as_str(), "internal_error");
     assert_eq!(ErrorCode::DamagedFile.as_str(), "damaged_file");
     assert_eq!(ErrorCode::DamagedFile.to_string(), "damaged_file");

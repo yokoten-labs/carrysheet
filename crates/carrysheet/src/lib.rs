@@ -33,7 +33,7 @@ use crate::save::{EncodeOptions, Encoded, FileFormat};
 use crate::text::escape;
 
 /// The commands [`run`] runs: those that work on a workbook.
-pub const ENGINE_COMMANDS: &[&str] = &["overview", "read", "eval", "edit", "convert"];
+pub const ENGINE_COMMANDS: &[&str] = &["overview", "read", "edit", "convert"];
 
 /// Carrysheet's limits on one call; the values are in [`commands::limits`].
 pub const LIMITS: Limits = Limits {
@@ -83,7 +83,6 @@ pub fn run_within(
     let result = match command.name {
         "overview" => view::overview(kernel, args, input).map(Answer::from),
         "read" => view::read(kernel, args, input).map(Answer::from),
-        "eval" => view::eval(kernel, args, input).map(Answer::from),
         "edit" => edit::edit(kernel, args, input),
         "convert" => save::convert(kernel, args, input),
         _ => Err(internal("running a command", "it is not an engine command")),
@@ -162,9 +161,7 @@ impl Kernel {
         format: FileFormat,
         options: &EncodeOptions<'_>,
     ) -> Result<Encoded, CommandError> {
-        self.guard("saving", || {
-            save::encode(book, path, format, options, values::MAX_CSV_BYTES)
-        })
+        self.guard("saving", || save::encode(book, path, format, options, values::MAX_CSV_BYTES))
     }
 
     /// Runs `f` within the limits; outside a command, each call gets its own.

@@ -24,39 +24,24 @@ fn ops_parse_with_their_types() {
 #[test]
 fn bad_ops_name_their_index() {
     for (bad, code) in [
-        (
-            json!([{ "op": "set_value", "target": "B2" }]),
-            ErrorCode::InvalidArgument,
-        ),
+        (json!([{ "op": "set_value", "target": "B2" }]), ErrorCode::InvalidArgument),
         (
             json!([{ "op": "set_value", "target": "nope!!", "value": 1 }]),
             ErrorCode::InvalidArgument,
         ),
-        (
-            json!([{ "op": "set_formula", "target": "B2", "value": 1 }]),
-            ErrorCode::InvalidArgument,
-        ),
-        (
-            json!([{ "op": "add_sheet", "target": "a\u{7}b" }]),
-            ErrorCode::InvalidArgument,
-        ),
+        (json!([{ "op": "set_formula", "target": "B2", "value": 1 }]), ErrorCode::InvalidArgument),
+        (json!([{ "op": "add_sheet", "target": "a\u{7}b" }]), ErrorCode::InvalidArgument),
         (
             json!([{ "op": "add_sheet", "target": "\u{1F600}".repeat(16) }]),
             ErrorCode::InvalidArgument,
         ),
-        (
-            json!([{ "op": "set_value", "target": "A:Z", "value": 1 }]),
-            ErrorCode::LimitExceeded,
-        ),
+        (json!([{ "op": "set_value", "target": "A:Z", "value": 1 }]), ErrorCode::LimitExceeded),
     ] {
         let e = parse_ops(&bad).unwrap_err();
         assert_eq!(e.code, code, "{bad}");
         assert!(e.what.contains("ops[0]"), "{}", e.what);
     }
-    assert_eq!(
-        parse_ops(&json!([])).unwrap_err().code,
-        ErrorCode::InvalidArgument
-    );
+    assert_eq!(parse_ops(&json!([])).unwrap_err().code, ErrorCode::InvalidArgument);
 }
 
 #[test]
@@ -197,11 +182,7 @@ fn a_formula_typo_is_not_a_policy_refusal() {
             .unwrap_err();
         assert_eq!(e.code, ErrorCode::InvalidArgument);
         assert!(e.what.contains("cannot read"), "{typo}: {}", e.what);
-        assert!(
-            e.fix.starts_with("Correct the formula"),
-            "{typo}: {}",
-            e.fix
-        );
+        assert!(e.fix.starts_with("Correct the formula"), "{typo}: {}", e.fix);
     }
     let e = parse_ops(&json!([{ "op": "set_formula", "target": "B2", "value": "WEBSERVICE(A1)" }]))
         .unwrap_err();

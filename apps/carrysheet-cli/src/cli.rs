@@ -32,9 +32,7 @@ pub struct Global {
 /// One command as clap sees it: `name` is its last word, such as `serve`.
 pub(crate) fn clap_command(name: &'static str, command: &Command) -> clap::Command {
     let (summary, description) = command.doc();
-    (command.flags)(clap::Command::new(name))
-        .about(summary)
-        .long_about(description)
+    (command.flags)(clap::Command::new(name)).about(summary).long_about(description)
 }
 
 /// Builds the whole command line from [`COMMANDS`].

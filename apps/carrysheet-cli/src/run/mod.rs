@@ -72,19 +72,14 @@ pub fn run(
 
 fn commands() -> Done {
     let list: Vec<Value> = COMMANDS.iter().map(command_json).collect();
-    let rows: Vec<Value> = COMMANDS
-        .iter()
-        .map(|c| json!({ "command": c.cli_name(), "summary": c.doc().0 }))
-        .collect();
+    let rows: Vec<Value> =
+        COMMANDS.iter().map(|c| json!({ "command": c.cli_name(), "summary": c.doc().0 })).collect();
     let mut plain = Map::new();
     plain.insert("commands".into(), Value::Array(rows));
     let mut data = Map::new();
     data.insert("version".into(), json!(env!("CARGO_PKG_VERSION")));
     data.insert("commands".into(), Value::Array(list));
-    Done {
-        data,
-        plain: Some(plain),
-    }
+    Done { data, plain: Some(plain) }
 }
 
 /// Everything about a command, for `commands --json`.

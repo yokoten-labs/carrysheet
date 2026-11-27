@@ -25,26 +25,16 @@ fn deleting_needs_confirm_or_yes() {
     let mut with = args.clone();
     with["confirm"] = json!(true);
     let e = run_json("edit", with).unwrap_err();
-    assert_eq!(
-        e.code,
-        ErrorCode::UnsupportedFormat,
-        "confirmed, then the file is looked at"
-    );
+    assert_eq!(e.code, ErrorCode::UnsupportedFormat, "confirmed, then the file is looked at");
 
     let mut dry = args.clone();
     dry["dry_run"] = json!(true);
-    assert_eq!(
-        run_json("edit", dry).unwrap_err().code,
-        ErrorCode::UnsupportedFormat
-    );
+    assert_eq!(run_json("edit", dry).unwrap_err().code, ErrorCode::UnsupportedFormat);
 
     let c = command("edit").unwrap();
     let checked = validate_args(c, &args).unwrap();
     let yes = Context { yes: true, ..ctx() };
-    assert_eq!(
-        run(c, &checked, &yes).unwrap_err().code,
-        ErrorCode::UnsupportedFormat
-    );
+    assert_eq!(run(c, &checked, &yes).unwrap_err().code, ErrorCode::UnsupportedFormat);
 }
 
 #[test]
@@ -57,19 +47,11 @@ fn missing_input_is_reported() {
 #[test]
 fn commands_lists_everything() {
     let done = run_json("commands", json!({})).unwrap();
-    assert_eq!(
-        done.data["commands"].as_array().unwrap().len(),
-        COMMANDS.len()
-    );
+    assert_eq!(done.data["commands"].as_array().unwrap().len(), COMMANDS.len());
     assert!(done.data["commands"][0].get("implemented").is_none());
     let plain = done.plain.unwrap();
     assert_eq!(plain["commands"].as_array().unwrap().len(), COMMANDS.len());
-    assert!(
-        !plain["commands"][0]
-            .as_object()
-            .unwrap()
-            .contains_key("input_schema")
-    );
+    assert!(!plain["commands"][0].as_object().unwrap().contains_key("input_schema"));
 }
 
 // Issue 102: every command `commands` lists is built, so none may fall

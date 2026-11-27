@@ -2,7 +2,7 @@
 //! optional sheet name (`Data!A1`, `'Q1 売上'!B2`).
 //!
 //! GridCraft's `RangeRef::parse` reads the cells. This file adds the sheet
-//! name, refuses what GridCraft would let pass (spaces, `+`), and the shape.
+//! name and refuses what GridCraft would let pass (spaces, `+`).
 
 use std::fmt;
 
@@ -22,42 +22,7 @@ impl fmt::Display for RefError {
 }
 
 fn invalid(input: &str, reason: &str) -> RefError {
-    RefError(format!(
-        "{} is not a valid reference: {reason}",
-        quote(input, 200)
-    ))
-}
-
-/// Checks a sheet name against Excel's rules: 1 to 31 characters (UTF-16),
-/// none of `: \ / ? * [ ]`, no `'` at either end, and not `History`.
-pub fn validate_sheet_name(name: &str) -> Result<(), RefError> {
-    let reason = if name.is_empty() {
-        "it is empty"
-    } else if name.encode_utf16().count() > 31 {
-        "it is longer than 31 characters"
-    } else if name.contains([':', '\\', '/', '?', '*', '[', ']']) {
-        "it contains one of : \\ / ? * [ ]"
-    } else if name.starts_with('\'') || name.ends_with('\'') {
-        "it starts or ends with '"
-    } else if name.chars().any(char::is_control) {
-        "it contains a control character"
-    } else if name.eq_ignore_ascii_case("history") {
-        "Excel reserves the name History"
-    } else {
-        return Ok(());
-    };
-    Err(RefError(format!(
-        "{} is not a valid sheet name: {reason}",
-        quote(name, 64)
-    )))
-}
-
-/// What a range covers: cells (`A1:C3`), whole columns (`A:C`) or whole rows (`2:5`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Shape {
-    Cells,
-    Columns,
-    Rows,
+    RefError(format!("{} is not a valid reference: {reason}", quote(input, 200)))
 }
 
 /// A range with an optional sheet name: `A1:C3`, `Sheet1!A:C`, `'Q1 売上'!B2`.
@@ -67,7 +32,6 @@ pub struct SheetRange {
     pub sheet: Option<String>,
     /// The cells, corners in order; whole columns and rows span the sheet.
     pub range: RangeRef,
-    pub shape: Shape,
 }
 
 impl SheetRange {
@@ -106,8 +70,8 @@ impl SheetRange {
                 }
             }
         };
-        if let Some(name) = &sheet {
-            validate_sheet_name(name)?;
+        if sheet.as_deref() == Some("") {
+            return Err(invalid(input, "the sheet name is empty"));
         }
         let is_range_char = |c: char| c.is_ascii_alphanumeric() || c == '$' || c == ':';
         let is_strict = text.chars().all(is_range_char) && !text.contains("$$");
@@ -116,16 +80,7 @@ impl SheetRange {
             let reason = "write cells like B7 or A1:C10, whole columns like A:C, or whole rows like 2:5; columns go from A to XFD, rows from 1 to 1048576";
             return Err(invalid(input, reason));
         };
-        let shape = match (range.is_full_cols(), range.is_full_rows()) {
-            (true, false) => Shape::Columns,
-            (false, true) => Shape::Rows,
-            _ => Shape::Cells,
-        };
-        Ok(SheetRange {
-            sheet,
-            range,
-            shape,
-        })
+        Ok(SheetRange { sheet, range })
     }
 
     /// The range without its sheet name: `A1:C3`, `A:C`, `2:5`.

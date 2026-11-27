@@ -110,10 +110,7 @@ fn every_sample_opens_or_is_refused_clearly() {
             }
             Kind::Numbers => match refused {
                 Some(e) if e.code == ErrorCode::UnsupportedFormat => {}
-                _ => report.fail(
-                    &case,
-                    format!("a Numbers file was not refused: {outcome:?}"),
-                ),
+                _ => report.fail(&case, format!("a Numbers file was not refused: {outcome:?}")),
             },
             Kind::OldExcel(v) => match refused {
                 Some(e) if mentions(&e.why, OLD_VERSION) => {}
@@ -157,22 +154,13 @@ struct Seed {
 
 impl Seed {
     fn whole(case: String, file_name: &'static str, bytes: Vec<u8>) -> Seed {
-        Seed {
-            case,
-            file_name,
-            bytes,
-            wrap: None,
-            parts: None,
-        }
+        Seed { case, file_name, bytes, wrap: None, parts: None }
     }
 
     /// A package: its parts when it is a zip (an encrypted one is not).
     fn package(case: String, file_name: &'static str, bytes: Vec<u8>) -> Seed {
         let parts = unpack(&bytes);
-        Seed {
-            parts,
-            ..Seed::whole(case, file_name, bytes)
-        }
+        Seed { parts, ..Seed::whole(case, file_name, bytes) }
     }
 }
 
@@ -194,10 +182,7 @@ fn seeds(extension: &str) -> Vec<Seed> {
     for path in sample_files() {
         let name = short_name(&path);
         let bytes = std::fs::read(&path).unwrap();
-        let matches = |ext: &str| {
-            path.extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case(ext))
-        };
+        let matches = |ext: &str| path.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext));
         match extension {
             "xls" if matches("xls") => {
                 // Damage to the BIFF stream reaches the records, not only
@@ -214,11 +199,7 @@ fn seeds(extension: &str) -> Vec<Seed> {
                 out.push(Seed::whole(name, "data.csv", bytes));
             }
             "xlsx" if matches("xlsx") || matches("parts") => {
-                let bytes = if matches("parts") {
-                    load_parts(&path)
-                } else {
-                    bytes
-                };
+                let bytes = if matches("parts") { load_parts(&path) } else { bytes };
                 out.push(Seed::package(name, "book.xlsx", bytes));
             }
             _ => {}
@@ -229,10 +210,7 @@ fn seeds(extension: &str) -> Vec<Seed> {
             let built: [(&str, Vec<u8>); 4] = [
                 ("biff8 split SST (built)", biff::biff8_split_sst()),
                 ("biff2 (built)", biff::biff2_sheet()),
-                (
-                    "biff5 cp936 (built)",
-                    biff::biff5_book(936, b"\xB1\xED", b"\xD6\xD0\xCE\xC4"),
-                ),
+                ("biff5 cp936 (built)", biff::biff5_book(936, b"\xB1\xED", b"\xD6\xD0\xCE\xC4")),
                 ("biff4 workbook (built)", biff::biff4_workbook()),
             ];
             for (case, stream) in built {
@@ -245,26 +223,14 @@ fn seeds(extension: &str) -> Vec<Seed> {
         "xlsx" => {
             // The kernel's own xlsx samples, and one built here.
             for name in ["WithTwoCharts.xlsx", "SimpleMacro.xlsm"] {
-                let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/data")
-                    .join(name);
-                out.push(Seed::package(
-                    name.to_owned(),
-                    "book.xlsx",
-                    std::fs::read(path).unwrap(),
-                ));
+                let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name);
+                out.push(Seed::package(name.to_owned(), "book.xlsx", std::fs::read(path).unwrap()));
             }
-            out.push(Seed::package(
-                "xlsx (built)".to_owned(),
-                "book.xlsx",
-                built_xlsx(),
-            ));
+            out.push(Seed::package("xlsx (built)".to_owned(), "book.xlsx", built_xlsx()));
         }
-        "xlsb" => out.push(Seed::package(
-            "xlsb (built)".to_owned(),
-            "book.xlsb",
-            xlsb::small_book(),
-        )),
+        "xlsb" => {
+            out.push(Seed::package("xlsb (built)".to_owned(), "book.xlsb", xlsb::small_book()))
+        }
         _ => {}
     }
     out
@@ -298,11 +264,7 @@ fn mutate_all(extension: &str, seed: u64, per_seed: usize, minimum: usize) -> Re
             .filter(|(_, (name, _))| target(extension, name))
             .map(|(i, _)| i)
             .collect();
-        let copies = if s.parts.is_some() {
-            per_seed
-        } else {
-            MUTATIONS_PER_INPUT
-        };
+        let copies = if s.parts.is_some() { per_seed } else { MUTATIONS_PER_INPUT };
         for case in 0..copies {
             let parts = s.parts.as_ref().filter(|_| case % 4 != 0);
             if let (Some(parts), false) = (parts, targets.is_empty()) {
@@ -346,11 +308,7 @@ fn mutate_all(extension: &str, seed: u64, per_seed: usize, minimum: usize) -> Re
         }
     }
     println!("{}", report.summary(&format!("{extension} mutations")));
-    assert!(
-        report.cases.len() >= minimum,
-        "{} cases",
-        report.cases.len()
-    );
+    assert!(report.cases.len() >= minimum, "{} cases", report.cases.len());
     if matches!(extension, "xlsx" | "xlsb") {
         println!("{extension}: {parts_opened} of {in_parts} copies damaged in one part opened");
         for (why, n) in &refusals {
@@ -399,19 +357,12 @@ fn mutated_xlsb_never_panics_or_hangs() {
 fn built_samples_open() {
     let mut report = Report::default();
     for (case, name, bytes) in [
-        (
-            "biff8 split SST",
-            "book.xls",
-            cfb::workbook(&biff::biff8_split_sst()),
-        ),
+        ("biff8 split SST", "book.xls", cfb::workbook(&biff::biff8_split_sst())),
         ("xlsb", "book.xlsb", xlsb::small_book()),
         ("xlsx", "book.xlsx", built_xlsx()),
     ] {
         let outcome = report.run(case.to_owned(), Input::Bytes(name, bytes), Depth::Save);
-        assert!(
-            matches!(outcome, Some(Outcome::Opened)),
-            "{case}: {outcome:?}"
-        );
+        assert!(matches!(outcome, Some(Outcome::Opened)), "{case}: {outcome:?}");
     }
     report.settle(&[]);
 }

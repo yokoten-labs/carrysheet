@@ -5,6 +5,17 @@ error codes are the public interface (`carrysheet-cli commands --json`).
 
 ## Unreleased
 
+### Removed
+
+- **Everything outside the 5,000-line cap** (record 0010 and record 0011):
+  the `macros` command, MCP over HTTP, `feedback`, our own readers that no
+  program linked (old `.xls`, Numbers, csv, encryption, data connections,
+  SQL) and `tools/`; thirteen crates became two. GridCraft now reads every
+  format. The removed code stays in the history of `main`: `50bd07b` is the
+  last commit on `main` before the first deletion merged, and holds all of
+  it. Code rewritten or removed later in the cut, such as `eval`, is named
+  in its own `changes/` file.
+
 ### Security
 
 - **zip 9.0.5.** Fixes RUSTSEC-2026-0548 (local header names that differ from the

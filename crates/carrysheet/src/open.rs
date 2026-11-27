@@ -15,14 +15,10 @@ use crate::internal;
 use crate::text::escape;
 
 /// The largest file opened. 32-bit programs get less (record 0003, point 4).
-pub const MAX_FILE_BYTES: u64 = if cfg!(target_pointer_width = "64") {
-    1 << 30
-} else {
-    256 << 20
-};
+pub const MAX_FILE_BYTES: u64 = if cfg!(target_pointer_width = "64") { 1 << 30 } else { 256 << 20 };
 
 /// Extensions [`check_opens`] accepts.
-const OPENS: &[&str] = &["xlsx", "xlsm", "xltx", "xltm", "xls", "xlsb", "csv"];
+const OPENS: &[&str] = &["xlsx", "xlsm", "xltx", "xltm", "xls", "xlsb", "ods", "csv"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SourceKind {
@@ -70,7 +66,7 @@ pub fn check_opens(path: &Path) -> Result<(), CommandError> {
     Err(CommandError::new(
         ErrorCode::UnsupportedFormat,
         format!("{} is not a workbook Carrysheet opens", path.display()),
-        "the extension is not one of .xlsx, .xlsm, .xltx, .xltm, .xls, .xlsb or .csv",
+        "the extension is not one of .xlsx, .xlsm, .xltx, .xltm, .xls, .xlsb, .ods or .csv",
         "Give a spreadsheet file with one of those extensions.",
     ))
 }
@@ -147,25 +143,17 @@ impl Book {
             gridcraft_engine::io::open_bytes(&name, &bytes).map_err(|e| open_error(path, &e))?
         };
         // So relative links to other workbooks follow a save to another folder.
-        wb.source_dir = std::path::absolute(path)
-            .ok()
-            .and_then(|p| p.parent().map(Path::to_path_buf));
+        wb.source_dir =
+            std::path::absolute(path).ok().and_then(|p| p.parent().map(Path::to_path_buf));
         // Recalculates everything, so values read are computed, not cached.
         let doc = DocState::new(wb, None, name);
         let mut session = Session::new();
         session.add_document(doc);
-        Ok(Book {
-            session,
-            source: Arc::new(bytes),
-            kind,
-            warnings,
-        })
+        Ok(Book { session, source: Arc::new(bytes), kind, warnings })
     }
 
     pub(crate) fn doc(&self) -> Result<&DocState, CommandError> {
-        self.session
-            .active()
-            .ok_or_else(|| internal("reading the workbook", "no document is open"))
+        self.session.active().ok_or_else(|| internal("reading the workbook", "no document is open"))
     }
 
     pub(crate) fn wb(&self) -> Result<&Workbook, CommandError> {
@@ -186,7 +174,7 @@ impl Book {
 pub(crate) fn no_such_sheet(name: &str) -> CommandError {
     CommandError::new(
         ErrorCode::NoSuchSheet,
-        format!("there is no sheet named \"{name}\""),
+        format!("there is no sheet named {}", crate::text::quote(name, 64)),
         "the workbook has no sheet with that name (names are compared without case)",
         "Run overview to see the sheet names.",
     )
@@ -197,11 +185,8 @@ pub(crate) fn no_such_sheet(name: &str) -> CommandError {
 /// and `SEPT1` stay (record 0006). One sheet, named after the file.
 fn read_csv(path: &Path, name: &str, bytes: &[u8]) -> Result<Opened, CommandError> {
     let (text, warnings) = decode_text(path, bytes)?;
-    let options = gridcraft_xlsx::CsvOptions {
-        delimiter: 0,
-        parse_values: false,
-        ..Default::default()
-    };
+    let options =
+        gridcraft_xlsx::CsvOptions { delimiter: 0, parse_values: false, ..Default::default() };
     let mut wb = gridcraft_xlsx::read_csv(text.as_bytes(), &options)
         .map_err(|e| internal("reading the csv file", &e.to_string()))?;
     let mut styles = std::mem::take(&mut wb.styles);
@@ -287,11 +272,9 @@ const GUESSED: &str = "Carrysheet guessed";
 /// guesses. Bytes the encoding cannot hold are an error, never U+FFFD.
 fn decode_text(path: &Path, bytes: &[u8]) -> Result<(String, Vec<String>), CommandError> {
     let (encoding, body, how) = match Encoding::for_bom(bytes) {
-        Some((encoding, bom)) => (
-            encoding,
-            bytes.get(bom..).unwrap_or_default(),
-            "its byte order mark names",
-        ),
+        Some((encoding, bom)) => {
+            (encoding, bytes.get(bom..).unwrap_or_default(), "its byte order mark names")
+        }
         None if std::str::from_utf8(bytes).is_ok() => (UTF_8, bytes, "Carrysheet found"),
         None => {
             // We give chardetng at most 1 MiB, from the first byte that is not ASCII.

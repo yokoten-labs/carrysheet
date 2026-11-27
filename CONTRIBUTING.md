@@ -2,12 +2,16 @@
 
 Thanks for helping. Carrysheet is an early preview, so things move fast. A short issue before a big change saves us both time.
 
+## What is here
+
+Two crates: the library `carrysheet` in `crates/carrysheet` (MIT OR Apache-2.0) and the program `carrysheet-cli` in `apps/carrysheet-cli` (GPL-3.0-or-later), on the vendored GridCraft kernel in `vendor/gridcraft/`. Our own source is capped at 5,000 lines ([record 0010](docs/records/0010-five-thousand-lines.md)); a change that adds code may need to remove some.
+
 ## The rules
 
 All the rules are in [AGENTS.md](AGENTS.md). They apply to people and AI agents alike. The most important ones:
 
 - **Clean room.** Never copy or closely follow code from GPL, LGPL, AGPL or MPL projects (LibreOffice, Gnumeric and others). Use Microsoft's published specs and permissively licensed code instead.
-- **Checks.** Run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo test --workspace --locked` while you work, and the `lines` job's command from `.github/workflows/ci.yml` for the line cap.
+- **Checks.** Run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo test --workspace --locked` while you work, and `node scripts/lines.mjs` for the line cap.
 - **Commits.** One logical change per commit, with a message in English that says what changed and why.
 
 ## Pull requests

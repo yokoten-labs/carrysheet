@@ -18,10 +18,7 @@ fn open_error(name: &str, bytes: Vec<u8>) -> carrysheet::commands::CommandError 
     let path = dir.join(format!("{name}.xlsx"));
     std::fs::write(&path, bytes).unwrap();
     let e = call("overview", json!({ "path": p(&path) })).unwrap_err();
-    assert!(
-        !e.what.is_empty() && !e.why.is_empty() && !e.fix.is_empty(),
-        "{e:?}"
-    );
+    assert!(!e.what.is_empty() && !e.why.is_empty() && !e.fix.is_empty(), "{e:?}");
     let _ = std::fs::remove_dir_all(&dir);
     e
 }
@@ -73,9 +70,7 @@ fn one_long_shared_text_in_many_cells() {
         rows.push_str("</row>");
     }
     let mut book = Book::new(&rows);
-    book.strings = Some(format!(
-        r#"<?xml version="1.0"?><sst {NS}><si><t>{text}</t></si></sst>"#
-    ));
+    book.strings = Some(format!(r#"<?xml version="1.0"?><sst {NS}><si><t>{text}</t></si></sst>"#));
     let dir = scratch("big-string");
     let path = dir.join("big.xlsx");
     std::fs::write(&path, book.bytes()).unwrap();
@@ -115,10 +110,7 @@ fn too_many_styles_or_strings_are_refused() {
 
     let path = dir.join("si.xlsx");
     let mut book = Book::new(r#"<row r="1"><c r="A1" t="s"><v>0</v></c></row>"#);
-    book.strings = Some(format!(
-        r#"<?xml version="1.0"?><sst {NS}>{}</sst>"#,
-        "<si/>".repeat(200)
-    ));
+    book.strings = Some(format!(r#"<?xml version="1.0"?><sst {NS}>{}</sst>"#, "<si/>".repeat(200)));
     std::fs::write(&path, book.bytes()).unwrap();
     let kernel = lowered(|l| l.shared_strings = 100);
     let e = call_with(&kernel, "overview", json!({ "path": p(&path) })).unwrap_err();
@@ -137,20 +129,17 @@ fn huge_array_results_are_errors_not_aborts() {
     let started = Instant::now();
     let page = call("read", json!({ "path": p(&path), "range": "A1" })).unwrap();
     assert_eq!(page["rows"][0]["cells"][0], "#NUM!", "{page:?}");
-    let e = call(
-        "eval",
-        json!({ "path": p(&path), "formula": "ROWS(SEQUENCE(1000000,10))" }),
-    )
-    .unwrap();
-    assert_eq!(e["value"], "#NUM!", "{e:?}");
+    // The same formula set by edit gives the error fast, too.
+    let ops =
+        json!([{ "op": "set_formula", "target": "N1", "value": "ROWS(SEQUENCE(1000000,10))" }]);
+    let e = call("edit", json!({ "path": p(&path), "ops": ops, "dry_run": true })).unwrap();
+    assert_eq!(e["changes"][0]["after"]["value"], "#NUM!", "{e:?}");
     assert!(started.elapsed() < QUICK, "{:?}", started.elapsed());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 fn numbers(n: u32) -> String {
-    (1..=n)
-        .map(|r| format!(r#"<row r="{r}"><c r="A{r}"><v>{r}</v></c></row>"#))
-        .collect()
+    (1..=n).map(|r| format!(r#"<row r="{r}"><c r="A{r}"><v>{r}</v></c></row>"#)).collect()
 }
 
 #[test]
@@ -203,11 +192,7 @@ fn deep_chains_are_computed() {
         { "op": "set_value", "target": "B5000", "value": 1 },
         { "op": "set_formula", "target": "B1:B4999", "value": "B2+1" }
     ]);
-    call(
-        "edit",
-        json!({ "path": p(&path), "ops": ops, "output": p(&out) }),
-    )
-    .unwrap();
+    call("edit", json!({ "path": p(&path), "ops": ops, "output": p(&out) })).unwrap();
     let page = call("read", json!({ "path": p(&out), "range": "B1" })).unwrap();
     assert_eq!(page["rows"][0]["cells"][0], json!(5000.0));
     let _ = std::fs::remove_dir_all(&dir);
@@ -219,11 +204,9 @@ fn circular_references_are_named() {
     let path = dir.join("circ.xlsx");
     let rows = r#"<row r="1"><c r="A1"><f>B1+1</f></c><c r="B1"><f>A1+1</f></c></row>"#;
     std::fs::write(&path, Book::new(rows).bytes()).unwrap();
-    let page = call(
-        "read",
-        json!({ "path": p(&path), "range": "A1", "response_format": "detailed" }),
-    )
-    .unwrap();
+    let page =
+        call("read", json!({ "path": p(&path), "range": "A1", "response_format": "detailed" }))
+            .unwrap();
     let cell = &page["rows"][0]["cells"][0];
     assert_eq!(cell["value"], "#CIRC!", "{cell}");
     let text = cell.to_string();
@@ -253,20 +236,11 @@ fn unreadable_numbers_are_reported() {
     std::fs::write(&path, Book::new(rows).bytes()).unwrap();
     let o = call("overview", json!({ "path": p(&path) })).unwrap();
     let warnings = o["warnings"].to_string();
-    assert!(
-        warnings.contains("numeric cells could not be read"),
-        "{o:?}"
-    );
+    assert!(warnings.contains("numeric cells could not be read"), "{o:?}");
     let out = dir.join("out.xlsx");
-    let dry = call(
-        "convert",
-        json!({ "path": p(&path), "output": p(&out), "dry_run": true }),
-    )
-    .unwrap();
-    assert!(
-        lost(&dry).iter().any(|l| l.contains("numeric cells")),
-        "{dry:?}"
-    );
+    let dry =
+        call("convert", json!({ "path": p(&path), "output": p(&out), "dry_run": true })).unwrap();
+    assert!(lost(&dry).iter().any(|l| l.contains("numeric cells")), "{dry:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -287,21 +261,12 @@ fn the_save_check_never_unpacks_a_padded_part() {
     std::fs::write(&path, book.bytes()).unwrap();
     let out = dir.join("out.xlsx");
     let started = Instant::now();
-    let done = call(
-        "convert",
-        json!({ "path": p(&path), "output": p(&out), "dry_run": true }),
-    )
-    .unwrap();
+    let done =
+        call("convert", json!({ "path": p(&path), "output": p(&out), "dry_run": true })).unwrap();
     assert!(started.elapsed() < QUICK, "{:?}", started.elapsed());
-    assert!(
-        done["save"]["dropped_parts"].to_string().contains("sheet9"),
-        "{done:?}"
-    );
+    assert!(done["save"]["dropped_parts"].to_string().contains("sheet9"), "{done:?}");
     // Nothing was unpacked, so no check stopped short.
-    assert!(
-        !done["save"]["lost"].to_string().contains("not checked"),
-        "{done:?}"
-    );
+    assert!(!done["save"]["lost"].to_string().contains("not checked"), "{done:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -373,9 +338,8 @@ fn nodes_inside_rows_and_strings_are_counted() {
     let e = call_with(&kernel, "overview", json!({ "path": p(&path) })).unwrap_err();
     assert_eq!(e.code, ErrorCode::LimitExceeded, "{e:?}");
     // The count starts again for each row: many small rows are fine.
-    let rows: String = (1..=2_000)
-        .map(|r| format!(r#"<row r="{r}"><c r="A{r}"><v>1</v></c></row>"#))
-        .collect();
+    let rows: String =
+        (1..=2_000).map(|r| format!(r#"<row r="{r}"><c r="A{r}"><v>1</v></c></row>"#)).collect();
     let small = dir.join("rows.xlsx");
     std::fs::write(&small, Book::new(&rows).bytes()).unwrap();
     let o = call_with(&kernel, "overview", json!({ "path": p(&small) })).unwrap();
@@ -384,9 +348,7 @@ fn nodes_inside_rows_and_strings_are_counted() {
 
     let path = dir.join("si.xlsx");
     let mut book = Book::new(r#"<row r="1"><c r="A1" t="s"><v>0</v></c></row>"#);
-    book.strings = Some(format!(
-        r#"<?xml version="1.0"?><sst {NS}><si><t>a</t>{junk}</si></sst>"#
-    ));
+    book.strings = Some(format!(r#"<?xml version="1.0"?><sst {NS}><si><t>a</t>{junk}</si></sst>"#));
     std::fs::write(&path, book.bytes()).unwrap();
     let e = call_with(&kernel, "overview", json!({ "path": p(&path) })).unwrap_err();
     assert_eq!(e.code, ErrorCode::LimitExceeded, "{e:?}");
@@ -402,16 +364,12 @@ fn flushed_per_byte(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     for b in data {
         out.reserve(64);
-        c.compress_vec(std::slice::from_ref(b), &mut out, FlushCompress::Partial)
-            .unwrap();
+        c.compress_vec(std::slice::from_ref(b), &mut out, FlushCompress::Partial).unwrap();
     }
     assert_eq!(c.total_in(), data.len() as u64);
     loop {
         out.reserve(64);
-        if c.compress_vec(&[], &mut out, FlushCompress::Finish)
-            .unwrap()
-            == Status::StreamEnd
-        {
+        if c.compress_vec(&[], &mut out, FlushCompress::Finish).unwrap() == Status::StreamEnd {
             break;
         }
     }
@@ -420,9 +378,8 @@ fn flushed_per_byte(data: &[u8]) -> Vec<u8> {
 
 #[test]
 fn slow_unpacking_counts_against_the_time_limit() {
-    let rows: String = (1..=4_000)
-        .map(|r| format!(r#"<row r="{r}"><c r="A{r}"><v>{r}</v></c></row>"#))
-        .collect();
+    let rows: String =
+        (1..=4_000).map(|r| format!(r#"<row r="{r}"><c r="A{r}"><v>{r}</v></c></row>"#)).collect();
     let data = sheet_xml(&rows, "", "");
     let packed = flushed_per_byte(data.as_bytes());
     // Under the ratio: the ratio check alone lets it through.
