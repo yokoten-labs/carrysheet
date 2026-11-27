@@ -213,7 +213,7 @@ fn csv_escapes_text_that_could_run_as_a_formula() {
 }
 
 #[test]
-fn overview_cuts_long_text_and_says_so() {
+fn read_cuts_long_text_and_says_so() {
     let dir = scratch("cut");
     let src = dir.join("long.xlsx");
     let long = "y".repeat(10_000);
@@ -221,13 +221,13 @@ fn overview_cuts_long_text_and_says_so() {
         r#"<row r="1"><c r="A1" t="inlineStr"><is><t>{long}</t></is></c><c r="B1" t="inlineStr"><is><t>short</t></is></c></row>"#
     );
     std::fs::write(&src, Book::new(&rows).bytes()).unwrap();
-    let o = call("overview", json!({ "path": p(&src) })).unwrap();
-    let header = &o["sheets"][0]["header"];
-    let first = header["cells"][0].as_str().unwrap();
+    let page = call("read", json!({ "path": p(&src), "range": "1:1" })).unwrap();
+    let row = &page["rows"][0]["cells"];
+    let first = row[0].as_str().unwrap();
     assert!(first.len() < long.len(), "{}", first.len());
-    assert_eq!(header["cells"][1], "short");
-    let cut = header["cut"].to_string();
-    assert!(cut.contains("S!A1"), "{o:?}");
+    assert_eq!(row[1], "short");
+    let cut = page["cut"].to_string();
+    assert!(cut.contains("S!A1"), "{page:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
