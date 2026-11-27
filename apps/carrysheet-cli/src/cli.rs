@@ -6,6 +6,7 @@ use std::path::Path;
 use carrysheet::args::{COMMANDS, Command, OPERATION_EXAMPLE, command, input_schema};
 use carrysheet::commands::limits::MAX_CLI_SECONDS;
 use carrysheet::commands::{CommandError, ErrorCode};
+use clap::builder::{Resettable, StyledStr};
 use clap::{ArgMatches, Args};
 use serde_json::{Map, Value};
 
@@ -37,7 +38,7 @@ pub(crate) fn clap_command(name: &'static str, command: &Command) -> clap::Comma
     (command.flags)(clap::Command::new(name))
         .about(summary)
         .long_about(description)
-        .after_long_help(example)
+        .after_long_help(Resettable::from(example.map(StyledStr::from)))
 }
 
 /// A line of `--help --long` that shows how to call a command, if it has one.
