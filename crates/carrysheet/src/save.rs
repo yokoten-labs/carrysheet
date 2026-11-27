@@ -74,18 +74,6 @@ impl Loss {
     }
 }
 
-/// How the package parts of the opened file fare in the saved one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
-pub struct PartCounts {
-    /// Written back byte for byte.
-    pub identical: u64,
-    /// Written again by the kernel (content kept, bytes differ).
-    pub rewritten: u64,
-    pub dropped: u64,
-    /// New in the saved file.
-    pub added: u64,
-}
-
 /// What a save will keep and lose, found before writing anything.
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct SaveReport {
@@ -96,8 +84,6 @@ pub struct SaveReport {
     /// Package parts of the opened file that the saved one will not have,
     /// as quoted and shortened names, at most [`MAX_LISTED_PARTS`].
     pub dropped_parts: Vec<String>,
-    /// For an xlsx opened and saved as xlsx: the parts compared.
-    pub parts: Option<PartCounts>,
     /// Things worth knowing that are not losses, such as a cache Excel
     /// rebuilds itself.
     pub notes: Vec<String>,

@@ -9,7 +9,7 @@ use std::io::{Cursor, Read};
 
 use zip::{ZipArchive, result::ZipError};
 
-use super::{Loss, MAX_LISTED_PARTS, PartCounts, SaveReport};
+use super::{Loss, MAX_LISTED_PARTS, SaveReport};
 use crate::text::quote;
 
 /// Most parts listed from one package (as GridCraft reads).
@@ -50,9 +50,8 @@ cell images and rich data: xl/richdata/*
 web extensions: xl/webextensions/*
 digital signatures: _xmlsignatures/**";
 
-/// One part as the zip directory describes it: index, CRC-32, size, and
-/// packed size.
-type Entry = (usize, u32, u64, u64);
+/// One part as the zip directory describes it: index, size and packed size.
+type Entry = (usize, u64, u64);
 
 /// A package's parts by normalized name (lower case, no leading `/`).
 struct Package<'a> {
@@ -76,7 +75,7 @@ impl<'a> Package<'a> {
         let mut parts = BTreeMap::new();
         for (i, f) in (0..zip.len()).filter_map(|i| Some((i, zip.by_index_data(i).ok()?))) {
             let name = String::from_utf8_lossy(f.name_raw()).into_owned();
-            let entry = (i, f.crc32(), f.size(), f.compressed_size());
+            let entry = (i, f.size(), f.compressed_size());
             if !f.is_dir() {
                 let normalized = name.replace('\\', "/");
                 let normalized = normalized.trim_start_matches('/').to_ascii_lowercase();
@@ -89,7 +88,7 @@ impl<'a> Package<'a> {
     /// The bytes of `[Content_Types].xml` (none when it is absent), or
     /// `None` when its sizes are outside the bounds or it cannot be unpacked.
     fn content_types(&mut self) -> Option<Vec<u8>> {
-        let Some((_, (index, _, size, packed))) = self.parts.get("[content_types].xml") else {
+        let Some((_, (index, size, packed))) = self.parts.get("[content_types].xml") else {
             return Some(Vec::new());
         };
         // Far more packed bytes than unpacked ones is how padding looks (issue 80).
@@ -206,27 +205,15 @@ pub(crate) fn compare(source: &[u8], output: &[u8], report: &mut SaveReport) {
             return report.lost.push(unchecked_loss(&why));
         }
     };
-    let mut counts = PartCounts::default();
-    for (name, (shown, e)) in &before.parts {
-        match after.parts.get(name) {
-            Some((_, a)) if (a.1, a.2) == (e.1, e.2) => counts.identical += 1,
-            Some(_) => counts.rewritten += 1,
-            None if HARMLESS.contains(&name.as_str()) => {
-                counts.dropped += 1;
-                let note = format!("{} is not written; Excel rebuilds it", quote(shown, 64));
-                report.notes.push(note);
-            }
-            None => {
-                counts.dropped += 1;
-                if report.dropped_parts.len() < MAX_LISTED_PARTS {
-                    report.dropped_parts.push(quote(shown, 64));
-                }
-            }
+    let dropped = before.parts.iter().filter(|(name, _)| !after.parts.contains_key(*name));
+    for (name, (shown, _)) in dropped {
+        if HARMLESS.contains(&name.as_str()) {
+            let note = format!("{} is not written; Excel rebuilds it", quote(shown, 64));
+            report.notes.push(note);
+        } else if report.dropped_parts.len() < MAX_LISTED_PARTS {
+            report.dropped_parts.push(quote(shown, 64));
         }
     }
-    let added = after.parts.keys().filter(|k| !before.parts.contains_key(*k));
-    counts.added = added.count() as u64;
-    report.parts = Some(counts);
 
     // By feature: how many the source has, and how many of those the
     // output keeps.

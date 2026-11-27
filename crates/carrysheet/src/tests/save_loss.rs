@@ -96,9 +96,6 @@ fn parts_are_compared_from_the_zip_directory_only() {
     ]);
     let mut r = SaveReport::new(FileFormat::Xlsx);
     compare(&source, &output, &mut r);
-    let parts = r.parts.unwrap();
-    let counts = (parts.identical, parts.rewritten, parts.dropped, parts.added);
-    assert_eq!(counts, (2, 1, 2, 1), "{parts:?}");
     assert_eq!(r.dropped_parts, vec!["\"xl/charts/chart2.xml\"".to_owned()]);
     assert_eq!(r.lost.len(), 1, "{:?}", r.lost);
     let l = &r.lost[0];
