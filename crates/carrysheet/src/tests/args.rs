@@ -372,7 +372,7 @@ fn an_enum_error_lists_the_allowed_values() {
     assert!(e.what.contains("`format`"), "{}", e.what);
     assert!(e.why.contains("pdf"), "{}", e.why);
     assert!(
-        e.fix.starts_with("Give `format` as one of xlsx, xls, csv."),
+        e.fix.starts_with("Give `format` as one of xlsx, csv."),
         "{}",
         e.fix
     );
