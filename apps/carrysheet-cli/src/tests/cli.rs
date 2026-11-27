@@ -35,6 +35,18 @@ fn every_command_is_reachable() {
 }
 
 #[test]
+fn flags_are_kebab_case() {
+    for c in COMMANDS {
+        for a in command_json(c)["args"].as_array().unwrap() {
+            if let Some(flag) = a["flag"].as_str() {
+                let name = a["name"].as_str().unwrap().replace('_', "-");
+                assert_eq!(flag, format!("--{name}"), "{}", c.name);
+            }
+        }
+    }
+}
+
+#[test]
 fn command_json_lists_flags_and_types() {
     let c = command_json(command("read").unwrap());
     assert_eq!(c["cli"], "read");

@@ -79,7 +79,10 @@ fn text_fits_help_and_tool_lists() {
 #[test]
 fn dry_run_is_last_on_commands_that_change_files() {
     for c in COMMANDS {
-        assert_eq!(c.has_arg("dry_run"), c.changes_files(), "{}", c.name);
+        // The tools that may change files, and only they, can be tried first.
+        let writes = c.mcp_tool && !c.is_read_only();
+        assert_eq!(c.has_arg("dry_run"), writes, "{}", c.name);
+        assert_eq!(c.changes_files(), writes, "{}", c.name);
         if c.changes_files() {
             assert!(!c.is_read_only(), "{}", c.name);
             assert_eq!(names(c).last().unwrap(), "dry_run");
@@ -297,6 +300,7 @@ fn refuses_missing_required() {
     assert_eq!(e.exit_code(), ExitCode::Usage);
     assert!(e.what.contains("`path`"), "{}", e.what);
     assert!(e.why.contains("missing field `path`"), "{}", e.why);
+    assert!(e.fix.starts_with("Give a value for `path`."), "{}", e.fix);
     assert!(e.fix.contains("The workbook"), "{}", e.fix);
     let e = validate_args(read(), &json!({ "path": null })).unwrap_err();
     assert!(e.why.contains("missing field `path`"));
@@ -352,9 +356,26 @@ fn a_wrong_value_names_its_argument() {
         assert_eq!(e.code, ErrorCode::InvalidArgument, "{bad}");
         assert!(e.what.contains(name), "{bad}: {}", e.what);
     }
-    // The fix is the argument's own description.
+    // The fix says what to send, then gives the argument's description.
     let e = validate_args(read(), &json!({ "path": "a", "max_rows": "5" })).unwrap_err();
-    assert!(e.fix.contains("Rows per page"), "{}", e.fix);
+    let fix = "Give `max_rows` as a whole number from 1 to 10000. `max_rows`: Rows per page";
+    assert!(e.fix.starts_with(fix), "{}", e.fix);
+    let e = validate_args(read(), &json!({ "path": "a", "cursor": 1 })).unwrap_err();
+    assert!(e.fix.starts_with("Give `cursor` as text."), "{}", e.fix);
+}
+
+#[test]
+fn an_enum_error_lists_the_allowed_values() {
+    let convert = command("convert").unwrap();
+    let call = json!({ "path": "a", "output": "b.pdf", "format": "pdf" });
+    let e = validate_args(convert, &call).unwrap_err();
+    assert!(e.what.contains("`format`"), "{}", e.what);
+    assert!(e.why.contains("pdf"), "{}", e.why);
+    assert!(
+        e.fix.starts_with("Give `format` as one of xlsx, xls, csv."),
+        "{}",
+        e.fix
+    );
 }
 
 #[test]
@@ -405,7 +426,14 @@ fn checks_object_lists() {
     let e = validate_args(edit, &json!({ "path": "a", "ops": [{ "op": "clear" }] })).unwrap_err();
     assert!(e.what.contains("`ops[0]`"), "{}", e.what);
     assert!(e.why.contains("`target`"), "{}", e.why);
-    assert!(e.fix.contains("The operations"), "{}", e.fix);
+    let fix = "Send `ops` as a list of objects with op, target, value, count, like [{";
+    assert!(e.fix.starts_with(fix), "{}", e.fix);
+    assert!(e.fix.contains(OPERATION_EXAMPLE), "{}", e.fix);
+    // Every error inside `ops` says what an operation looks like.
+    for op in [json!({ "op": "explode", "target": "A1" }), json!({ "op": "set_value", "target": "A1", "value": [3] })] {
+        let e = validate_args(edit, &json!({ "path": "a", "ops": [op] })).unwrap_err();
+        assert!(e.fix.starts_with(fix), "{}", e.fix);
+    }
 
     let e = validate_args(
         edit,
@@ -477,6 +505,18 @@ fn limits_list_sizes_and_text_length() {
     assert!(e.why.contains("limit"));
     let long = "x".repeat(MAX_TEXT_CHARS + 1);
     assert!(validate_args(read(), &json!({ "path": long })).is_err());
+}
+
+#[test]
+fn an_operation_in_map_form_is_refused() {
+    // serde's other form for an enum must not get a delete past confirm.
+    let edit = command("edit").unwrap();
+    for op in [json!({ "delete_rows": null }), json!({ "delete_rows": {} })] {
+        let ops = json!([{ "op": op, "target": "Sheet1!3:4" }]);
+        let e = validate_args(edit, &json!({ "path": "a", "ops": ops })).unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidArgument, "{op}");
+        assert!(e.what.contains("`ops[0]`"), "{}", e.what);
+    }
 }
 
 #[test]

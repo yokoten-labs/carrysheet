@@ -30,7 +30,9 @@ pub const MAX_LIST_ITEMS: usize = 10_000;
 /// 8,192; this leaves room for long cell text).
 pub const MAX_TEXT_CHARS: usize = 32_767;
 
-/// The arguments that name a file or folder; `mcp serve` keeps them in its root.
+/// The arguments that name a file or folder; `mcp serve` keeps them in its
+/// root. Only these top-level names are confined: a path field added inside
+/// an edit operation must be confined by hand.
 pub const PATHS: &[&str] = &["path", "output", "root"];
 
 /// The largest value of each whole-number argument; the smallest is 1. The
@@ -178,6 +180,9 @@ pub struct Operation {
     /// Rows or columns to insert or delete, from the start of target. Default: as many as target spans.
     pub count: Option<u32>,
 }
+
+/// One operation for `edit`, shown in errors and help.
+pub const OPERATION_EXAMPLE: &str = r#"{"op":"set_value","target":"A1","value":3}"#;
 
 // A cell value. The JSON type says whether "3" is text or a number.
 #[derive(Clone, Deserialize, JsonSchema)]
@@ -439,12 +444,7 @@ pub fn validate_args(command: &Command, args: &Value) -> Result<Checked, Command
     }
     if let Err(why) = (command.check)(given.clone().into()) {
         let name = culprit(command, &given, &why);
-        let field = name.split('[').next().unwrap_or_default();
-        let schema = input_schema(command);
-        let fix = match schema["properties"][field]["description"].as_str() {
-            Some(text) => format!("`{field}`: {text}"),
-            None => help,
-        };
+        let fix = fix_for(&input_schema(command), &name, &why).unwrap_or(help);
         // serde repeats a wrong value; keep a long one out of the error.
         let why: String = why.chars().take(300).collect();
         return Err(invalid(&name, why, fix));
@@ -457,6 +457,36 @@ pub fn validate_args(command: &Command, args: &Value) -> Result<Checked, Command
         (name, value)
     });
     Ok(all.collect())
+}
+
+/// What to send instead of a value serde refused (`why`): for an item of a
+/// list its fields and an example, else the allowed values or the type;
+/// then the argument's description.
+fn fix_for(schema: &Value, name: &str, why: &str) -> Option<String> {
+    let field = name.split('[').next().unwrap_or_default();
+    let node = &schema["properties"][field];
+    let about = node["description"].as_str()?;
+    let kind = node.pointer("/anyOf/0").unwrap_or(node);
+    let fields = kind["items"]["properties"].as_object();
+    let todo = if let Some(fields) = fields {
+        let fields: Vec<&str> = fields.keys().map(String::as_str).collect();
+        let fields = fields.join(", ");
+        format!("Send `{field}` as a list of objects with {fields}, like [{OPERATION_EXAMPLE}].")
+    } else if let Some(values) = kind["enum"].as_array() {
+        let values: Vec<&str> = values.iter().filter_map(Value::as_str).collect();
+        format!("Give `{field}` as one of {}.", values.join(", "))
+    } else if why.starts_with("missing field") {
+        format!("Give a value for `{field}`.")
+    } else {
+        let expected = match (kind["type"].as_str(), LARGEST.iter().find(|l| l.0 == field)) {
+            (_, Some((_, max))) => format!("a whole number from 1 to {max}"),
+            (Some("boolean"), _) => "true or false".to_owned(),
+            (Some("integer"), _) => "a whole number".to_owned(),
+            _ => "text".to_owned(),
+        };
+        format!("Give `{field}` as {expected}.")
+    };
+    Some(format!("{todo} `{field}`: {about}"))
 }
 
 /// The argument a serde error is about: the one named as missing, or the

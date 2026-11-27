@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use carrysheet::args::{COMMANDS, Command, PATHS, command, input_schema};
+use carrysheet::args::{COMMANDS, Command, OPERATION_EXAMPLE, PATHS, command, input_schema};
 use carrysheet::commands::{CommandError, ErrorCode};
 use carrysheet::open::ReadFailure;
 use clap::{ArgAction, ArgMatches};
@@ -191,9 +191,7 @@ pub fn args_json(command: &Command, m: &ArgMatches) -> Result<Map<String, Value>
                     CommandError::invalid_argument(
                         name,
                         format!("--{flag} is not valid JSON: {e}"),
-                        format!(
-                            "Pass a JSON list, or @file.json. Example: --{flag} '[{{\"op\":\"set_value\",\"target\":\"A1\",\"value\":3}}]'"
-                        ),
+                        format!("Pass a JSON list, or @file.json. Example: --{flag} '[{OPERATION_EXAMPLE}]'"),
                     )
                 })?
             }
