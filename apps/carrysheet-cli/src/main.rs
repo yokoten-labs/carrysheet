@@ -12,7 +12,7 @@ mod tests;
 
 use std::ffi::OsString;
 
-use carrysheet::commands::{CommandError, ErrorCode, ExitCode, validate_args};
+use carrysheet::commands::{Command, CommandError, ErrorCode, ExitCode, validate_args};
 use clap::{ArgMatches, FromArgMatches};
 use serde_json::Value;
 
@@ -57,11 +57,21 @@ fn run_command(matches: &ArgMatches) -> Result<Option<run::Done>, CommandError> 
     let ctx = run::Context { yes: global.yes, max_seconds: cli::max_seconds(&global)?, root: None };
     // clap requires a subcommand, and each one comes from the command table.
     let (command, sub) = cli::chosen(matches).expect("clap chose a command");
-    let args = validate_args(command, &Value::Object(cli::args_json(command, sub)?))?;
+    let args = validate_args(command, &Value::Object(cli::args_json(command, sub)?))
+        .map_err(|err| flag_names(err, command))?;
     if command.name == "mcp_serve" {
         return mcp::serve(&args).map(|()| None);
     }
     run::run(command, &args, &ctx).map(Some).map_err(with_yes)
+}
+
+fn flag_names(mut err: CommandError, command: &Command) -> CommandError {
+    for arg in cli::clap_command("", command).get_arguments() {
+        let Some(long) = arg.get_long() else { continue };
+        let (id, flag) = (format!("`{}`", arg.get_id()), format!("`--{long}`"));
+        let _ = [&mut err.what, &mut err.why, &mut err.fix].map(|t| *t = t.replace(&id, &flag));
+    }
+    err
 }
 
 /// Nobody is asked: a refusal for want of a confirmation also names `--yes`.

@@ -283,6 +283,7 @@ fn stdio_session_lists_and_calls_tools() {
     let e =
         tool_error(&call(&mut server, 9, "read", json!({ "path": "book.xlsx", "max_rows": 0 })));
     assert_eq!(e["code"], "invalid_argument");
+    assert!(e.to_string().contains("`max_rows`"), "{e}");
     let e = tool_error(&call(&mut server, 10, "overveiw", json!({})));
     assert!(e["fix"].as_str().unwrap().contains("overview"));
     let again = server.result(11, "tools/list", json!({}));
